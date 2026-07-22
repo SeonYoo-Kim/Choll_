@@ -7,7 +7,9 @@ Face Recognition가 아닌 Person Re-Identification(Re-ID)로 동일 인물을 �
 
 ROS2 기반 **Jetson Orin Nano 8GB**에서 구동
 
-![image](./img/result.mp4)
+<video width="100%" controls>
+  <source src="./img/result.mp4" type="video/mp4">
+</video>
 
 ## Key Features
 
