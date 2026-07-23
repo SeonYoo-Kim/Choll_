@@ -3,10 +3,6 @@
 
 ## 🛠 작업 내용 (Changes)
 - [ ] 기능 개발 (Feature)
-    - [ ]  FE
-    - [ ]  BE
-    - [ ]  AI
-    - [ ]  EM
 - [ ] 버그 수정 (Bug fix)
 - [ ] 리팩토링 (Refactoring)
 - [ ] 문서 수정 (Documentation)
