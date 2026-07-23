@@ -17,6 +17,9 @@ Face Recognition이 아닌 **Person Re-Identification(Re-ID)** 으로 동일 인
 | [ros2_ws/src/person_follow_robot/](ros2_ws/src/person_follow_robot/) | ROS2 패키지 (빌드/실행 단위) | [패키지 CLAUDE.md](ros2_ws/src/person_follow_robot/CLAUDE.md) |
 | `ros2_ws/.../person_follow_robot/` | ROS2 노드 소스 (7개 노드) | [노드 CLAUDE.md](ros2_ws/src/person_follow_robot/person_follow_robot/CLAUDE.md) |
 | [tests/](tests/) | 프레임워크 독립 로직 단위 테스트 | [tests/CLAUDE.md](tests/CLAUDE.md) |
+| [frontend/](frontend/) | FE: 사서용 카트 관리 웹 (React 18+TS+Vite) | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
+| [backend/](backend/) | BE: 허브 서버 (Java 21+Spring Boot, MySQL, MQTT) | [backend/CLAUDE.md](backend/CLAUDE.md) |
+| [embedded/](embedded/) | EM: 카트 제어 (STM32·ROS2·SLAM·RFID·MQTT) | [embedded/CLAUDE.md](embedded/CLAUDE.md) |
 | `ros2_ws/.../test/` | ament lint + colcon 테스트 | (패키지 CLAUDE.md 참조) |
 | [scripts/](scripts/) | 유지보수 스크립트 (가비지 컬렉션 등) | — |
 
