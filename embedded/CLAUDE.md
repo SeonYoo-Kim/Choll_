@@ -36,7 +36,7 @@ STM32(MCU) · ROS 2 · DC 모터 · SLAM · LiDAR · CAN · Ubuntu 22.04.5 LTS
 
 - [ ] STM32 보드 모델, CubeIDE/CubeMX 버전
 - [ ] 커밋 범위: CubeMX 생성 프로젝트 전체 커밋 여부 (Drivers/, Middlewares/ 포함?)
-- [ ] SLAM·Nav2 실행 위치: Jetson Orin? 별도 컴퓨트? (ros2_ws와의 코드 경계)
+- [ ] SLAM·Nav2 실행 위치: Jetson Orin? 별도 컴퓨트? (`ai/` 워크스페이스와의 코드 경계)
 - [ ] CAN 버스 용도 (모터 드라이버? 센서?)
 
 ## 참고 문서

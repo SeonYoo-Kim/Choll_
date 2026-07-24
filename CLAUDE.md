@@ -14,13 +14,13 @@ Face Recognition이 아닌 **Person Re-Identification(Re-ID)** 으로 동일 인
 | 경로 | 내용 | 진입점 CLAUDE.md |
 |------|------|------------------|
 | [docs/](docs/) | 프로젝트 헌장·아키텍처·AI 명세·개발 가이드 | [docs/CLAUDE.md](docs/CLAUDE.md) |
-| [ros2_ws/src/person_follow_robot/](ros2_ws/src/person_follow_robot/) | ROS2 패키지 (빌드/실행 단위) | [패키지 CLAUDE.md](ros2_ws/src/person_follow_robot/CLAUDE.md) |
-| `ros2_ws/.../person_follow_robot/` | ROS2 노드 소스 (7개 노드) | [노드 CLAUDE.md](ros2_ws/src/person_follow_robot/person_follow_robot/CLAUDE.md) |
+| [ai/src/person_follow_robot/](ai/src/person_follow_robot/) | ROS2 패키지 (빌드/실행 단위) | [패키지 CLAUDE.md](ai/src/person_follow_robot/CLAUDE.md) |
+| `ai/.../person_follow_robot/` | ROS2 노드 소스 (7개 노드) | [노드 CLAUDE.md](ai/src/person_follow_robot/person_follow_robot/CLAUDE.md) |
 | [tests/](tests/) | 프레임워크 독립 로직 단위 테스트 | [tests/CLAUDE.md](tests/CLAUDE.md) |
 | [frontend/](frontend/) | FE: 사서용 카트 관리 웹 (React 18+TS+Vite) | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
 | [backend/](backend/) | BE: 허브 서버 (Java 21+Spring Boot, MySQL, MQTT) | [backend/CLAUDE.md](backend/CLAUDE.md) |
 | [embedded/](embedded/) | EM: 카트 제어 (STM32·ROS2·SLAM·RFID·MQTT) | [embedded/CLAUDE.md](embedded/CLAUDE.md) |
-| `ros2_ws/.../test/` | ament lint + colcon 테스트 | (패키지 CLAUDE.md 참조) |
+| `ai/.../test/` | ament lint + colcon 테스트 | (패키지 CLAUDE.md 참조) |
 | [scripts/](scripts/) | 유지보수 스크립트 (가비지 컬렉션 등) | — |
 
 ## 파이프라인 (데이터 흐름)
@@ -44,12 +44,12 @@ RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [사서 선택 2초] → OSN
 
 ## 자주 쓰는 명령
 
-빌드·실행·테스트의 정본은 [패키지 CLAUDE.md](ros2_ws/src/person_follow_robot/CLAUDE.md)에 있습니다. 요약:
+빌드·실행·테스트의 정본은 [패키지 CLAUDE.md](ai/src/person_follow_robot/CLAUDE.md)에 있습니다. 요약:
 
 ```bash
-# 빌드 (colcon 워크스페이스 루트 = 저장소/ros2_ws 에서. 코드 변경 시마다 여기서 재빌드)
-# Jetson 실기: cd ~/AIoT-Library-Book-Cart/ros2_ws
-cd ros2_ws && colcon build --symlink-install && source install/setup.bash
+# 빌드 (colcon 워크스페이스 루트 = 저장소/ai 에서. 코드 변경 시마다 여기서 재빌드)
+# Jetson 실기: cd ~/Choll/ai
+cd ai && colcon build --symlink-install && source install/setup.bash
 
 # 실행 (SSH 접속 + 터미널 3개. 상세 단계는 README Quick Start 참조)
 # 반드시 저장소 루트에서 실행 (모델을 models/*.engine 상대경로로 찾음)

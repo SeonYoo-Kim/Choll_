@@ -11,7 +11,7 @@ ROS2 기반 **Jetson Orin Nano 8GB**에서 구동
 
 > 코드와 모델은 모두 **Jetson Orin Nano 위**에서 돕니다. 노트북/PC에서 직접 실행하는 게 아니라,
 > **SSH로 Jetson에 접속한 뒤** 그 안에서 아래 명령을 실행합니다.
-> 저장소는 Jetson의 `~/AIoT-Library-Book-Cart` 에 있다고 가정합니다.
+> 저장소는 Jetson의 `~/Choll` 에 있다고 가정합니다.
 
 ### 0. Jetson에 SSH 접속
 
@@ -21,10 +21,10 @@ ssh <사용자名>@<Jetson_IP>       # 예: ssh jetson@192.168.0.42
 
 ### 1. (최초 1회 또는 코드 변경 후) 빌드
 
-빌드는 **반드시 `~/AIoT-Library-Book-Cart/ros2_ws/` 에서** 합니다.
+빌드는 **반드시 `~/Choll/ai/` 에서** 합니다.
 
 ```bash
-cd ~/AIoT-Library-Book-Cart/ros2_ws
+cd ~/Choll/ai
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -48,11 +48,11 @@ ros2 launch ydlidar_ros2_driver ydlidar_launch.py
 ```
 
 **터미널 2 — 메인 파이프라인**
-`~/AIoT-Library-Book-Cart` 에서 실행합니다. (detector가 모델을 `models/yolov10s.engine` **상대 경로**로 찾기 때문에
+`~/Choll` 에서 실행합니다. (detector가 모델을 `models/yolov10s.engine` **상대 경로**로 찾기 때문에
 반드시 이 디렉토리에서 실행해야 엔진 파일을 찾습니다.)
 
 ```bash
-cd ~/AIoT-Library-Book-Cart
+cd ~/Choll
 ros2 launch person_follow_robot follow_robot_launch.py
 # 결과 영상을 저장하려면: ros2 launch person_follow_robot follow_robot_launch.py save_debug_video:=true
 ```
@@ -88,7 +88,7 @@ ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: 1}"   # 위에�
 
 ## Repository Structure
 
-    AIOT-LIBRARY-BOOK-CART/
+    Choll/
     ├── CLAUDE.md                  # AI 에이전트 진입점 (저장소 지도 + 규칙)
     ├── README.md
     ├── pyproject.toml             # ruff 린트/포맷 설정
@@ -108,8 +108,9 @@ ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: 1}"   # 위에�
     ├── tests/                     # 프레임워크 독립 로직 테스트 (pytest)
     │   ├── CLAUDE.md
     │   ├── conftest.py
-    │   └── test_pid.py
-    └── ros2_ws/
+    │   ├── test_pid.py
+    │   └── test_control_logic.py
+    └── ai/
         └── src/
             └── person_follow_robot/
                 ├── CLAUDE.md
