@@ -33,7 +33,9 @@
                       ↓
           Publish `/cmd_vel`
                       ↓
-               Motor Controller
+    Differential Drive (v, ω → L/R RPM)
+                      ↓
+     Publish `/wheel_speed_cmd` → STM32
 ```
 
 ## Tracking Strategy
@@ -65,6 +67,8 @@
     /scan
     ↓
     /cmd_vel
+    ↓
+    /wheel_speed_cmd   (Int32MultiArray [left_rpm, right_rpm] → STM32, micro-ROS)
 
 
 

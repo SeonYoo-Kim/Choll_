@@ -12,6 +12,63 @@
 
 ---
 
+## 2026-07-24 16:43 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/ -v` + `ruff check <변경 파일들>`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **맥락**: motor_node 차동구동 역기구학 구현(+14 테스트) 및 control_node LiDAR 조회
+  각도 부호 버그 수정(+카메라 방위각→LiDAR 각도 변환 함수 분리) 검증.
+  - `test_motor_logic.py` 신규 11개: 직진/후진 RPM, 좌회전 시 오른쪽 바퀴 가속(REP 103),
+    제자리 회전 부호, max_rpm 클램핑(좌우 비율 보존), 입력 검증.
+  - `test_control_logic.py`에 `camera_bearing_to_lidar_angle` 4개 추가: 중앙=0,
+    화면 오른쪽=음의 방위각, 장착 오프셋 반영.
+- **ruff**: 변경 파일(motor_node·control_node·launch·tests/) 기준 `All checks passed!`
+  (저장소 전체에는 다른 노드의 기존 이슈 잔존)
+
+<details>
+<summary>pytest 전체 출력</summary>
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\SSAFY\miniforge3\python.exe
+cachedir: .pytest_cache
+rootdir: C:\SSAFY\workspace\Choll
+configfile: pyproject.toml
+plugins: anyio-4.14.1
+collecting ... collected 26 items
+
+tests/test_control_logic.py::TestNormalizeCenterX::test_image_center_maps_to_zero PASSED [  3%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_left_edge_maps_to_minus_one PASSED [  7%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_right_edge_maps_to_plus_one PASSED [ 11%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_quarter_position PASSED [ 15%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_out_of_frame_is_clamped PASSED [ 19%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_non_positive_width_raises PASSED [ 23%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_center_maps_to_zero PASSED [ 26%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_right_edge_is_negative_half_fov PASSED [ 30%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_left_edge_is_positive_half_fov PASSED [ 34%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_mount_offset_shifts_lookup_angle PASSED [ 38%]
+tests/test_control_logic.py::TestPidReset::test_reset_clears_integral_and_derivative_state PASSED [ 42%]
+tests/test_motor_logic.py::TestStraightLine::test_forward_gives_equal_positive_rpms PASSED [ 46%]
+tests/test_motor_logic.py::TestStraightLine::test_backward_gives_equal_negative_rpms PASSED [ 50%]
+tests/test_motor_logic.py::TestRotation::test_left_turn_makes_right_wheel_faster PASSED [ 53%]
+tests/test_motor_logic.py::TestRotation::test_spin_in_place_wheels_are_opposite PASSED [ 57%]
+tests/test_motor_logic.py::TestClamping::test_peak_clamped_to_max_rpm PASSED [ 61%]
+tests/test_motor_logic.py::TestClamping::test_clamp_preserves_left_right_ratio PASSED [ 65%]
+tests/test_motor_logic.py::TestClamping::test_zero_command_is_zero PASSED [ 69%]
+tests/test_motor_logic.py::TestValidation::test_non_positive_radius_raises PASSED [ 73%]
+tests/test_motor_logic.py::TestValidation::test_non_positive_separation_raises PASSED [ 76%]
+tests/test_motor_logic.py::TestValidation::test_negative_max_rpm_raises PASSED [ 80%]
+tests/test_pid.py::test_proportional_term_only PASSED                    [ 84%]
+tests/test_pid.py::test_output_is_clamped_to_limit PASSED                [ 88%]
+tests/test_pid.py::test_integral_accumulates_over_time PASSED            [ 92%]
+tests/test_pid.py::test_derivative_responds_to_error_change PASSED       [ 96%]
+tests/test_pid.py::test_zero_dt_disables_derivative PASSED               [100%]
+
+============================= 26 passed in 0.06s ==============================
+```
+
+</details>
+
 ## 2026-07-24 14:37 — ✅ 12 passed (Claude)
 
 - **명령**: `pytest tests/ -v`

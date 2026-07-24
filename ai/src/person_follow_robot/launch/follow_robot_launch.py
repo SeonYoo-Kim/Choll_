@@ -2,8 +2,9 @@
 사용법:
     ros2 launch person_follow_robot follow_robot_launch.py
 
-Launch the camera, TensorRT detector, ByteTrack tracker, and Re-ID nodes.
-Controller and motor nodes will be connected in their respective phases.
+Launch the full pipeline: camera → detector → tracker → re-id → control → motor
+(+ debug visualization). The motor node publishes /wheel_speed_cmd for the STM32
+(micro-ROS agent must be running separately for the command to reach the MCU).
 """
 
 from launch import LaunchDescription
@@ -12,7 +13,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
+def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument(
             "video_path",
@@ -72,6 +73,33 @@ def generate_launch_description():
                 "memory_bank_max_features": 20,
                 "similarity_threshold": 0.90,
                 "osnet_device": "auto",
+            }],
+        ),
+        Node(
+            package="person_follow_robot",
+            executable="control_node",
+            name="control_node",
+            output="screen",
+            parameters=[{
+                "target_distance_m": 1.0,
+                "camera_fov_deg": 58.0,
+                "image_width": 640,           # camera_node frame_width와 일치
+                "lidar_yaw_offset_deg": 0.0,  # 조립 후 캘리브레이션으로 확정
+                "target_timeout_sec": 1.0,
+                "max_linear_vel": 0.5,
+                "max_angular_vel": 1.0,
+            }],
+        ),
+        Node(
+            package="person_follow_robot",
+            executable="motor_node",
+            name="motor_node",
+            output="screen",
+            parameters=[{
+                "wheel_radius_m": 0.065,
+                "wheel_separation_m": 0.30,   # TODO: 조립 후 실측값으로 교체
+                "max_rpm": 200,               # TODO: 모터 스펙 확정 시 조정
+                "publish_rate_hz": 10.0,
             }],
         ),
         Node(
