@@ -12,5 +12,6 @@
 export interface Book {
   bookId: string;
   title: string;
+  author?: string;
   zone: string;
 }

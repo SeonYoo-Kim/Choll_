@@ -1,4 +1,5 @@
 // 전역 스타일 — 컴포넌트 스타일은 각자의 *.module.scss에 둔다.
+@use './variables' as *;
 
 *,
 *::before,
@@ -14,12 +15,21 @@ body,
 }
 
 body {
-  font-family:
-    'Pretendard Variable',
-    Pretendard,
-    -apple-system,
-    'Segoe UI',
-    'Malgun Gothic',
-    sans-serif;
+  font-family: $font-body;
+  color: $text-main;
+  background: $bg-page;
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: $accent;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
 }

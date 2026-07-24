@@ -1,0 +1,136 @@
+@use '@/shared/styles/variables' as *;
+
+.overline {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $text-overline;
+}
+
+.pageTitle {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+}
+
+.pageDesc {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: $text-soft;
+}
+
+.searchBox {
+  margin-top: 28px;
+  display: flex;
+  max-width: 672px;
+  align-items: center;
+  gap: 12px;
+  border: 2px solid $primary;
+  border-radius: $radius-tile;
+  background: #fff;
+  padding: 12px $spacing-md;
+  box-shadow: 0 5px 0 rgba(105, 194, 182, 0.12);
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: #58ab9f;
+}
+
+.input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+
+  &::placeholder {
+    color: #b9b0a2;
+  }
+}
+
+.results {
+  margin-top: 28px;
+  display: flex;
+  max-width: 768px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.result {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: $spacing-md;
+  border: 1px solid $border-soft;
+  border-radius: $radius-tile;
+  background: #fff;
+  padding: $spacing-md;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+
+  &:hover {
+    border-color: $slot-book-border;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.bookIcon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: #f5eddd;
+  color: #a47a43;
+}
+
+.bookInfo {
+  min-width: 0;
+  flex: 1;
+}
+
+.bookTitle {
+  margin: 0;
+  font-weight: 700;
+}
+
+.bookMeta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #9b9183;
+}
+
+.bookLocation {
+  text-align: right;
+}
+
+.zoneBadge {
+  border-radius: 999px;
+  background: $primary-bg;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #398c80;
+}
+
+.slotNo {
+  margin: $spacing-sm 0 0;
+  font-size: 12px;
+  color: #958c7f;
+}
+
+.emptyResult {
+  border-radius: $radius-tile;
+  background: #faf7ef;
+  padding: 48px 0;
+  text-align: center;
+  font-size: 14px;
+  color: #928979;
+}

@@ -208,9 +208,12 @@ components:
         title:
           type: string
           example: 어린 왕자
+        author:
+          type: string
+          example: 생텍쥐페리
         zone:
           type: string
-          example: A-3
+          example: 2구역
     TaskProgress:
       type: object
       required: [totalBooks, shelvedBooks, remainingBooks]

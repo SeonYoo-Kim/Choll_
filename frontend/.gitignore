@@ -34,3 +34,10 @@ coverage
 .env.*.local
 
 *storybook.log
+
+# 루트 .gitignore의 *.png(AI 산출물 방지용)를 FE 에셋에 한해 해제
+!src/assets/*.png
+!public/*.png
+
+# Claude Code 로컬 설정
+.claude/

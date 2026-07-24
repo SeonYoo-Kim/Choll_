@@ -24,6 +24,10 @@ export const getListSlotsResponseMock = (): Slot[] =>
       {
         bookId: faker.string.alpha({ length: { min: 10, max: 20 } }),
         title: faker.string.alpha({ length: { min: 10, max: 20 } }),
+        author: faker.helpers.arrayElement([
+          faker.string.alpha({ length: { min: 10, max: 20 } }),
+          undefined,
+        ]),
         zone: faker.string.alpha({ length: { min: 10, max: 20 } }),
       },
       undefined,
