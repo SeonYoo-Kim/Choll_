@@ -1,0 +1,20 @@
+@use '@/shared/styles/variables' as *;
+
+.layout {
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+}
+
+.title {
+  // antd Header(어두운 배경) 위 제목
+  color: #fff !important;
+  margin: 0 !important;
+}
+
+.content {
+  padding: $spacing-lg;
+}

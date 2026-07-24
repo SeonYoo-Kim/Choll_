@@ -1,0 +1,14 @@
+// 디자인 토큰 (Figma 목업 확정 시 값 동기화)
+// antd 테마 토큰과 겹치는 값은 ConfigProvider theme로 관리하고,
+// 여기는 SCSS 모듈에서 쓰는 레이아웃/도메인 색상만 둔다.
+
+// 슬롯 상태 색상
+$color-slot-empty: #d9d9d9;
+$color-slot-occupied: #52c41a;
+$color-slot-failed: #ff4d4f;
+
+// 간격
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
