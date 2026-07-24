@@ -13,7 +13,7 @@ cd "$ROOT"
 
 # Directories to remove wholesale.
 DIRS=(
-  "ros2_ws/build" "ros2_ws/install" "ros2_ws/log"
+  "ai/build" "ai/install" "ai/log"
 )
 
 # Glob patterns of cache dirs / files anywhere in the tree.

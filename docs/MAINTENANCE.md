@@ -9,7 +9,7 @@
 
 | 종류 | 경로/패턴 | 왜 제외하나 |
 |------|-----------|-------------|
-| colcon 빌드 산출물 | `ros2_ws/build/`, `ros2_ws/install/`, `ros2_ws/log/` | `colcon build`로 재생성 |
+| colcon 빌드 산출물 | `ai/build/`, `ai/install/`, `ai/log/` | `colcon build`로 재생성 |
 | Python 캐시 | `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.ruff_cache/`, `.mypy_cache/` | 자동 생성 |
 | TensorRT 엔진 | `*.engine`, `*.plan`, `*.trt` | **Orin Nano 기기 종속** — 다른 기기에서 무효 |
 | 모델 가중치 | `models/`, `weights/`, `*.pt`, `*.pth`, `*.onnx` | 용량 큼, 외부 배포 |

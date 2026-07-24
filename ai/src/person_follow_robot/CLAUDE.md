@@ -18,11 +18,11 @@ person_follow_robot/
 
 ## 빌드
 
-빌드는 **colcon 워크스페이스 루트(`ros2_ws/`)에서** 합니다 — 이 패키지 디렉토리가 아님에 주의.
-Jetson 실기에서는 **`~/AIoT-Library-Book-Cart/ros2_ws/`** 가 정확한 위치입니다. **코드를 바꿀 때마다 이 위치에서 재빌드**하세요.
+빌드는 **colcon 워크스페이스 루트(`ai/`)에서** 합니다 — 이 패키지 디렉토리가 아님에 주의.
+Jetson 실기에서는 **`~/Choll/ai/`** 가 정확한 위치입니다. **코드를 바꿀 때마다 이 위치에서 재빌드**하세요.
 
 ```bash
-cd ~/AIoT-Library-Book-Cart/ros2_ws     # 실기 경로 (저장소 루트/ros2_ws)
+cd ~/Choll/ai     # 실기 경로 (저장소 루트/ai)
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -35,7 +35,7 @@ Jetson에 SSH로 접속한 뒤 **터미널 3개**로 실행합니다. 각 새 �
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/AIoT-Library-Book-Cart/ros2_ws/install/setup.bash
+source ~/Choll/ai/install/setup.bash
 ```
 
 ```bash
@@ -43,7 +43,7 @@ source ~/AIoT-Library-Book-Cart/ros2_ws/install/setup.bash
 ros2 launch ydlidar_ros2_driver ydlidar_launch.py
 
 # 터미널 2) 파이프라인 — 반드시 저장소 루트에서 실행 (모델을 models/yolov10s.engine 상대경로로 찾음)
-cd ~/AIoT-Library-Book-Cart
+cd ~/Choll
 ros2 launch person_follow_robot follow_robot_launch.py
 #   video_path:=/path/to.mp4      # USB 카메라 대신 영상 입력
 #   save_debug_video:=true        # /debug/image를 result.mp4로 저장
@@ -59,7 +59,7 @@ ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: 1}"  # 확인한
 
 ```bash
 # colcon (ament lint + 패키지 테스트)
-cd ros2_ws && colcon test --packages-select person_follow_robot
+cd ai && colcon test --packages-select person_follow_robot
 colcon test-result --verbose
 
 # 프레임워크 독립 로직 테스트는 저장소 루트의 tests/ 참조 (ROS 설치 불필요)

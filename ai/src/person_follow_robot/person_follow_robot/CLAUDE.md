@@ -38,7 +38,7 @@
    → 차동구동 변환(선속도/각속도 → 좌우 RPM) + micro-ROS 발행이 미구현입니다.
 
 2. **launch에 control/motor 미포함.** `follow_robot_launch.py`는 camera·detector·tracker·reid·debug만 실행합니다
-   (docstring: "connected in their respective phases"). Week 3에서 연결 예정.
+   (docstring: "connected in their respective phases"). Step 3에서 연결 예정.
    control_node를 launch에 추가할 때 `image_width` 파라미터가 camera_node의 `frame_width`와 일치해야 합니다.
 
 > ~~control_node ↔ reid_node 계약 단절~~ — **해결됨.** control_node가 `/target_person`(Detection2DArray)을

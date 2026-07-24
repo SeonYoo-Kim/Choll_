@@ -13,7 +13,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 $Dirs = @(
-    'ros2_ws/build', 'ros2_ws/install', 'ros2_ws/log'
+    'ai/build', 'ai/install', 'ai/log'
 )
 $Patterns = @(
     '__pycache__', '.pytest_cache', '.ruff_cache', '.mypy_cache', '*.egg-info'

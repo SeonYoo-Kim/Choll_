@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 target-version = "py310"
 line-length = 88
 # ROS2 빌드 산출물과 서드파티는 검사 대상에서 제외.
-extend-exclude = ["ros2_ws/build", "ros2_ws/install", "ros2_ws/log"]
+extend-exclude = ["ai/build", "ai/install", "ai/log"]
 
 [tool.ruff.lint]
 # E/W: pycodestyle(PEP8), F: pyflakes, I: isort, D: pydocstyle(docstring 필수),
@@ -28,7 +28,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # 테스트는 docstring/타입힌트 규칙을 완화.
 "tests/**" = ["D", "ANN"]
-"ros2_ws/**/test/**" = ["D", "ANN"]
+"ai/**/test/**" = ["D", "ANN"]
 # launch/setup 파일은 docstring 규칙 완화.
 "**/launch/*.py" = ["D"]
 "**/setup.py" = ["D"]

@@ -8,14 +8,23 @@ pip install pytest        # 최초 1회
 pytest tests/ -v
 ```
 
-> 이 디렉토리는 **AI 파트(ros2_ws) 전용**입니다. FE/BE/EM 테스트는 각 파트 디렉토리
+> **Windows 개발 PC 주의**: 이 팀의 Windows 개발 머신은 python이 PATH에 없고 miniforge에만 있다.
+> `python`이 안 잡히면 전체 경로로 실행: `~/miniforge3/python.exe -m pytest tests/ -v`
+
+## 테스트 로그 (필수)
+
+테스트를 실행했으면 — 에이전트든 사람이든, 통과든 실패든 — 결과를 [TEST_LOG.md](TEST_LOG.md)에 기록한다.
+날짜·실행자·환경·명령·커밋과 함께 **원본 출력을 `<details>` 블록으로** 남겨, "통과했다"는 말을
+사람이 눈으로 검증할 수 있게 한다. 형식은 TEST_LOG.md 상단 규칙 참조.
+
+> 이 디렉토리는 **AI 파트(`ai/`) 전용**입니다. FE/BE/EM 테스트는 각 파트 디렉토리
 > 안에 두고 각자의 러너로 실행합니다 — 아래 "파트별 테스트 규칙" 참조.
 
 ## 파트별 테스트 규칙
 
 | 파트 | 테스트 위치 | 도구·실행 | 규칙 |
 |------|-------------|-----------|------|
-| AI | `tests/` + `ros2_ws/.../test/` | `pytest tests/`, `colcon test` | 아래 2단계 전략 참조. 실기(추론·센서·주행) 검증은 Jetson에서만 가능 |
+| AI | `tests/` + `ai/.../test/` | `pytest tests/`, `colcon test` | 아래 2단계 전략 참조. 실기(추론·센서·주행) 검증은 Jetson에서만 가능 |
 | FE | `frontend/` 내부 | Playwright(E2E), Storybook, MSW+orval 모킹 | BE 없이도 돌게 API는 MSW로 모킹. E2E는 핵심 유저 플로우(슬롯 보드·지도·추종 제어) 우선 |
 | BE | `backend/src/test/` | JUnit 5 / Mockito, `./gradlew test` | 외부 의존(MySQL·MQTT Broker)은 모킹 또는 Testcontainers로 격리. MQTT↔WS 이벤트 변환 로직은 단위 테스트 필수 |
 | EM | `embedded/` 내부 | 실기(HIL) 중심 | 하드웨어 없이 검증 가능한 로직(프로토콜 파싱, Differential Drive 계산 등)은 분리해서 단위 테스트. 센서·모터·MQTT 통신은 실기에서 체크리스트로 |
@@ -28,7 +37,7 @@ pytest tests/ -v
 | 위치 | 무엇을 테스트 | 실행 방법 | ROS 필요? |
 |------|---------------|-----------|-----------|
 | `tests/` (여기) | 순수 알고리즘 (PID, 코사인 유사도 등) | `pytest tests/` | ❌ |
-| `ros2_ws/src/person_follow_robot/test/` | ament lint(PEP8/docstring), 통합 | `colcon test` | ✅ |
+| `ai/src/person_follow_robot/test/` | ament lint(PEP8/docstring), 통합 | `colcon test` | ✅ |
 
 ## 어떻게 ROS 없이 노드 코드를 테스트하나
 

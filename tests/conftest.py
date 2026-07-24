@@ -13,7 +13,7 @@ from pathlib import Path
 # Make the ROS2 node package importable by file path.
 NODE_DIR = (
     Path(__file__).resolve().parents[1]
-    / "ros2_ws"
+    / "ai"
     / "src"
     / "person_follow_robot"
     / "person_follow_robot"
