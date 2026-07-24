@@ -38,7 +38,7 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/AIoT-Library-Book-Cart/ros2_ws/install/setup.bash
+source ~/Choll/ai/install/setup.bash
 ```
 
 **터미널 1 — LiDAR 드라이버** (위치 무관)
