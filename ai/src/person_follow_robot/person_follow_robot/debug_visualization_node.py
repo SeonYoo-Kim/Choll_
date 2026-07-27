@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -195,12 +196,18 @@ class DebugVisualizationNode(Node):
                     )
 
     def _current_distance_text(self) -> str | None:
-        """Return the target distance label, or None if unknown/stale."""
+        """Return the target distance label, or None if no fresh message.
+
+        NaN from control_node means the target is visible but no valid LiDAR
+        range was found (driver not running, or all rays invalid at that angle).
+        """
         if self._target_distance_m is None:
             return None
         age = time.monotonic() - self._distance_updated_at
         if age > self._distance_display_timeout_sec:
             return None
+        if math.isnan(self._target_distance_m):
+            return "NO LIDAR"
         return f"{self._target_distance_m:.2f}m"
 
     def _draw_status(self, frame: np.ndarray) -> None:
@@ -210,9 +217,12 @@ class DebugVisualizationNode(Node):
             if self._target_track_id is None
             else f"TARGET: ID {self._target_track_id}"
         )
+        # DIST "--"는 /target_distance 미수신(control_node 미동작/타겟 미인식) 상태
+        distance_text = self._current_distance_text() or "--"
         self._draw_banner(
             frame,
-            f"Re-ID Debug | Tracks: {track_count} | {target_text}",
+            f"Re-ID Debug | Tracks: {track_count} | {target_text}"
+            f" | DIST: {distance_text}",
             20,
             42,
             BLACK,

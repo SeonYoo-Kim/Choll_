@@ -71,7 +71,8 @@
     /wheel_speed_cmd   (Int32MultiArray [left_rpm, right_rpm] → STM32, micro-ROS)
 
     /target_distance   (Float32, control_node → debug_visualization_node:
-                        LiDAR로 측정한 타겟 거리[m], 디버그 오버레이 표시용)
+                        LiDAR로 측정한 타겟 거리[m], 디버그 오버레이 표시용.
+                        타겟은 보이지만 유효 LiDAR 거리가 없으면 NaN)
 
 
 

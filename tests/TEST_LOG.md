@@ -12,6 +12,35 @@
 
 ---
 
+## 2026-07-27 17:30 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/ -v` + `ruff check control_node.py debug_visualization_node.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `36cc4dd` 기준 작업 트리 (거리 표시 NaN 폴백 추가, 커밋 전)
+- **맥락**: 실기에서 result.mp4에 거리 라벨이 안 찍힌 문제의 후속 수정 검증.
+  원인 추정: LiDAR 거리 측정 실패 시 `/target_distance`를 아예 발행하지 않아
+  디버그 노드가 표시할 데이터가 없었음.
+  - control_node: 타겟이 보이는데 측정 실패면 NaN 발행 (미검출 시엔 여전히 미발행).
+  - debug_visualization_node: NaN → 박스 우상단 `NO LIDAR`, 수신 없음 → 배너 `DIST: --`,
+    정상 → `X.XXm`. 상단 배너에 `DIST:` 항목 상시 추가.
+  - 순수 로직 변경 없음 → 기존 26개로 회귀 확인. 실기 검증은 Jetson에서 필요.
+
+<details>
+<summary>pytest 출력 (마지막 8줄)</summary>
+
+```
+tests/test_motor_logic.py::TestValidation::test_negative_max_rpm_raises PASSED [ 80%]
+tests/test_pid.py::test_proportional_term_only PASSED                    [ 84%]
+tests/test_pid.py::test_output_is_clamped_to_limit PASSED                [ 88%]
+tests/test_pid.py::test_integral_accumulates_over_time PASSED            [ 92%]
+tests/test_pid.py::test_derivative_responds_to_error_change PASSED       [ 96%]
+tests/test_pid.py::test_zero_dt_disables_derivative PASSED               [100%]
+
+============================= 26 passed in 0.05s ==============================
+```
+
+</details>
+
 ## 2026-07-27 17:11 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/ -v` + `ruff check <변경 파일들>`

@@ -27,7 +27,7 @@
 | `/reid/recovery_event` | std_msgs/String | reid | debug |
 | `/cmd_vel` | geometry_msgs/Twist | control | motor |
 | `/scan` | sensor_msgs/LaserScan | (LiDAR 드라이버) | control |
-| `/target_distance` | std_msgs/Float32 (m, LiDAR 측정) | control | debug |
+| `/target_distance` | std_msgs/Float32 (m, LiDAR 측정. NaN=측정 실패) | control | debug |
 | `/wheel_speed_cmd` | std_msgs/Int32MultiArray (`[left_rpm, right_rpm]`) | motor | (STM32, micro-ROS) |
 
 `vision_msgs` BoundingBox2D의 center는 배포판에 따라 `.position.x`(신형) 또는 `.x`(구형) 레이아웃이 다릅니다.
