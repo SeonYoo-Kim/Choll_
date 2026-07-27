@@ -2,6 +2,7 @@ package com.ssafy.backend.book.service;
 
 import com.ssafy.backend.book.domain.Book;
 import com.ssafy.backend.book.repository.BookRepository;
+import com.ssafy.backend.bookcopy.repository.BookCopyRepository;
 import com.ssafy.backend.classification.domain.ClassificationSection;
 import com.ssafy.backend.classification.service.ClassificationSectionService;
 import com.ssafy.backend.common.exception.DuplicateResourceException;
@@ -24,13 +25,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class BookService {
 
 	private final BookRepository repository;
+	private final BookCopyRepository bookCopyRepository;
 	private final ClassificationSectionService classificationSectionService;
 
 	public BookService(
 		BookRepository repository,
+		BookCopyRepository bookCopyRepository,
 		ClassificationSectionService classificationSectionService
 	) {
 		this.repository = repository;
+		this.bookCopyRepository = bookCopyRepository;
 		this.classificationSectionService = classificationSectionService;
 	}
 
@@ -90,6 +94,9 @@ public class BookService {
 
 	@Transactional
 	public void delete(Long id) {
+		if (bookCopyRepository.existsByBookId(id)) {
+			throw new InvalidDomainException("소장 도서가 연결된 도서 정보는 삭제할 수 없습니다.");
+		}
 		repository.delete(getBook(id));
 	}
 
