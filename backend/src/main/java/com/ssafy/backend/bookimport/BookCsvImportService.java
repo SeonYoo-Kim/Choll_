@@ -35,11 +35,17 @@ public class BookCsvImportService {
 		this.batchWriter = batchWriter;
 	}
 
-	public ImportReport importFile(Path path, int limit, int batchSize) throws IOException {
+	public ImportReport importFile(
+		Path path,
+		int limit,
+		int batchSize,
+		String targetLibraryName
+	) throws IOException {
 		validateOptions(path, limit, batchSize);
 		batchWriter.ensureTopLevelSections();
 
 		int readRows = 0;
+		int filteredRows = 0;
 		int invalidRows = 0;
 		int importedBooks = 0;
 		int importedCopies = 0;
@@ -61,6 +67,11 @@ public class BookCsvImportService {
 					break;
 				}
 				readRows++;
+
+				if (!matchesLibrary(record, targetLibraryName)) {
+					filteredRows++;
+					continue;
+				}
 
 				BookImportRow row = toRow(record);
 				if (row == null) {
@@ -91,8 +102,15 @@ public class BookCsvImportService {
 			importedBooks,
 			importedCopies,
 			skippedCopies,
+			filteredRows,
 			invalidRows
 		);
+	}
+
+	private boolean matchesLibrary(CSVRecord record, String targetLibraryName) {
+		return targetLibraryName == null
+			|| targetLibraryName.isBlank()
+			|| targetLibraryName.trim().equals(record.get("관리구분").trim());
 	}
 
 	private BookImportRow toRow(CSVRecord record) {
@@ -187,6 +205,7 @@ public class BookCsvImportService {
 		int importedBooks,
 		int importedCopies,
 		int skippedCopies,
+		int filteredRows,
 		int invalidRows
 	) {
 	}

@@ -21,6 +21,7 @@ BOOK_IMPORT_ENABLED=true
 BOOK_IMPORT_PATH=C:/absolute/path/to/dongjak-books.csv
 BOOK_IMPORT_LIMIT=5000
 BOOK_IMPORT_BATCH_SIZE=500
+BOOK_IMPORT_LIBRARY_NAME=사당솔밭도서관
 ```
 
 3. `backend` 디렉터리에서 서버를 실행합니다.
@@ -30,6 +31,7 @@ BOOK_IMPORT_BATCH_SIZE=500
 ```
 
 - `BOOK_IMPORT_LIMIT=0`: 전체 데이터 가져오기
+- `BOOK_IMPORT_LIBRARY_NAME`: 지정한 단일 도서관의 자료만 가져오기
 - 같은 등록번호는 다시 실행해도 건너뜁니다.
 - 공공 CSV에는 RFID 값이 없으므로 `rfid_uid`는 비워 두며, 카트에 태그를 등록할 때 갱신합니다.
 - DVD, LP, CD 등 청구기호로 명확히 식별되는 비도서 자료는 가져오지 않습니다.

@@ -20,17 +20,20 @@ public class BookCsvImportRunner implements ApplicationRunner {
 	private final String importPath;
 	private final int limit;
 	private final int batchSize;
+	private final String libraryName;
 
 	public BookCsvImportRunner(
 		BookCsvImportService importService,
 		@Value("${book.import.path}") String importPath,
 		@Value("${book.import.limit}") int limit,
-		@Value("${book.import.batch-size}") int batchSize
+		@Value("${book.import.batch-size}") int batchSize,
+		@Value("${book.import.library-name}") String libraryName
 	) {
 		this.importService = importService;
 		this.importPath = importPath;
 		this.limit = limit;
 		this.batchSize = batchSize;
+		this.libraryName = libraryName;
 	}
 
 	@Override
@@ -41,15 +44,26 @@ public class BookCsvImportRunner implements ApplicationRunner {
 			);
 		}
 
-		log.info("도서 CSV 가져오기를 시작합니다. path={}, limit={}", importPath, limit);
-		ImportReport report = importService.importFile(Path.of(importPath), limit, batchSize);
+		log.info(
+			"도서 CSV 가져오기를 시작합니다. path={}, limit={}, libraryName={}",
+			importPath,
+			limit,
+			libraryName
+		);
+		ImportReport report = importService.importFile(
+			Path.of(importPath),
+			limit,
+			batchSize,
+			libraryName
+		);
 		log.info(
 			"도서 CSV 가져오기를 완료했습니다. readRows={}, importedBooks={}, "
-				+ "importedCopies={}, skippedCopies={}, invalidRows={}",
+				+ "importedCopies={}, skippedCopies={}, filteredRows={}, invalidRows={}",
 			report.readRows(),
 			report.importedBooks(),
 			report.importedCopies(),
 			report.skippedCopies(),
+			report.filteredRows(),
 			report.invalidRows()
 		);
 	}
