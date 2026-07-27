@@ -27,7 +27,8 @@ export function SearchPage() {
       }
       return (
         slot.book.title.toLowerCase().includes(keyword) ||
-        slot.book.bookId.toLowerCase().includes(keyword)
+        slot.book.callNumber.toLowerCase().includes(keyword) ||
+        slot.book.rfidTagId.toLowerCase().includes(keyword)
       );
     });
   }, [slots, query]);
@@ -36,32 +37,36 @@ export function SearchPage() {
     <>
       <p className={styles.overline}>FIND A BOOK</p>
       <h1 className={styles.pageTitle}>도서 검색</h1>
-      <p className={styles.pageDesc}>제목이나 RFID 도서 ID로 바로 찾을 수 있어요.</p>
+      <p className={styles.pageDesc}>제목·청구기호·RFID 태그로 바로 찾을 수 있어요.</p>
       <div className={styles.searchBox}>
         <Search size={20} className={styles.searchIcon} />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="예: 불편한 편의점, BK-0012"
+          placeholder="예: 불편한 편의점, 813.7"
           className={styles.input}
         />
       </div>
       <div className={styles.results}>
         {results.length > 0 ? (
           results.map((slot) => (
-            <button key={slot.slotNo} className={styles.result} onClick={() => setSelected(slot)}>
+            <button
+              key={slot.slotNumber}
+              className={styles.result}
+              onClick={() => setSelected(slot)}
+            >
               <span className={styles.bookIcon}>
                 <BookOpen size={20} />
               </span>
               <div className={styles.bookInfo}>
                 <p className={styles.bookTitle}>{slot.book?.title}</p>
                 <p className={styles.bookMeta}>
-                  {slot.book?.author} · RFID {slot.book?.bookId}
+                  {slot.book?.author} · {slot.book?.callNumber}
                 </p>
               </div>
               <div className={styles.bookLocation}>
-                <span className={styles.zoneBadge}>{slot.book?.zone}</span>
-                <p className={styles.slotNo}>슬롯 {slotLabel(slot.slotNo)}</p>
+                <span className={styles.zoneBadge}>{slot.book?.zoneName}</span>
+                <p className={styles.slotNo}>슬롯 {slotLabel(slot.slotNumber)}</p>
               </div>
             </button>
           ))

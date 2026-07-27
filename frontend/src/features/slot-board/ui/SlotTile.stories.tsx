@@ -15,22 +15,32 @@ type Story = StoryObj<typeof meta>;
 export const Occupied: Story = {
   args: {
     slot: {
-      slotNo: 3,
+      id: 103,
+      slotNumber: 3,
       status: SlotStatus.OCCUPIED,
-      book: { bookId: 'BK-0003', title: '어린 왕자', author: '생텍쥐페리', zone: '2구역' },
+      isTarget: false,
+      book: {
+        id: 3,
+        title: '어린 왕자',
+        author: '생텍쥐페리',
+        callNumber: '863-생884ㅇ',
+        rfidTagId: 'E200-3412-DC03-0003',
+        shelfZoneId: 2,
+        zoneName: '2구역',
+      },
     },
   },
 };
 
 export const Empty: Story = {
   args: {
-    slot: { slotNo: 4, status: SlotStatus.EMPTY },
+    slot: { id: 104, slotNumber: 4, status: SlotStatus.EMPTY, isTarget: false },
   },
 };
 
 export const RecognitionFailed: Story = {
   args: {
-    slot: { slotNo: 11, status: SlotStatus.RECOGNITION_FAILED },
+    slot: { id: 111, slotNumber: 11, status: SlotStatus.RECOGNITION_FAILED, isTarget: false },
   },
 };
 

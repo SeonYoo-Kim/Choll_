@@ -6,13 +6,21 @@
  * BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
  * 변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
  *
- * OpenAPI spec version: 0.1.0
+ * v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+ * app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+ *
+ * OpenAPI spec version: 0.2.0
  */
 import type { Book } from './book';
 import type { SlotStatus } from './slotStatus';
 
 export interface Slot {
-  slotNo: number;
+  id: number;
+  /** 카트 내 슬롯 번호 (1~30) */
+  slotNumber: number;
   status: SlotStatus;
+  /** 현재 구역에 꽂을 책이 있는 슬롯 여부 (LED 점등 대상) */
+  isTarget: boolean;
   book?: Book;
+  lastDetectedAt?: string;
 }

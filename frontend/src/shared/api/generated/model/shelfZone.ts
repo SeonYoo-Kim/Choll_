@@ -11,17 +11,15 @@
  *
  * OpenAPI spec version: 0.2.0
  */
-import type { CartStatus } from './cartStatus';
 
-export interface CartSummary {
+export interface ShelfZone {
   id: number;
+  mapId: number;
   name: string;
-  status: CartStatus;
-  online: boolean;
-  /**
-   * @minimum 0
-   * @maximum 100
-   */
-  batteryLevel?: number;
-  emergencyStopped?: boolean;
+  /** 구역 경계 폴리곤 JSON (형식은 BE와 협의) */
+  boundaryData?: unknown;
+  callNumberStart?: string;
+  callNumberEnd?: string;
+  priority?: number;
+  active: boolean;
 }

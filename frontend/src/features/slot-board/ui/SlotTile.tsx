@@ -29,10 +29,10 @@ export function SlotTile({ slot, active = false, onClick }: SlotTileProps) {
       onClick={onClick}
       className={`${styles.tile} ${STATUS_CLASS[slot.status] ?? styles.empty} ${active ? styles.active : ''}`}
     >
-      <span className={styles.id}>{slotLabel(slot.slotNo)}</span>
+      <span className={styles.id}>{slotLabel(slot.slotNumber)}</span>
       <p className={styles.title}>{title}</p>
       <p className={styles.subtitle}>{subtitle}</p>
-      {slot.book?.zone && <span className={styles.zone}>{slot.book.zone}</span>}
+      {slot.book?.zoneName && <span className={styles.zone}>{slot.book.zoneName}</span>}
     </button>
   );
 }

@@ -6,7 +6,10 @@
  * BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
  * 변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
  *
- * OpenAPI spec version: 0.1.0
+ * v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+ * app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+ *
+ * OpenAPI spec version: 0.2.0
  */
 import { faker } from '@faker-js/faker';
 
@@ -18,18 +21,27 @@ import type { Slot } from '../model';
 
 export const getListSlotsResponseMock = (): Slot[] =>
   Array.from({ length: faker.number.int({ min: 1, max: 10 }) }, (_, i) => i + 1).map(() => ({
-    slotNo: faker.number.int(),
+    id: faker.number.int(),
+    slotNumber: faker.number.int(),
     status: faker.helpers.arrayElement(Object.values(SlotStatus)),
+    isTarget: faker.datatype.boolean(),
     book: faker.helpers.arrayElement([
       {
-        bookId: faker.string.alpha({ length: { min: 10, max: 20 } }),
+        id: faker.number.int(),
         title: faker.string.alpha({ length: { min: 10, max: 20 } }),
         author: faker.helpers.arrayElement([
           faker.string.alpha({ length: { min: 10, max: 20 } }),
           undefined,
         ]),
-        zone: faker.string.alpha({ length: { min: 10, max: 20 } }),
+        callNumber: faker.string.alpha({ length: { min: 10, max: 20 } }),
+        rfidTagId: faker.string.alpha({ length: { min: 10, max: 20 } }),
+        shelfZoneId: faker.number.int(),
+        zoneName: faker.string.alpha({ length: { min: 10, max: 20 } }),
       },
+      undefined,
+    ]),
+    lastDetectedAt: faker.helpers.arrayElement([
+      faker.date.past().toISOString().slice(0, 19) + 'Z',
       undefined,
     ]),
   }));

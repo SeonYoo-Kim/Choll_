@@ -11,17 +11,17 @@
  *
  * OpenAPI spec version: 0.2.0
  */
-import type { CartStatus } from './cartStatus';
 
-export interface CartSummary {
+export interface MapInfo {
   id: number;
   name: string;
-  status: CartStatus;
-  online: boolean;
-  /**
-   * @minimum 0
-   * @maximum 100
-   */
-  batteryLevel?: number;
-  emergencyStopped?: boolean;
+  imageUrl: string;
+  /** m/pixel */
+  resolution: number;
+  originX: number;
+  originY: number;
+  imageWidth: number;
+  imageHeight: number;
+  version?: string;
+  active?: boolean;
 }

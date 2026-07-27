@@ -6,7 +6,10 @@
  * BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
  * 변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
  *
- * OpenAPI spec version: 0.1.0
+ * v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+ * app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+ *
+ * OpenAPI spec version: 0.2.0
  */
 import { useQuery } from '@tanstack/react-query';
 import type {
@@ -43,11 +46,11 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 /**
  * @summary 정리 작업 진행률 조회
  */
-export const getTaskProgress = (cartId: string, signal?: AbortSignal) => {
+export const getTaskProgress = (cartId: number, signal?: AbortSignal) => {
   return http<TaskProgress>({ url: `/api/carts/${cartId}/tasks/progress`, method: 'GET', signal });
 };
 
-export const getGetTaskProgressQueryKey = (cartId: string) => {
+export const getGetTaskProgressQueryKey = (cartId: number) => {
   return [`/api/carts/${cartId}/tasks/progress`] as const;
 };
 
@@ -55,7 +58,7 @@ export const getGetTaskProgressQueryOptions = <
   TData = Awaited<ReturnType<typeof getTaskProgress>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskProgress>>, TError, TData>>;
   },
@@ -84,7 +87,7 @@ export function useGetTaskProgress<
   TData = Awaited<ReturnType<typeof getTaskProgress>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options: {
     query: Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskProgress>>, TError, TData>> &
       Pick<
@@ -102,7 +105,7 @@ export function useGetTaskProgress<
   TData = Awaited<ReturnType<typeof getTaskProgress>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskProgress>>, TError, TData>> &
       Pick<
@@ -120,7 +123,7 @@ export function useGetTaskProgress<
   TData = Awaited<ReturnType<typeof getTaskProgress>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskProgress>>, TError, TData>>;
   },
@@ -134,7 +137,7 @@ export function useGetTaskProgress<
   TData = Awaited<ReturnType<typeof getTaskProgress>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskProgress>>, TError, TData>>;
   },

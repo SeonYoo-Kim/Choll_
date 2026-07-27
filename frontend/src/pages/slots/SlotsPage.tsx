@@ -42,7 +42,7 @@ export function SlotsPage() {
       case 'error':
         return allSlots.filter((s) => s.status === SlotStatus.RECOGNITION_FAILED);
       case 'currentArea':
-        return allSlots.filter((s) => s.book?.zone === currentArea);
+        return allSlots.filter((s) => s.book?.zoneName === currentArea);
       default:
         return allSlots;
     }
@@ -79,9 +79,9 @@ export function SlotsPage() {
       <div className={styles.board}>
         {filteredSlots.map((slot) => (
           <SlotTile
-            key={slot.slotNo}
+            key={slot.slotNumber}
             slot={slot}
-            active={selected?.slotNo === slot.slotNo}
+            active={selected?.slotNumber === slot.slotNumber}
             onClick={() => setSelected(slot)}
           />
         ))}

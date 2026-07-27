@@ -6,7 +6,10 @@
  * BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
  * 변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
  *
- * OpenAPI spec version: 0.1.0
+ * v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+ * app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+ *
+ * OpenAPI spec version: 0.2.0
  */
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type {
@@ -133,11 +136,11 @@ export function useListCarts<TData = Awaited<ReturnType<typeof listCarts>>, TErr
 /**
  * @summary 카트 상세 조회
  */
-export const getCart = (cartId: string, signal?: AbortSignal) => {
+export const getCart = (cartId: number, signal?: AbortSignal) => {
   return http<CartDetail>({ url: `/api/carts/${cartId}`, method: 'GET', signal });
 };
 
-export const getGetCartQueryKey = (cartId: string) => {
+export const getGetCartQueryKey = (cartId: number) => {
   return [`/api/carts/${cartId}`] as const;
 };
 
@@ -145,7 +148,7 @@ export const getGetCartQueryOptions = <
   TData = Awaited<ReturnType<typeof getCart>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getCart>>, TError, TData>>;
   },
@@ -171,7 +174,7 @@ export type GetCartQueryResult = NonNullable<Awaited<ReturnType<typeof getCart>>
 export type GetCartQueryError = unknown;
 
 export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options: {
     query: Partial<UseQueryOptions<Awaited<ReturnType<typeof getCart>>, TError, TData>> &
       Pick<
@@ -186,7 +189,7 @@ export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError =
   queryClient?: QueryClient,
 ): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getCart>>, TError, TData>> &
       Pick<
@@ -201,7 +204,7 @@ export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError =
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getCart>>, TError, TData>>;
   },
@@ -212,7 +215,7 @@ export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError =
  */
 
 export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getCart>>, TError, TData>>;
   },
@@ -230,7 +233,7 @@ export function useGetCart<TData = Awaited<ReturnType<typeof getCart>>, TError =
 /**
  * @summary 카트 호출 (목적지 구역으로 이동)
  */
-export const callCart = (cartId: string, callCartBody: CallCartBody, signal?: AbortSignal) => {
+export const callCart = (cartId: number, callCartBody: CallCartBody, signal?: AbortSignal) => {
   return http<void>({
     url: `/api/carts/${cartId}/commands/call`,
     method: 'POST',
@@ -244,13 +247,13 @@ export const getCallCartMutationOptions = <TError = unknown, TContext = unknown>
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof callCart>>,
     TError,
-    { cartId: string; data: CallCartBody },
+    { cartId: number; data: CallCartBody },
     TContext
   >;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof callCart>>,
   TError,
-  { cartId: string; data: CallCartBody },
+  { cartId: number; data: CallCartBody },
   TContext
 > => {
   const mutationKey = ['callCart'];
@@ -262,7 +265,7 @@ export const getCallCartMutationOptions = <TError = unknown, TContext = unknown>
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof callCart>>,
-    { cartId: string; data: CallCartBody }
+    { cartId: number; data: CallCartBody }
   > = (props) => {
     const { cartId, data } = props ?? {};
 
@@ -284,7 +287,7 @@ export const useCallCart = <TError = unknown, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof callCart>>,
       TError,
-      { cartId: string; data: CallCartBody },
+      { cartId: number; data: CallCartBody },
       TContext
     >;
   },
@@ -292,7 +295,7 @@ export const useCallCart = <TError = unknown, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof callCart>>,
   TError,
-  { cartId: string; data: CallCartBody },
+  { cartId: number; data: CallCartBody },
   TContext
 > => {
   return useMutation(getCallCartMutationOptions(options), queryClient);
@@ -300,7 +303,7 @@ export const useCallCart = <TError = unknown, TContext = unknown>(
 /**
  * @summary 이동 취소(정지)
  */
-export const stopCart = (cartId: string, signal?: AbortSignal) => {
+export const stopCart = (cartId: number, signal?: AbortSignal) => {
   return http<void>({ url: `/api/carts/${cartId}/commands/stop`, method: 'POST', signal });
 };
 
@@ -308,13 +311,13 @@ export const getStopCartMutationOptions = <TError = unknown, TContext = unknown>
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof stopCart>>,
     TError,
-    { cartId: string },
+    { cartId: number },
     TContext
   >;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof stopCart>>,
   TError,
-  { cartId: string },
+  { cartId: number },
   TContext
 > => {
   const mutationKey = ['stopCart'];
@@ -324,7 +327,7 @@ export const getStopCartMutationOptions = <TError = unknown, TContext = unknown>
       : { ...options, mutation: { ...options.mutation, mutationKey } }
     : { mutation: { mutationKey } };
 
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopCart>>, { cartId: string }> = (
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopCart>>, { cartId: number }> = (
     props,
   ) => {
     const { cartId } = props ?? {};
@@ -347,7 +350,7 @@ export const useStopCart = <TError = unknown, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof stopCart>>,
       TError,
-      { cartId: string },
+      { cartId: number },
       TContext
     >;
   },
@@ -355,7 +358,7 @@ export const useStopCart = <TError = unknown, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof stopCart>>,
   TError,
-  { cartId: string },
+  { cartId: number },
   TContext
 > => {
   return useMutation(getStopCartMutationOptions(options), queryClient);

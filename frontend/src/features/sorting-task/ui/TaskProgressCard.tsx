@@ -3,7 +3,7 @@ import { useGetTaskProgress } from '@/shared/api/generated/tasks/tasks';
 import styles from './TaskProgressCard.module.scss';
 
 interface TaskProgressCardProps {
-  cartId: string;
+  cartId: number;
 }
 
 /** 홈 화면의 카트 정리 현황 카드 — 진행률 도넛 + 남은/완료 권수. */

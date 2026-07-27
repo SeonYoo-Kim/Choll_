@@ -6,7 +6,10 @@
  * BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
  * 변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
  *
- * OpenAPI spec version: 0.1.0
+ * v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+ * app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+ *
+ * OpenAPI spec version: 0.2.0
  */
 import { useMutation } from '@tanstack/react-query';
 import type {
@@ -24,7 +27,7 @@ import { http } from '../../http';
  * @summary 추종 시작 (선택한 대상)
  */
 export const startFollow = (
-  cartId: string,
+  cartId: number,
   startFollowBody: StartFollowBody,
   signal?: AbortSignal,
 ) => {
@@ -41,13 +44,13 @@ export const getStartFollowMutationOptions = <TError = unknown, TContext = unkno
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof startFollow>>,
     TError,
-    { cartId: string; data: StartFollowBody },
+    { cartId: number; data: StartFollowBody },
     TContext
   >;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof startFollow>>,
   TError,
-  { cartId: string; data: StartFollowBody },
+  { cartId: number; data: StartFollowBody },
   TContext
 > => {
   const mutationKey = ['startFollow'];
@@ -59,7 +62,7 @@ export const getStartFollowMutationOptions = <TError = unknown, TContext = unkno
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof startFollow>>,
-    { cartId: string; data: StartFollowBody }
+    { cartId: number; data: StartFollowBody }
   > = (props) => {
     const { cartId, data } = props ?? {};
 
@@ -81,7 +84,7 @@ export const useStartFollow = <TError = unknown, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof startFollow>>,
       TError,
-      { cartId: string; data: StartFollowBody },
+      { cartId: number; data: StartFollowBody },
       TContext
     >;
   },
@@ -89,7 +92,7 @@ export const useStartFollow = <TError = unknown, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof startFollow>>,
   TError,
-  { cartId: string; data: StartFollowBody },
+  { cartId: number; data: StartFollowBody },
   TContext
 > => {
   return useMutation(getStartFollowMutationOptions(options), queryClient);
@@ -97,7 +100,7 @@ export const useStartFollow = <TError = unknown, TContext = unknown>(
 /**
  * @summary 추종 종료
  */
-export const stopFollow = (cartId: string, signal?: AbortSignal) => {
+export const stopFollow = (cartId: number, signal?: AbortSignal) => {
   return http<void>({ url: `/api/carts/${cartId}/follow/stop`, method: 'POST', signal });
 };
 
@@ -105,13 +108,13 @@ export const getStopFollowMutationOptions = <TError = unknown, TContext = unknow
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof stopFollow>>,
     TError,
-    { cartId: string },
+    { cartId: number },
     TContext
   >;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof stopFollow>>,
   TError,
-  { cartId: string },
+  { cartId: number },
   TContext
 > => {
   const mutationKey = ['stopFollow'];
@@ -121,7 +124,7 @@ export const getStopFollowMutationOptions = <TError = unknown, TContext = unknow
       : { ...options, mutation: { ...options.mutation, mutationKey } }
     : { mutation: { mutationKey } };
 
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopFollow>>, { cartId: string }> = (
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopFollow>>, { cartId: number }> = (
     props,
   ) => {
     const { cartId } = props ?? {};
@@ -144,7 +147,7 @@ export const useStopFollow = <TError = unknown, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof stopFollow>>,
       TError,
-      { cartId: string },
+      { cartId: number },
       TContext
     >;
   },
@@ -152,7 +155,7 @@ export const useStopFollow = <TError = unknown, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof stopFollow>>,
   TError,
-  { cartId: string },
+  { cartId: number },
   TContext
 > => {
   return useMutation(getStopFollowMutationOptions(options), queryClient);

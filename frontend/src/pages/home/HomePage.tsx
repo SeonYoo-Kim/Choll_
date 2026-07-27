@@ -19,7 +19,7 @@ export function HomePage() {
 
   const following = runState === 'FOLLOWING';
   const currentArea = zoneLabel(cartZone);
-  const areaBookCount = slots?.filter((slot) => slot.book?.zone === currentArea).length ?? 0;
+  const areaBookCount = slots?.filter((slot) => slot.book?.zoneName === currentArea).length ?? 0;
 
   return (
     <>

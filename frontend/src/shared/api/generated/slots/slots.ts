@@ -6,7 +6,10 @@
  * BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
  * 변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
  *
- * OpenAPI spec version: 0.1.0
+ * v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+ * app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+ *
+ * OpenAPI spec version: 0.2.0
  */
 import { useQuery } from '@tanstack/react-query';
 import type {
@@ -43,11 +46,11 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
 /**
  * @summary 카트 슬롯 상태 목록 조회
  */
-export const listSlots = (cartId: string, signal?: AbortSignal) => {
+export const listSlots = (cartId: number, signal?: AbortSignal) => {
   return http<Slot[]>({ url: `/api/carts/${cartId}/slots`, method: 'GET', signal });
 };
 
-export const getListSlotsQueryKey = (cartId: string) => {
+export const getListSlotsQueryKey = (cartId: number) => {
   return [`/api/carts/${cartId}/slots`] as const;
 };
 
@@ -55,7 +58,7 @@ export const getListSlotsQueryOptions = <
   TData = Awaited<ReturnType<typeof listSlots>>,
   TError = unknown,
 >(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listSlots>>, TError, TData>>;
   },
@@ -81,7 +84,7 @@ export type ListSlotsQueryResult = NonNullable<Awaited<ReturnType<typeof listSlo
 export type ListSlotsQueryError = unknown;
 
 export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options: {
     query: Partial<UseQueryOptions<Awaited<ReturnType<typeof listSlots>>, TError, TData>> &
       Pick<
@@ -96,7 +99,7 @@ export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TErr
   queryClient?: QueryClient,
 ): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listSlots>>, TError, TData>> &
       Pick<
@@ -111,7 +114,7 @@ export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TErr
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listSlots>>, TError, TData>>;
   },
@@ -122,7 +125,7 @@ export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TErr
  */
 
 export function useListSlots<TData = Awaited<ReturnType<typeof listSlots>>, TError = unknown>(
-  cartId: string,
+  cartId: number,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof listSlots>>, TError, TData>>;
   },

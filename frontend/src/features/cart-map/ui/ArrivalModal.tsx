@@ -26,7 +26,7 @@ export function ArrivalModal({ slots }: ArrivalModalProps) {
   }
 
   const currentArea = zoneLabel(arrivalZone);
-  const arrivalSlots = slots.filter((slot) => slot.book?.zone === currentArea);
+  const arrivalSlots = slots.filter((slot) => slot.book?.zoneName === currentArea);
 
   return (
     <div className={styles.backdrop}>
@@ -46,8 +46,8 @@ export function ArrivalModal({ slots }: ArrivalModalProps) {
         </p>
         <div className={styles.slotGrid}>
           {arrivalSlots.map((slot) => (
-            <div key={slot.slotNo} className={styles.slot}>
-              <span className={styles.slotId}>SLOT {slotLabel(slot.slotNo)}</span>
+            <div key={slot.slotNumber} className={styles.slot}>
+              <span className={styles.slotId}>SLOT {slotLabel(slot.slotNumber)}</span>
               <p className={styles.slotTitle}>{slot.book?.title}</p>
               <span className={styles.ping} />
             </div>

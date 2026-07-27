@@ -22,7 +22,7 @@ export function SlotDetailModal({ slot, onClose }: SlotDetailModalProps) {
       <div className={styles.modal}>
         <div className={styles.header}>
           <div>
-            <span className={styles.slotId}>SLOT {slotLabel(slot.slotNo)}</span>
+            <span className={styles.slotId}>SLOT {slotLabel(slot.slotNumber)}</span>
             <h3 className={styles.title}>{slot.book?.title ?? '비어 있는 슬롯'}</h3>
           </div>
           <button className={styles.close} onClick={onClose} aria-label="닫기">
@@ -36,7 +36,7 @@ export function SlotDetailModal({ slot, onClose }: SlotDetailModalProps) {
           </p>
           <p className={styles.row}>
             <span>목적 구역</span>
-            <strong className={styles.zoneValue}>{slot.book?.zone ?? '—'}</strong>
+            <strong className={styles.zoneValue}>{slot.book?.zoneName ?? '—'}</strong>
           </p>
           <p className={styles.row}>
             <span>RFID 상태</span>
