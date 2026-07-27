@@ -256,6 +256,29 @@ GET /api/book-copies?bookshelfId={bookshelfId}
 GET /api/book-copies?bookId={bookId}&bookshelfId={bookshelfId}
 ```
 
+### 도서 위치 조회
+
+RFID가 등록된 소장 도서의 책장과 구역 조회:
+
+```text
+GET /api/book-copies/rfid/{rfidUid}/zone
+```
+
+RFID가 등록되지 않았거나 일치하는 소장 도서가 없으면 `404 Not Found`를 반환합니다.
+도서에 책장이 배정되지 않아 구역을 확인할 수 없으면 `400 Bad Request`를 반환합니다.
+실제 RFID가 없는 도서에 임시 UID를 만들거나 저장하지 않습니다.
+
+구역에 배치된 소장 도서 목록 조회:
+
+```text
+GET /api/zones/{zoneId}/book-copies?page=0&size=20
+```
+
+- `page` 기본값: `0`
+- `size` 기본값: `20`, 최댓값: `100`
+- RFID가 등록되지 않은 소장 도서의 `rfidUid`는 `null`
+- 책장 표시 순서, 청구기호, 도서 등록번호 순으로 정렬
+
 ## 11. 조회 쿼리
 
 도서관과 자료실의 고유 조합:
