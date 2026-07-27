@@ -26,6 +26,7 @@ from collections.abc import Sequence
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32
 from vision_msgs.msg import Detection2D, Detection2DArray
@@ -157,7 +158,11 @@ class ControlNode(Node):
         self.create_subscription(
             Detection2DArray, "/target_person", self.target_callback, 10
         )
-        self.create_subscription(LaserScan, "/scan", self.scan_callback, 10)
+        # LiDAR 드라이버는 BEST_EFFORT(sensor QoS)로 발행하므로 구독도 맞춘다
+        # (기본 RELIABLE 구독은 BEST_EFFORT 발행자와 매칭되지 않아 /scan을 못 받음)
+        self.create_subscription(
+            LaserScan, "/scan", self.scan_callback, qos_profile_sensor_data
+        )
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.distance_pub = self.create_publisher(Float32, "/target_distance", 10)
 
@@ -260,8 +265,14 @@ class ControlNode(Node):
         else:
             # LiDAR 거리 못 구하면 안전하게 정지 (카메라만으로 전진은 위험)
             linear_vel = 0.0
+            reason = (
+                "/scan 미수신 (드라이버·QoS 확인)"
+                if self.latest_scan is None
+                else "조회 각도에 유효 range 없음"
+            )
             self.get_logger().warn(
-                "LiDAR 거리 획득 실패, 선속도 0으로 설정", throttle_duration_sec=2.0
+                f"LiDAR 거리 획득 실패({reason}), 선속도 0으로 설정",
+                throttle_duration_sec=2.0,
             )
 
         cmd.linear.x = linear_vel

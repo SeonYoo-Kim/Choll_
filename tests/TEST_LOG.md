@@ -12,6 +12,28 @@
 
 ---
 
+## 2026-07-28 08:42 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/` + `ruff check control_node.py conftest.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `53d8f01` 기준 작업 트리 (/scan QoS 수정, 커밋 전)
+- **맥락**: Jetson 실기에서 영상에 `NO LIDAR`가 찍힌 문제 수정 검증.
+  원인: ydlidar 드라이버는 BEST_EFFORT(sensor QoS)로 발행하는데 control_node가
+  기본 RELIABLE로 구독 → QoS 비호환으로 /scan 미수신.
+  - control_node: /scan 구독을 `qos_profile_sensor_data`(BEST_EFFORT)로 변경.
+  - 거리 획득 실패 경고에 원인 구분 추가 (/scan 미수신 vs 유효 range 없음).
+  - conftest.py에 `rclpy.qos` 스텁 추가 (미추가 시 import 실패).
+  - 순수 로직 변경 없음 → 기존 26개 회귀 확인. QoS 매칭 자체는 Jetson 실기 검증 필요.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 26 passed in 0.06s ==============================
+```
+
+</details>
+
 ## 2026-07-27 17:30 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/ -v` + `ruff check control_node.py debug_visualization_node.py`

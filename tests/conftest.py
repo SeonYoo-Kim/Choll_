@@ -38,6 +38,7 @@ _stub(
     shutdown=lambda *a, **k: None,
 )
 _stub("rclpy.node", Node=type("Node", (), {}))
+_stub("rclpy.qos", qos_profile_sensor_data=object())
 
 # ROS message packages referenced at import time by the node modules.
 for pkg in ("std_msgs", "sensor_msgs", "geometry_msgs", "vision_msgs"):
