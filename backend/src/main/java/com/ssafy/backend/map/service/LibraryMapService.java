@@ -4,6 +4,7 @@ import com.ssafy.backend.common.exception.DuplicateResourceException;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
 import com.ssafy.backend.map.domain.LibraryMap;
 import com.ssafy.backend.map.repository.LibraryMapRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -112,14 +113,23 @@ public class LibraryMapService {
 	) {
 	}
 
+	@Schema(name = "MapInfo")
 	public record Response(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long id,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String name,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String imageUrl,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		BigDecimal resolution,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		BigDecimal originX,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		BigDecimal originY,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		int imageWidth,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		int imageHeight
 	) {
 		public static Response from(LibraryMap map) {

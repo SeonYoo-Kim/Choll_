@@ -9,6 +9,7 @@ import com.ssafy.backend.slot.domain.Slot;
 import com.ssafy.backend.slot.domain.SlotStatus;
 import com.ssafy.backend.slot.repository.SlotRepository;
 import com.ssafy.backend.zone.domain.Zone;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -48,12 +49,19 @@ public class SlotService {
 		return cart.getCurrentZone() == null ? null : cart.getCurrentZone().getId();
 	}
 
+	@Schema(name = "Slot")
 	public record Response(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long id,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "1", maximum = "30")
 		int slotNumber,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Status status,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		boolean isTarget,
+		@Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
 		BookResponse book,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		LocalDateTime lastDetectedAt
 	) {
 		public static Response from(Slot slot, Long currentZoneId) {
@@ -72,16 +80,27 @@ public class SlotService {
 		}
 	}
 
+	@Schema(name = "SlotBook")
 	public record BookResponse(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long id,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long bookId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String title,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		String author,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String callNumber,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		String rfidTagId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		Long bookshelfId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		String bookshelfNumber,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		Long shelfZoneId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		String zoneName
 	) {
 		public static BookResponse from(BookCopy copy) {
@@ -102,6 +121,7 @@ public class SlotService {
 		}
 	}
 
+	@Schema(name = "SlotStatus")
 	public enum Status {
 		EMPTY,
 		OCCUPIED,

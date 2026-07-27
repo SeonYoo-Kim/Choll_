@@ -6,6 +6,7 @@ import com.ssafy.backend.map.domain.LibraryMap;
 import com.ssafy.backend.map.service.LibraryMapService;
 import com.ssafy.backend.zone.domain.Zone;
 import com.ssafy.backend.zone.repository.ZoneRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -95,11 +96,17 @@ public class ZoneService {
 	) {
 	}
 
+	@Schema(name = "ShelfZone")
 	public record Response(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long id,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long mapId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String code,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String name,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String boundaryData
 	) {
 		public static Response from(Zone zone) {

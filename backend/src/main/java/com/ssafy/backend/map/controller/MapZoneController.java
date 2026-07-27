@@ -2,6 +2,7 @@ package com.ssafy.backend.map.controller;
 
 import com.ssafy.backend.zone.service.ZoneService;
 import com.ssafy.backend.zone.service.ZoneService.Response;
+import io.swagger.v3.oas.annotations.Operation;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +20,7 @@ public class MapZoneController {
 	}
 
 	@GetMapping
+	@Operation(operationId = "listShelfZones", tags = "maps")
 	public List<Response> findAll(@PathVariable Long mapId) {
 		return service.findAll(mapId);
 	}

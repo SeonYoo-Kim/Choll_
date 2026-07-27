@@ -2,6 +2,7 @@ package com.ssafy.backend.task.service;
 
 import com.ssafy.backend.slot.service.SlotService;
 import com.ssafy.backend.slot.service.SlotService.Response;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,10 +35,15 @@ public class TaskService {
 		);
 	}
 
+	@Schema(name = "TaskProgress")
 	public record ProgressResponse(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		int totalBooks,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		int shelvedBooks,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		int remainingBooks,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		List<Integer> currentZoneSlotNumbers
 	) {
 	}

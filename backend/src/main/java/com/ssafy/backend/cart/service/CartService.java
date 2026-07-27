@@ -5,6 +5,7 @@ import com.ssafy.backend.cart.domain.CartConnectionStatus;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
 import com.ssafy.backend.zone.domain.Zone;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
@@ -29,15 +30,25 @@ public class CartService {
 			.orElseThrow(() -> new ResourceNotFoundException("카트", id));
 	}
 
+	@Schema(name = "CartDetail")
 	public record Response(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long id,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		String name,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Status status,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		boolean online,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		Long mapId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		Long currentZoneId,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		String currentZoneName,
+		@Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED)
 		Position position,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true)
 		LocalDateTime lastSeenAt
 	) {
 		public static Response from(Cart cart) {
@@ -56,6 +67,7 @@ public class CartService {
 		}
 	}
 
+	@Schema(name = "CartStatus")
 	public enum Status {
 		IDLE,
 		MOVING,
@@ -72,7 +84,13 @@ public class CartService {
 		}
 	}
 
-	public record Position(BigDecimal x, BigDecimal y) {
+	@Schema(name = "CartPosition")
+	public record Position(
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+		BigDecimal x,
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+		BigDecimal y
+	) {
 		private static Position from(BigDecimal x, BigDecimal y) {
 			return x == null || y == null ? null : new Position(x, y);
 		}
