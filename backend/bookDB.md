@@ -271,11 +271,10 @@ RFID가 등록되지 않았거나 일치하는 소장 도서가 없으면 `404 N
 구역에 배치된 소장 도서 목록 조회:
 
 ```text
-GET /api/zones/{zoneId}/book-copies?page=0&size=20
+GET /api/zones/{zoneId}/book-copies
 ```
 
-- `page` 기본값: `0`
-- `size` 기본값: `20`, 최댓값: `100`
+- 해당 구역에 배치된 소장 도서 전체를 한 번에 반환
 - RFID가 등록되지 않은 소장 도서의 `rfidUid`는 `null`
 - 책장 표시 순서, 청구기호, 도서 등록번호 순으로 정렬
 

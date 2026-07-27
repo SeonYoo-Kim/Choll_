@@ -11,7 +11,6 @@ import com.ssafy.backend.bookcopy.domain.BookCopy;
 import com.ssafy.backend.bookcopy.domain.BookCopyStatus;
 import com.ssafy.backend.bookcopy.repository.BookCopyRepository;
 import com.ssafy.backend.booklocation.service.BookLocationService;
-import com.ssafy.backend.booklocation.service.BookLocationService.BookInZonePageResponse;
 import com.ssafy.backend.booklocation.service.BookLocationService.BookInZoneResponse;
 import com.ssafy.backend.booklocation.service.BookLocationService.ZoneByRfidResponse;
 import com.ssafy.backend.bookshelf.domain.Bookshelf;
@@ -21,8 +20,6 @@ import com.ssafy.backend.zone.domain.Zone;
 import com.ssafy.backend.zone.service.ZoneService;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -109,8 +106,7 @@ class BookLocationServiceTests {
 	@Test
 	void findsBooksByZoneWithoutCreatingTemporaryRfid() {
 		when(zoneService.getZone(1L)).thenReturn(zone);
-		when(bookCopyRepository.findAllByZoneId(1L, PageRequest.of(0, 20)))
-			.thenReturn(new PageImpl<>(List.of(copy), PageRequest.of(0, 20), 1));
+		when(bookCopyRepository.findAllByZoneId(1L)).thenReturn(List.of(copy));
 		when(copy.getId()).thenReturn(30L);
 		when(copy.getBook()).thenReturn(book);
 		when(copy.getLibraryBookId()).thenReturn("LIB-001");
@@ -123,20 +119,10 @@ class BookLocationServiceTests {
 		when(bookshelf.getId()).thenReturn(10L);
 		when(bookshelf.getShelfNumber()).thenReturn("300");
 
-		BookInZonePageResponse response = service.findBooksByZone(1L, 0, 20);
-		List<BookInZoneResponse> books = response.books();
+		List<BookInZoneResponse> books = service.findBooksByZone(1L);
 
 		assertEquals(1, books.size());
-		assertEquals(1, response.totalElements());
 		assertNull(books.getFirst().rfidUid());
 		verify(zoneService).getZone(1L);
-	}
-
-	@Test
-	void rejectsOversizedPage() {
-		assertThrows(
-			InvalidDomainException.class,
-			() -> service.findBooksByZone(1L, 0, 101)
-		);
 	}
 }

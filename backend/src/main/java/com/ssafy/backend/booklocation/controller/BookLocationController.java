@@ -1,11 +1,11 @@
 package com.ssafy.backend.booklocation.controller;
 
 import com.ssafy.backend.booklocation.service.BookLocationService;
-import com.ssafy.backend.booklocation.service.BookLocationService.BookInZonePageResponse;
+import com.ssafy.backend.booklocation.service.BookLocationService.BookInZoneResponse;
 import com.ssafy.backend.booklocation.service.BookLocationService.ZoneByRfidResponse;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -23,11 +23,7 @@ public class BookLocationController {
 	}
 
 	@GetMapping("/api/zones/{zoneId}/book-copies")
-	public BookInZonePageResponse findBooksByZone(
-		@PathVariable Long zoneId,
-		@RequestParam(defaultValue = "0") int page,
-		@RequestParam(defaultValue = "20") int size
-	) {
-		return service.findBooksByZone(zoneId, page, size);
+	public List<BookInZoneResponse> findBooksByZone(@PathVariable Long zoneId) {
+		return service.findBooksByZone(zoneId);
 	}
 }
