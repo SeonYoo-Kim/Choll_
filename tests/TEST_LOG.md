@@ -12,6 +12,25 @@
 
 ---
 
+## 2026-07-28 08:53 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/` + `ruff check debug_visualization_node.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `53d8f01` 기준 작업 트리 (라벨 화면 안 clamp, 커밋 전)
+- **맥락**: 바운딩박스가 프레임 밖으로 나가면 거리/ID 라벨이 화면 밖에 그려져
+  보이지 않는 문제 수정. `_draw_label`(모든 라벨 공통 진입점)에서 배경 사각형이
+  프레임 안에 완전히 들어오도록 x·y를 clamp. cv2 의존 그리기 로직이라 순수 테스트
+  없음 → 기존 26개 회귀만 확인, 표시 확인은 Jetson 실기.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 26 passed in 0.03s ==============================
+```
+
+</details>
+
 ## 2026-07-28 08:42 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/` + `ruff check control_node.py conftest.py`

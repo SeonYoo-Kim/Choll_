@@ -282,10 +282,18 @@ class DebugVisualizationNode(Node):
         y: int,
         color: tuple[int, int, int],
     ) -> None:
+        """Draw a filled label, clamped so it stays fully inside the frame.
+
+        Boxes may extend past the image edges (partially visible person);
+        without clamping the label would be drawn off-screen and lost.
+        """
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale = 0.9
         thickness = 2
         (width, height), baseline = cv2.getTextSize(text, font, scale, thickness)
+        frame_height, frame_width = frame.shape[:2]
+        x = max(0, min(x, frame_width - width - 14))
+        y = max(height + baseline + 8, min(y, frame_height - 6))
         cv2.rectangle(
             frame,
             (x, y - height - baseline - 8),
