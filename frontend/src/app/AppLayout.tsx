@@ -1,4 +1,4 @@
-import { Home, MapPin, PackageOpen, Search, Settings2 } from 'lucide-react';
+import { Home, MapPin, PackageOpen, Search } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
 import logo from '@/assets/logo.png';
@@ -13,7 +13,9 @@ const NAV_ITEMS = [
   { to: '/search', label: '도서 검색', Icon: Search },
 ] as const;
 
-const MOBILE_NAV_ITEMS = [...NAV_ITEMS, { to: '/settings', label: '설정', Icon: Settings2 }];
+// 설정 페이지 미사용 결정 — 다시 살리려면 Settings2 아이콘 import와 함께 주석 해제
+// const MOBILE_NAV_ITEMS = [...NAV_ITEMS, { to: '/settings', label: '설정', Icon: Settings2 }];
+const MOBILE_NAV_ITEMS = [...NAV_ITEMS];
 
 /** 공통 레이아웃 — 데스크톱 사이드바 + 모바일 하단 탭 + 페이지 Outlet. */
 export function AppLayout() {

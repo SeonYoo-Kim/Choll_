@@ -4,7 +4,7 @@ import { AppLayout } from '@/app/AppLayout';
 import { HomePage } from '@/pages/home/HomePage';
 import { MapPage } from '@/pages/map/MapPage';
 import { SearchPage } from '@/pages/search/SearchPage';
-import { SettingsPage } from '@/pages/settings/SettingsPage';
+// import { SettingsPage } from '@/pages/settings/SettingsPage';
 import { SlotsPage } from '@/pages/slots/SlotsPage';
 
 /**
@@ -20,7 +20,7 @@ export const router = createBrowserRouter([
       { path: 'map', element: <MapPage /> },
       { path: 'slots', element: <SlotsPage /> },
       { path: 'search', element: <SearchPage /> },
-      { path: 'settings', element: <SettingsPage /> },
+      // { path: 'settings', element: <SettingsPage /> },
     ],
   },
 ]);
