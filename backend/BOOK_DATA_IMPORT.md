@@ -32,4 +32,5 @@ BOOK_IMPORT_BATCH_SIZE=500
 - `BOOK_IMPORT_LIMIT=0`: 전체 데이터 가져오기
 - 같은 등록번호는 다시 실행해도 건너뜁니다.
 - 공공 CSV에는 RFID 값이 없으므로 `rfid_uid`는 비워 두며, 카트에 태그를 등록할 때 갱신합니다.
+- DVD, LP, CD 등 청구기호로 명확히 식별되는 비도서 자료는 가져오지 않습니다.
 - 가져오기가 끝나면 다음 실행 전에 `BOOK_IMPORT_ENABLED=false`로 되돌립니다.

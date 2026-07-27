@@ -24,6 +24,10 @@ public class BookCsvImportService {
 		"(?<!\\d)(\\d{3}(?:\\.\\d+)?)"
 	);
 	private static final Pattern YEAR_PATTERN = Pattern.compile("(\\d{4})");
+	private static final Pattern NON_BOOK_CALL_NUMBER_PATTERN = Pattern.compile(
+		"^\\s*(?:DVD?|LP|CD(?:-ROM)?|오디오|비도서)(?:\\s|\\d)",
+		Pattern.CASE_INSENSITIVE
+	);
 
 	private final BookCsvImportBatchWriter batchWriter;
 
@@ -100,6 +104,7 @@ public class BookCsvImportService {
 			libraryBookId == null
 				|| title == null
 				|| callNumber == null
+				|| NON_BOOK_CALL_NUMBER_PATTERN.matcher(callNumber).find()
 				|| classification == null
 		) {
 			return null;
