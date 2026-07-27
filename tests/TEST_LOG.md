@@ -12,6 +12,38 @@
 
 ---
 
+## 2026-07-27 17:07 — ✅ BE 20 tests·UTF-8 전체 재컴파일 통과 (Codex)
+
+- **명령**: `backend/gradlew.bat test --rerun-tasks`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.11
+- **브랜치**: `backend/feature/socket_test`
+- **결과**: 10 suites, 20 tests, 0 failures, 0 errors
+- **검증 범위**: UTF-8 Java 전체 재컴파일, MQTT 활성 상태 애플리케이션 기동,
+  메시지 파싱, 카트별 최근 위치 20개 제한, 다각형 구역 판정, 동일 구역 3회
+  연속 감지
+- **참고**: 구현 중 Paho 의존성 누락으로 컴파일 실패 후 명시적 의존성을
+  추가했고, Spring Boot 4의 Jackson 3에 맞게 import를 수정한 뒤 재검증했다.
+  샌드박스에서 Gradle 배포 파일 다운로드가 차단된 실행은 기존 캐시를 사용할 수
+  있는 환경에서 다시 실행했다.
+
+<details>
+<summary>백엔드 Gradle 테스트 최종 출력</summary>
+
+```text
+> Task :compileJava UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileTestJava
+> Task :processTestResources NO-SOURCE
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 29s
+4 actionable tasks: 4 executed
+```
+
+</details>
+
 ## 2026-07-27 15:50 — ✅ BE 10 tests·FE 6 tests·lint·format·build 통과 (Codex)
 
 - **명령**: `backend/gradlew.bat test`, `pnpm test`, `pnpm lint`, `pnpm format:check`, `pnpm build`
