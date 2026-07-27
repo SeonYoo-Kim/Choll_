@@ -1,0 +1,183 @@
+@use '@/shared/styles/variables' as *;
+
+.pageHeader {
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: $spacing-md;
+
+  @media (min-width: $bp-sm) {
+    flex-direction: row;
+    align-items: flex-end;
+  }
+}
+
+.overline {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $text-overline;
+}
+
+.pageTitle {
+  margin: 0;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1;
+
+  @media (min-width: $bp-md) {
+    font-size: 38px;
+  }
+}
+
+.followBadge {
+  width: fit-content;
+  border-radius: 999px;
+  padding: $spacing-sm $spacing-md;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.on {
+  background: $primary-bg;
+  color: #398c80;
+
+  .dot {
+    background: $primary;
+    animation: pulse 1.6s infinite;
+  }
+}
+
+.off {
+  background: #f0ede6;
+  color: #827b71;
+
+  .dot {
+    background: #aaa49a;
+  }
+}
+
+.dot {
+  margin-right: $spacing-sm;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.grid {
+  display: grid;
+  gap: 20px;
+
+  @media (min-width: $bp-2xl) {
+    grid-template-columns: minmax(0, 1.4fr) minmax(330px, 0.9fr);
+  }
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: $radius-panel;
+  background: $primary;
+  padding: 28px 24px;
+  color: #fff;
+  box-shadow: 0 10px 0 $primary-dark;
+
+  @media (min-width: $bp-md) {
+    padding: 28px 32px;
+  }
+}
+
+.heroRing {
+  position: absolute;
+  right: -40px;
+  top: -64px;
+  width: 224px;
+  height: 224px;
+  border: 24px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+
+.heroCart {
+  position: absolute;
+  bottom: 12px;
+  right: 32px;
+  font-size: 60px;
+}
+
+.heroLabel {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.heroTitleRow {
+  margin-top: 4px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.heroTitle {
+  margin: 0;
+  font-family: $font-display;
+  font-size: 32px;
+  font-weight: 400;
+}
+
+.arrivedBadge {
+  margin-bottom: 4px;
+  border-radius: 999px;
+  background: $accent;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: $accent-text;
+}
+
+.heroDesc {
+  margin: 12px 0 0;
+  max-width: 384px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.9);
+
+  strong {
+    color: $accent;
+  }
+}
+
+.heroButton {
+  margin-top: 20px;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px $spacing-md;
+  font-size: 14px;
+  font-weight: 700;
+  color: #388d81;
+}
+
+.cards {
+  display: grid;
+  gap: 20px;
+
+  @media (min-width: $bp-md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

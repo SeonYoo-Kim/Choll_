@@ -1,0 +1,115 @@
+@use '@/shared/styles/variables' as *;
+
+.pageHeader {
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+
+  @media (min-width: $bp-sm) {
+    flex-direction: row;
+    align-items: flex-end;
+  }
+}
+
+.overline {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $text-overline;
+}
+
+.pageTitle {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+}
+
+.pageDesc {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: $text-soft;
+}
+
+.statusBadge {
+  width: fit-content;
+  border-radius: 999px;
+  padding: $spacing-sm $spacing-md;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.moving {
+  background: #fff0df;
+  color: #9a6435;
+
+  .dot {
+    background: #fab67a;
+    animation: pulse 1.6s infinite;
+  }
+}
+
+.idle {
+  background: $primary-bg;
+  color: #398c80;
+
+  .dot {
+    background: $primary;
+  }
+}
+
+.dot {
+  margin-right: $spacing-sm;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.mapArea {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 780px;
+}
+
+.statCards {
+  margin-top: 20px;
+  display: grid;
+  gap: $spacing-md;
+
+  @media (min-width: $bp-sm) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.statCard {
+  border: 1px solid $border-soft;
+  border-radius: $radius-tile;
+  background: #fff;
+  padding: $spacing-md;
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    color: #948b7e;
+  }
+
+  strong {
+    margin-top: 4px;
+    display: block;
+    font-size: 18px;
+  }
+}
+
+.statPrimary {
+  color: #398c80;
+}
