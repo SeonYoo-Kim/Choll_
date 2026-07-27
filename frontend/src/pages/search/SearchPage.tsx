@@ -6,7 +6,7 @@ import { SlotDetailModal } from '@/features/slot-board/ui/SlotDetailModal';
 import type { Slot } from '@/shared/api/generated/model';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
 import { DEMO_CART_ID } from '@/shared/config/cart';
-import { slotLabel } from '@/shared/lib/slotLabel';
+import { slotLabel } from '@/shared/utils/slotLabel';
 
 import styles from './SearchPage.module.scss';
 
@@ -28,7 +28,7 @@ export function SearchPage() {
       return (
         slot.book.title.toLowerCase().includes(keyword) ||
         slot.book.callNumber.toLowerCase().includes(keyword) ||
-        slot.book.rfidTagId.toLowerCase().includes(keyword)
+        (slot.book.rfidTagId ?? '').toLowerCase().includes(keyword)
       );
     });
   }, [slots, query]);

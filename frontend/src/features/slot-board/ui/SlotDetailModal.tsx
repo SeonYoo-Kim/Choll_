@@ -2,7 +2,7 @@ import { Check, X } from 'lucide-react';
 
 import type { Slot } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
-import { slotLabel } from '@/shared/lib/slotLabel';
+import { slotLabel } from '@/shared/utils/slotLabel';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
 import styles from './SlotDetailModal.module.scss';

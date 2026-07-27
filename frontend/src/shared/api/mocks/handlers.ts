@@ -1,6 +1,5 @@
 import { getCartsMock } from '@/shared/api/generated/carts/carts.msw';
-import { getFollowMock } from '@/shared/api/generated/follow/follow.msw';
-import type { Book, Slot } from '@/shared/api/generated/model';
+import type { Slot, SlotBook } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
 import { getListSlotsMockHandler } from '@/shared/api/generated/slots/slots.msw';
 import { getGetTaskProgressMockHandler } from '@/shared/api/generated/tasks/tasks.msw';
@@ -11,6 +10,7 @@ const emptySlot = (slotNumber: number): Slot => ({
   slotNumber,
   status: SlotStatus.EMPTY,
   isTarget: false,
+  lastDetectedAt: null,
 });
 
 const book = (
@@ -19,12 +19,15 @@ const book = (
   author: string,
   shelfZoneId: number,
   callNumber: string,
-): Book => ({
+): SlotBook => ({
   id,
+  bookId: id,
   title,
   author,
   callNumber,
   rfidTagId: `E200-3412-DC03-${String(id).padStart(4, '0')}`,
+  bookshelfId: shelfZoneId,
+  bookshelfNumber: String(shelfZoneId * 100),
   shelfZoneId,
   zoneName: `${shelfZoneId}구역`,
 });
@@ -76,5 +79,4 @@ export const handlers = [
     currentZoneSlotNumbers: [1, 2],
   }),
   ...getCartsMock(),
-  ...getFollowMock(),
 ];
