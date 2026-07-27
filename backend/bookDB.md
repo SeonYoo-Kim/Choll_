@@ -2,8 +2,8 @@
 
 ## 1. 개요
 
-쫄래쫄래 프로젝트에서 사용하는 도서 데이터베이스의 구조와 공공데이터 적재 및
-정제 과정을 정리한 문서입니다.
+쫄래쫄래 프로젝트에서 사용하는 도서 데이터베이스의 구조, 공공데이터 적재 및
+정제 과정, 테스트 책장, 카트와 슬롯 구성을 정리한 문서입니다.
 
 현재는 서울특별시 동작구 도서관 보유도서 데이터 중 소장 자료가 가장 많은
 `사당솔밭도서관` 한 곳만 사용합니다.
@@ -98,15 +98,17 @@ Book 1개
 책장 배정 구조는 다음과 같습니다.
 
 ```text
-Book.classificationNumber
-  → BookshelfRange
-    → Bookshelf
-      → Zone
-        → LibraryMap
+BookCopy.callNumber
+  → KDC 분류번호 추출
+    → BookshelfRange
+      → Bookshelf
+        → Zone
+          → LibraryMap
 ```
 
-공공데이터에는 실제 책장 번호가 없으므로 현재 `BookCopy.bookshelf`는 비어 있습니다.
-사당솔밭도서관의 책장별 KDC 범위를 조사한 뒤 `BookshelfRange`에 등록해야 합니다.
+공공데이터에는 실제 책장 번호가 없으므로 테스트 환경에서는 청구기호에서 추출한
+KDC 대분류에 따라 `000`부터 `900`까지 10개 책장에 배정합니다.
+현재 모든 `BookCopy`에 테스트 책장이 연결되어 있습니다.
 
 ## 5. 공공데이터
 
@@ -219,6 +221,15 @@ Book 도메인에서 관리할 수 없는 비도서 자료는 제외합니다.
 | 사용 도서관 | 사당솔밭도서관 1개 |
 | `Book` | 66,411종 |
 | `BookCopy` | 67,289권 |
+| `ClassificationSection` | 10개 |
+| `LibraryMap` | 1개 |
+| `Zone` | 1개 |
+| `Bookshelf` | 10개 |
+| `BookshelfRange` | 10개 |
+| `Cart` | 1대 |
+| `Slot` | 30개 |
+| RFID가 등록된 `BookCopy` | 0권 |
+| 도서가 적재된 `Slot` | 0개 |
 | 다른 도서관에서 삭제한 `BookCopy` | 272,555권 |
 | 다른 도서관 제거 후 삭제한 고아 `Book` | 121,368종 |
 | 현재 고아 `Book` | 0종 |
@@ -278,6 +289,25 @@ GET /api/zones/{zoneId}/book-copies
 - RFID가 등록되지 않은 소장 도서의 `rfidUid`는 `null`
 - 책장 표시 순서, 청구기호, 도서 등록번호 순으로 정렬
 
+### Cart와 Slot
+
+카트 1대의 상태 조회:
+
+```text
+GET /api/carts/{cartId}
+```
+
+카트의 전체 슬롯과 개별 슬롯 조회:
+
+```text
+GET /api/carts/{cartId}/slots
+GET /api/carts/{cartId}/slots/{slotNumber}
+```
+
+현재 카트 ID는 `1`이며 연결 상태는 `OFFLINE`, 동작 상태는 `IDLE`입니다.
+슬롯은 1번부터 30번까지 존재하며 모두 `EMPTY`입니다. 실제 RFID와 도서가 아직
+등록되지 않았으므로 각 슬롯의 `book`은 `null`입니다.
+
 ## 11. 조회 쿼리
 
 도서관과 자료실의 고유 조합:
@@ -324,6 +354,27 @@ WHERE NOT EXISTS (
 );
 ```
 
+카트별 슬롯 수와 적재 상태:
+
+```sql
+SELECT
+    c.id AS cart_id,
+    c.name,
+    c.connection_status,
+    c.operation_status,
+    COUNT(s.id) AS slot_count,
+    SUM(s.status = 'EMPTY') AS empty_slot_count,
+    SUM(s.book_copy_id IS NOT NULL) AS occupied_slot_count
+FROM carts c
+LEFT JOIN slots s
+    ON s.cart_id = c.id
+GROUP BY
+    c.id,
+    c.name,
+    c.connection_status,
+    c.operation_status;
+```
+
 ## 12. 관련 커밋
 
 ```text
@@ -332,6 +383,12 @@ b1b5716 [feat] 소장 도서 CRUD 추가
 1abdb27 [feat] 공공 도서 CSV 가져오기 추가
 0200bfd [fix] 비도서 자료 가져오기 제외
 b4f89b7 [feat] 단일 도서관 가져오기 필터 추가
+5989148 [feat] KDC 테스트 책장 배치 추가
+6e6069f [feat] RFID 도서 위치 조회 추가
+163d3f9 [fix] 구역 도서 전체 조회 적용
+29060ca [feat] 카트 상태 조회 도메인 추가
+56a2eae [feat] 카트 슬롯 30개 구성 추가
+36dee85 [chore] MySQL 초기 데이터 덤프 추가
 ```
 
 ## 13. 테스트 방 책장 구성
@@ -372,10 +429,59 @@ src/main/resources/db/test-room-bookshelves.sql
 
 이 SQL은 같은 지도, 구역, 책장을 중복 생성하지 않으며 여러 번 실행할 수 있습니다.
 
-## 14. 다음 작업
+## 14. 카트와 슬롯 구성
+
+테스트 환경은 카트 1대와 슬롯 30개로 구성합니다.
+
+| 항목 | 현재 값 |
+|---|---|
+| 카트 | `쫄래쫄래 카트` 1대 |
+| 카트 연결 상태 | `OFFLINE` |
+| 카트 동작 상태 | `IDLE` |
+| 카트 좌표와 현재 구역 | `NULL` |
+| 슬롯 번호 | 1 ~ 30 |
+| 슬롯 상태 | 모두 `EMPTY` |
+| 슬롯의 소장 도서 | 모두 `NULL` |
+| RFID | 등록된 값 없음 |
+
+카트 상태는 MQTT 연결과 Heartbeat가 연동되면 갱신합니다. 슬롯은 RFID 인식 결과를
+받았을 때 실제 `BookCopy`와 연결하며 임시 RFID나 임시 도서를 생성하지 않습니다.
+
+초기 데이터는 다음 SQL로 재구성할 수 있습니다.
+
+```text
+src/main/resources/db/cart-slot-seed.sql
+```
+
+이 SQL은 여러 번 실행해도 카트와 슬롯을 중복 생성하지 않으며, 기존 슬롯 상태나
+도서 배정을 초기값으로 덮어쓰지 않습니다. 자세한 내용은 `CART_SLOT.md`를 참고합니다.
+
+## 15. 전체 DB 덤프
+
+현재 MySQL `chollae` 스키마의 테이블 구조와 데이터를 포함한 전체 덤프를 관리합니다.
+
+```text
+backend/chollae-ful.sql
+```
+
+덤프에는 도서 66,411종, 소장 도서 67,289권, KDC 테스트 책장, 카트 1대,
+슬롯 30개가 포함되어 있습니다. DB 비밀번호나 `.env` 값은 포함하지 않습니다.
+
+빈 MySQL 환경에서 다음과 같이 복원할 수 있습니다.
+
+```powershell
+& 'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe' `
+  -uroot -p `
+  --default-character-set=utf8mb4 `
+  -e 'source C:/ssafy2_1/S15P11C101/backend/chollae-ful.sql'
+```
+
+## 16. 다음 작업
 
 1. 실제 테스트 방 크기에 맞춰 지도 크기와 책장 좌표를 조정합니다.
-2. 프론트에서 `Bookshelf.id`, `shelfNumber`, 좌표를 사용해 근처 책을 조회합니다.
-3. 실제 도서 RFID를 인식할 때 `BookCopy.rfidUid`를 갱신합니다.
-4. 전체 목록 API에 페이지네이션과 검색 조건을 추가합니다.
-5. `800 문학` 책장의 물리적 수납이 필요해지면 하위 분류로 책장을 세분화합니다.
+2. MQTT 연결과 Heartbeat로 카트 상태 및 마지막 통신 시각을 갱신합니다.
+3. RFID 인식 이벤트로 `BookCopy.rfidUid`와 `Slot.bookCopy`를 연결합니다.
+4. 도서가 슬롯에 적재되면 구역별 정리 작업을 생성합니다.
+5. 프론트에서 `Bookshelf.id`, `shelfNumber`, 좌표를 사용해 근처 책을 조회합니다.
+6. 전체 도서 목록 API에 페이지네이션과 검색 조건을 추가합니다.
+7. `800 문학` 책장의 물리적 수납이 필요해지면 하위 분류로 책장을 세분화합니다.
