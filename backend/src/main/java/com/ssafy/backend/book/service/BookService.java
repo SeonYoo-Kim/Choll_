@@ -11,6 +11,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.util.List;
@@ -35,16 +36,18 @@ public class BookService {
 
 	@Transactional
 	public Response create(Request request) {
-		validateDuplicates(request, null);
+		String isbn = normalizeNullable(request.isbn());
+		validateDuplicateIsbn(isbn, null);
 		ClassificationSection section = classificationSectionService.getSection(
 			request.classificationSectionId()
 		);
 		validateClassificationRange(section, request.classificationNumber());
 		Book book = new Book(
-			request.libraryBookId(),
+			isbn,
 			request.title(),
-			request.rfidUid(),
-			request.callNumber(),
+			normalizeNullable(request.author()),
+			normalizeNullable(request.publisher()),
+			request.publicationYear(),
 			request.classificationCode(),
 			request.classificationNumber(),
 			section
@@ -66,16 +69,18 @@ public class BookService {
 	@Transactional
 	public Response update(Long id, Request request) {
 		Book book = getBook(id);
-		validateDuplicates(request, id);
+		String isbn = normalizeNullable(request.isbn());
+		validateDuplicateIsbn(isbn, id);
 		ClassificationSection section = classificationSectionService.getSection(
 			request.classificationSectionId()
 		);
 		validateClassificationRange(section, request.classificationNumber());
 		book.update(
-			request.libraryBookId(),
+			isbn,
 			request.title(),
-			request.rfidUid(),
-			request.callNumber(),
+			normalizeNullable(request.author()),
+			normalizeNullable(request.publisher()),
+			request.publicationYear(),
 			request.classificationCode(),
 			request.classificationNumber(),
 			section
@@ -88,29 +93,26 @@ public class BookService {
 		repository.delete(getBook(id));
 	}
 
-	private Book getBook(Long id) {
+	public Book getBook(Long id) {
 		return repository.findById(id)
 			.orElseThrow(() -> new ResourceNotFoundException("도서", id));
 	}
 
-	private void validateDuplicates(Request request, Long id) {
-		boolean duplicatedLibraryBookId = id == null
-			? repository.existsByLibraryBookId(request.libraryBookId())
-			: repository.existsByLibraryBookIdAndIdNot(request.libraryBookId(), id);
-		if (duplicatedLibraryBookId) {
-			throw new DuplicateResourceException(
-				"이미 사용 중인 도서 관리 ID입니다. libraryBookId=" + request.libraryBookId()
-			);
+	private void validateDuplicateIsbn(String isbn, Long id) {
+		if (isbn == null) {
+			return;
 		}
 
-		boolean duplicatedRfid = id == null
-			? repository.existsByRfidUid(request.rfidUid())
-			: repository.existsByRfidUidAndIdNot(request.rfidUid(), id);
-		if (duplicatedRfid) {
-			throw new DuplicateResourceException(
-				"이미 사용 중인 RFID UID입니다. rfidUid=" + request.rfidUid()
-			);
+		boolean exists = id == null
+			? repository.existsByIsbn(isbn)
+			: repository.existsByIsbnAndIdNot(isbn, id);
+		if (exists) {
+			throw new DuplicateResourceException("이미 등록된 ISBN입니다. isbn=" + isbn);
 		}
+	}
+
+	private String normalizeNullable(String value) {
+		return value == null || value.isBlank() ? null : value.trim();
 	}
 
 	private void validateClassificationRange(
@@ -127,21 +129,22 @@ public class BookService {
 	}
 
 	public record Request(
-		@NotBlank
-		@Size(max = 100)
-		String libraryBookId,
+		@Size(max = 13)
+		@Pattern(regexp = "^$|\\d{10}|\\d{13}$", message = "ISBN은 10자리 또는 13자리 숫자여야 합니다.")
+		String isbn,
 
 		@NotBlank
 		@Size(max = 255)
 		String title,
 
-		@NotBlank
-		@Size(max = 100)
-		String rfidUid,
+		@Size(max = 255)
+		String author,
 
-		@NotBlank
-		@Size(max = 100)
-		String callNumber,
+		@Size(max = 255)
+		String publisher,
+
+		@Positive
+		Integer publicationYear,
 
 		@NotBlank
 		@Size(max = 20)
@@ -159,10 +162,11 @@ public class BookService {
 
 	public record Response(
 		Long id,
-		String libraryBookId,
+		String isbn,
 		String title,
-		String rfidUid,
-		String callNumber,
+		String author,
+		String publisher,
+		Integer publicationYear,
 		String classificationCode,
 		BigDecimal classificationNumber,
 		Long classificationSectionId,
@@ -171,10 +175,11 @@ public class BookService {
 		public static Response from(Book book) {
 			return new Response(
 				book.getId(),
-				book.getLibraryBookId(),
+				book.getIsbn(),
 				book.getTitle(),
-				book.getRfidUid(),
-				book.getCallNumber(),
+				book.getAuthor(),
+				book.getPublisher(),
+				book.getPublicationYear(),
 				book.getClassificationCode(),
 				book.getClassificationNumber(),
 				book.getClassificationSection().getId(),

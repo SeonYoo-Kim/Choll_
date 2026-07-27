@@ -20,10 +20,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(
 	name = "books",
-	uniqueConstraints = {
-		@UniqueConstraint(name = "uk_book_library_book_id", columnNames = "library_book_id"),
-		@UniqueConstraint(name = "uk_book_rfid_uid", columnNames = "rfid_uid")
-	}
+	uniqueConstraints = @UniqueConstraint(name = "uk_book_isbn", columnNames = "isbn")
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Book {
@@ -32,17 +29,20 @@ public class Book {
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
-	@Column(name = "library_book_id", nullable = false, length = 100)
-	private String libraryBookId;
+	@Column(length = 13)
+	private String isbn;
 
 	@Column(nullable = false, length = 255)
 	private String title;
 
-	@Column(name = "rfid_uid", nullable = false, length = 100)
-	private String rfidUid;
+	@Column(length = 255)
+	private String author;
 
-	@Column(name = "call_number", nullable = false, length = 100)
-	private String callNumber;
+	@Column(length = 255)
+	private String publisher;
+
+	@Column(name = "publication_year")
+	private Integer publicationYear;
 
 	@Column(name = "classification_code", nullable = false, length = 20)
 	private String classificationCode;
@@ -55,19 +55,21 @@ public class Book {
 	private ClassificationSection classificationSection;
 
 	public Book(
-		String libraryBookId,
+		String isbn,
 		String title,
-		String rfidUid,
-		String callNumber,
+		String author,
+		String publisher,
+		Integer publicationYear,
 		String classificationCode,
 		BigDecimal classificationNumber,
 		ClassificationSection classificationSection
 	) {
 		update(
-			libraryBookId,
+			isbn,
 			title,
-			rfidUid,
-			callNumber,
+			author,
+			publisher,
+			publicationYear,
 			classificationCode,
 			classificationNumber,
 			classificationSection
@@ -75,18 +77,20 @@ public class Book {
 	}
 
 	public void update(
-		String libraryBookId,
+		String isbn,
 		String title,
-		String rfidUid,
-		String callNumber,
+		String author,
+		String publisher,
+		Integer publicationYear,
 		String classificationCode,
 		BigDecimal classificationNumber,
 		ClassificationSection classificationSection
 	) {
-		this.libraryBookId = libraryBookId;
+		this.isbn = isbn;
 		this.title = title;
-		this.rfidUid = rfidUid;
-		this.callNumber = callNumber;
+		this.author = author;
+		this.publisher = publisher;
+		this.publicationYear = publicationYear;
 		this.classificationCode = classificationCode;
 		this.classificationNumber = classificationNumber;
 		this.classificationSection = classificationSection;
