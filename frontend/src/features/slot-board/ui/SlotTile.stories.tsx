@@ -19,12 +19,16 @@ export const Occupied: Story = {
       slotNumber: 3,
       status: SlotStatus.OCCUPIED,
       isTarget: false,
+      lastDetectedAt: null,
       book: {
         id: 3,
+        bookId: 3,
         title: '어린 왕자',
         author: '생텍쥐페리',
         callNumber: '863-생884ㅇ',
         rfidTagId: 'E200-3412-DC03-0003',
+        bookshelfId: 2,
+        bookshelfNumber: '800',
         shelfZoneId: 2,
         zoneName: '2구역',
       },
@@ -34,13 +38,25 @@ export const Occupied: Story = {
 
 export const Empty: Story = {
   args: {
-    slot: { id: 104, slotNumber: 4, status: SlotStatus.EMPTY, isTarget: false },
+    slot: {
+      id: 104,
+      slotNumber: 4,
+      status: SlotStatus.EMPTY,
+      isTarget: false,
+      lastDetectedAt: null,
+    },
   },
 };
 
 export const RecognitionFailed: Story = {
   args: {
-    slot: { id: 111, slotNumber: 11, status: SlotStatus.RECOGNITION_FAILED, isTarget: false },
+    slot: {
+      id: 111,
+      slotNumber: 11,
+      status: SlotStatus.RECOGNITION_FAILED,
+      isTarget: false,
+      lastDetectedAt: null,
+    },
   },
 };
 

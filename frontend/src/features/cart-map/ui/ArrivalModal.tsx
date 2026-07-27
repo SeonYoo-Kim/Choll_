@@ -5,7 +5,7 @@ import { useCartMapStore } from '../model/cartMapStore';
 import { zoneLabel } from '../model/zones';
 
 import type { Slot } from '@/shared/api/generated/model';
-import { slotLabel } from '@/shared/lib/slotLabel';
+import { slotLabel } from '@/shared/utils/slotLabel';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
 import styles from './ArrivalModal.module.scss';
