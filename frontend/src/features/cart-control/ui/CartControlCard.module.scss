@@ -1,0 +1,53 @@
+@use '@/shared/styles/variables' as *;
+
+.card {
+  border: 1px solid $border-soft;
+  border-radius: $radius-card;
+  background: $bg-card;
+  padding: 20px;
+}
+
+.label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: $text-label;
+}
+
+.grid {
+  margin-top: $spacing-md;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.control {
+  display: flex;
+  min-height: 80px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-radius: 16px;
+  padding: $spacing-md;
+  text-align: left;
+
+  span {
+    font-size: 14px;
+    font-weight: 700;
+  }
+}
+
+.following {
+  background: #e7f7f4;
+  color: #328b7e;
+}
+
+.idle {
+  background: #f4f0e7;
+  color: #776f65;
+}
+
+.stop {
+  background: $danger-bg;
+  color: #bd6257;
+}

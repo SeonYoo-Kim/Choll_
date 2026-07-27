@@ -16,15 +16,15 @@
 
 ## 기술 스택
 
-| 항목 | 값 |
-|------|-----|
-| 코어 | React 18 + TypeScript + Vite |
-| 상태관리 | TanStack Query(서버 상태) + Zustand(클라이언트 상태) |
-| 스타일링 | SCSS + CSS Modules |
-| 패키지 매니저 | pnpm |
-| UI 컴포넌트 | Ant Design + Storybook |
-| API 모킹 | MSW + orval (OpenAPI 기반 클라이언트 생성) |
-| E2E 테스트 | Playwright |
+| 항목          | 값                                                   |
+| ------------- | ---------------------------------------------------- |
+| 코어          | React 18 + TypeScript + Vite                         |
+| 상태관리      | TanStack Query(서버 상태) + Zustand(클라이언트 상태) |
+| 스타일링      | SCSS + CSS Modules                                   |
+| 패키지 매니저 | pnpm                                                 |
+| UI 컴포넌트   | Ant Design + Storybook                               |
+| API 모킹      | MSW + orval (OpenAPI 기반 클라이언트 생성)           |
+| E2E 테스트    | Playwright                                           |
 
 ## BE 통신 계약
 
@@ -40,6 +40,39 @@
 - 기능 명세서 > 프론트: https://app.notion.com/p/3a3135971f3c80468d7ccd220a2a35e0
 - Figma 웹 목업: https://www.figma.com/make/emuvioahRJ0y7fL1ssnWMn/웹-페이지-목업-ver.2
 - Figma 유저 플로우: https://www.figma.com/board/9oo8WXRlcKIb90MP3qH9r9/유저-플로우
+
+## 디렉토리 구조 (feature 기반)
+
+```
+src/
+  app/        # 엔트리 조립: App, router, 전역 프로바이더(QueryClient, antd ConfigProvider)
+  pages/      # 라우트 단위 페이지 (features를 조립)
+  features/   # 도메인 기능: slot-board, cart-control, (예정) cart-map, sorting-task, follow-target
+    <name>/ui/     # 컴포넌트 + *.module.scss + *.stories.tsx + *.test.tsx
+    <name>/model/  # zustand 스토어, 로직 + *.test.ts
+  shared/
+    api/generated/ # orval 생성물 — 직접 수정 금지, openapi.yaml 수정 후 pnpm api:gen
+    api/mocks/     # MSW 워커·핸들러 (고정 픽스처는 handlers.ts)
+    api/ws/        # CartSocket (WS 재연결 래퍼)
+    api/http.ts    # axios 인스턴스 + orval mutator (인증 헤더는 여기)
+    styles/        # globals.scss, _variables.scss (디자인 토큰)
+  test/       # vitest setup
+openapi/openapi.yaml  # API 스펙 초안 — 정본은 노션, BE Swagger 나오면 교체
+e2e/          # Playwright 테스트 (MSW로 BE 없이 동작)
+```
+
+## 자주 쓰는 명령
+
+```bash
+pnpm dev            # 개발 서버 (기본 MSW 모킹, .env.development의 VITE_ENABLE_MSW)
+pnpm build          # tsc 타입체크 + 프로덕션 빌드
+pnpm lint           # ESLint
+pnpm format         # Prettier
+pnpm test           # Vitest 단위 테스트
+pnpm test:e2e       # Playwright E2E (dev 서버 자동 기동)
+pnpm api:gen        # openapi/openapi.yaml → shared/api/generated 재생성
+pnpm storybook      # Storybook (포트 6006)
+```
 
 ## 이 디렉토리에서 지켜야 할 것
 

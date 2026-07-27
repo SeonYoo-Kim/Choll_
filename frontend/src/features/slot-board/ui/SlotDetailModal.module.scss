@@ -1,0 +1,112 @@
+@use '@/shared/styles/variables' as *;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: $spacing-md;
+  background: rgba(69, 65, 57, 0.2);
+}
+
+.modal {
+  width: 100%;
+  max-width: 448px;
+  border-radius: $radius-panel;
+  background: #fff;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.slotId {
+  font-family: $font-mono;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64aa9e;
+}
+
+.title {
+  margin: 8px 0 0;
+  font-family: $font-display;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f7f0e4;
+}
+
+.info {
+  margin-top: 20px;
+  border-radius: 16px;
+  background: #f9f6ef;
+  padding: $spacing-md;
+  font-size: 14px;
+}
+
+.row {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+
+  span {
+    color: $text-muted;
+  }
+
+  & + .row {
+    margin-top: 12px;
+  }
+}
+
+.zoneValue {
+  color: $primary-text;
+}
+
+.errorValue {
+  color: #c35e54;
+}
+
+.actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
+}
+
+.primary {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 12px;
+  background: $primary-bg;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: $primary-text;
+}
+
+.checkIcon {
+  flex-shrink: 0;
+}
+
+.danger {
+  border-radius: 12px;
+  background: $danger-bg;
+  padding: 0 $spacing-md;
+  font-size: 14px;
+  font-weight: 700;
+  color: $danger-text;
+}

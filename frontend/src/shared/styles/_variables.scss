@@ -1,0 +1,66 @@
+// 디자인 토큰 — Figma 목업(웹 페이지 목업 ver.2) 기준
+
+// 폰트
+$font-display: 'Jua', sans-serif; // 헤딩
+$font-body:
+  'Gowun Dodum',
+  -apple-system,
+  'Malgun Gothic',
+  sans-serif; // 본문
+$font-mono: 'Nanum Gothic Coding', monospace; // 슬롯 ID·코드
+
+// 배경·보더
+$bg-page: #fcfaf4;
+$bg-card: #fffdf9;
+$bg-panel: #fffaf1;
+$bg-soft: #f8f5ee;
+$border-soft: #eee7da;
+$border-panel: #e7dfcf;
+$border-frame: #e8e0d0;
+
+// 텍스트
+$text-main: #444;
+$text-muted: #938a7e;
+$text-soft: #867d70;
+$text-label: #9a917e;
+$text-overline: #69a69e;
+
+// 브랜드 (민트)
+$primary: #69c2b6;
+$primary-dark: #4ba59a;
+$primary-bg: #e5f7f3;
+$primary-text: #398c80;
+
+// 포인트 (노랑)
+$accent: #ffe6a6;
+$accent-text: #6d5228;
+
+// 경고 (붉은 톤)
+$danger-bg: #fff0ed;
+$danger-text: #b85e54;
+
+// 슬롯 상태 톤
+$slot-book-border: #9fded5;
+$slot-book-bg: #effbf8;
+$slot-book-text: #367b70;
+$slot-empty-border: #e6dfd3;
+$slot-empty-bg: #faf8f3;
+$slot-empty-text: #938a7e;
+$slot-error-border: #edb7ad;
+$slot-error-bg: #fff3ef;
+$slot-error-text: #b75c52;
+
+// 간격·라운드
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
+$radius-card: 24px;
+$radius-panel: 26px;
+$radius-tile: 16px;
+
+// 반응형
+$bp-sm: 640px;
+$bp-md: 768px;
+$bp-lg: 1024px;
+$bp-2xl: 1536px;

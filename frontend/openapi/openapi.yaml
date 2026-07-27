@@ -1,0 +1,373 @@
+openapi: 3.0.3
+info:
+  title: Choll Cart API (DRAFT)
+  version: 0.2.0
+  description: |
+    ⚠️ FE 개발용 초안 스펙입니다. 정본은 노션 API 명세서이며,
+    BE Swagger(springdoc-openapi)가 준비되면 이 파일을 export 결과물로 교체합니다.
+    변경 시 `pnpm api:gen`으로 클라이언트/모킹 코드를 재생성하세요.
+
+    v0.2.0: BE ERD 기준으로 재작성 (id는 BIGINT, zone은 shelf_zone 조인 이름 포함).
+    app_user(로그인)는 우선순위 '하'로 이번 초안에서 제외.
+servers:
+  - url: /
+tags:
+  - name: carts
+  - name: slots
+  - name: tasks
+  - name: follow
+  - name: maps
+paths:
+  /api/carts:
+    get:
+      tags: [carts]
+      operationId: listCarts
+      summary: 카트 목록 조회
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CartSummary'
+  /api/carts/{cartId}:
+    get:
+      tags: [carts]
+      operationId: getCart
+      summary: 카트 상세 조회
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartDetail'
+  /api/carts/{cartId}/slots:
+    get:
+      tags: [slots]
+      operationId: listSlots
+      summary: 카트 슬롯 상태 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+  /api/carts/{cartId}/tasks/progress:
+    get:
+      tags: [tasks]
+      operationId: getTaskProgress
+      summary: 정리 작업 진행률 조회
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskProgress'
+  /api/carts/{cartId}/commands/call:
+    post:
+      tags: [carts]
+      operationId: callCart
+      summary: 카트 호출 (목적지 구역으로 이동)
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [zoneId]
+              properties:
+                zoneId:
+                  type: integer
+                  format: int64
+                  description: shelf_zone.id
+                  example: 3
+      responses:
+        '202':
+          description: 이동 명령 접수
+  /api/carts/{cartId}/commands/stop:
+    post:
+      tags: [carts]
+      operationId: stopCart
+      summary: 이동 취소(정지)
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      responses:
+        '202':
+          description: 정지 명령 접수
+  /api/carts/{cartId}/follow/start:
+    post:
+      tags: [follow]
+      operationId: startFollow
+      summary: 추종 시작 (선택한 대상)
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetId]
+              properties:
+                targetId:
+                  type: integer
+                  description: AI가 부여한 추적 대상 Track ID
+      responses:
+        '202':
+          description: 추종 시작 명령 접수
+  /api/carts/{cartId}/follow/stop:
+    post:
+      tags: [follow]
+      operationId: stopFollow
+      summary: 추종 종료
+      parameters:
+        - $ref: '#/components/parameters/CartId'
+      responses:
+        '202':
+          description: 추종 종료 명령 접수
+  /api/maps/{mapId}:
+    get:
+      tags: [maps]
+      operationId: getMap
+      summary: SLAM 지도 메타 조회 (이미지 URL·해상도·원점)
+      parameters:
+        - $ref: '#/components/parameters/MapId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapInfo'
+  /api/maps/{mapId}/zones:
+    get:
+      tags: [maps]
+      operationId: listShelfZones
+      summary: 지도 내 서가 구역 목록 조회
+      parameters:
+        - $ref: '#/components/parameters/MapId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShelfZone'
+components:
+  parameters:
+    CartId:
+      name: cartId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      example: 1
+    MapId:
+      name: mapId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      example: 1
+  schemas:
+    CartStatus:
+      type: string
+      enum: [IDLE, MOVING, FOLLOWING]
+    CartSummary:
+      type: object
+      required: [id, name, status, online]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: 1호 카트
+        status:
+          $ref: '#/components/schemas/CartStatus'
+        online:
+          type: boolean
+        batteryLevel:
+          type: integer
+          minimum: 0
+          maximum: 100
+        emergencyStopped:
+          type: boolean
+    CartDetail:
+      allOf:
+        - $ref: '#/components/schemas/CartSummary'
+        - type: object
+          properties:
+            mapId:
+              type: integer
+              format: int64
+            currentZoneId:
+              type: integer
+              format: int64
+              description: shelf_zone.id (구역 밖이면 null)
+            currentZoneName:
+              type: string
+              description: shelf_zone.name 조인 값
+              example: 2구역
+            position:
+              $ref: '#/components/schemas/CartPosition'
+            lastSeenAt:
+              type: string
+              format: date-time
+    CartPosition:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        yaw:
+          type: number
+          description: 라디안 단위 방향각 (ERD position_yaw)
+    SlotStatus:
+      type: string
+      enum: [EMPTY, OCCUPIED, RECOGNITION_FAILED]
+    Slot:
+      type: object
+      required: [id, slotNumber, status, isTarget]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 101
+        slotNumber:
+          type: integer
+          description: 카트 내 슬롯 번호 (1~30)
+          example: 1
+        status:
+          $ref: '#/components/schemas/SlotStatus'
+        isTarget:
+          type: boolean
+          description: 현재 구역에 꽂을 책이 있는 슬롯 여부 (LED 점등 대상)
+        book:
+          $ref: '#/components/schemas/Book'
+        lastDetectedAt:
+          type: string
+          format: date-time
+    Book:
+      type: object
+      required: [id, title, callNumber, rfidTagId, shelfZoneId, zoneName]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 42
+        title:
+          type: string
+          example: 어린 왕자
+        author:
+          type: string
+          example: 생텍쥐페리
+        callNumber:
+          type: string
+          description: 청구기호
+          example: 863-생884ㅇ
+        rfidTagId:
+          type: string
+          example: E200-3412-DC03-0042
+        shelfZoneId:
+          type: integer
+          format: int64
+          description: 꽂을 서가 구역 shelf_zone.id
+          example: 2
+        zoneName:
+          type: string
+          description: shelf_zone.name 조인 값
+          example: 2구역
+    ShelfZone:
+      type: object
+      required: [id, mapId, name, active]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 2
+        mapId:
+          type: integer
+          format: int64
+        name:
+          type: string
+          example: 2구역
+        boundaryData:
+          description: 구역 경계 폴리곤 JSON (형식은 BE와 협의)
+        callNumberStart:
+          type: string
+          example: '800'
+        callNumberEnd:
+          type: string
+          example: '899.99'
+        priority:
+          type: integer
+        active:
+          type: boolean
+    MapInfo:
+      type: object
+      required: [id, name, imageUrl, resolution, originX, originY, imageWidth, imageHeight]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: 본관 1층
+        imageUrl:
+          type: string
+          example: /maps/floor1.png
+        resolution:
+          type: number
+          description: m/pixel
+          example: 0.05
+        originX:
+          type: number
+        originY:
+          type: number
+        imageWidth:
+          type: integer
+        imageHeight:
+          type: integer
+        version:
+          type: string
+        active:
+          type: boolean
+    TaskProgress:
+      type: object
+      required: [totalBooks, shelvedBooks, remainingBooks]
+      properties:
+        totalBooks:
+          type: integer
+        shelvedBooks:
+          type: integer
+        remainingBooks:
+          type: integer
+        currentZoneSlotNumbers:
+          type: array
+          items:
+            type: integer
+          description: 현재 구역에 꽂을 책이 있는 슬롯 번호 목록
