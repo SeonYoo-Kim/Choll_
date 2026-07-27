@@ -44,6 +44,7 @@ for pkg in ("std_msgs", "sensor_msgs", "geometry_msgs", "vision_msgs"):
     _stub(pkg)
     _stub(
         f"{pkg}.msg",
+        Float32=type("Float32", (), {}),
         Float32MultiArray=type("Float32MultiArray", (), {}),
         Int32MultiArray=type("Int32MultiArray", (), {}),
         LaserScan=type("LaserScan", (), {}),

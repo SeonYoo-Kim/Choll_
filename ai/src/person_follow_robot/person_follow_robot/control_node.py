@@ -3,6 +3,7 @@
 - /target_person (vision_msgs/Detection2DArray, reid_node 발행) 구독
 - /scan (sensor_msgs/LaserScan, LiDAR 드라이버 발행) 구독
 - 화면 중심 오차(각도) + LiDAR 거리(전방) → PID → /cmd_vel (geometry_msgs/Twist) 발행
+- 측정한 타겟 거리를 /target_distance (std_msgs/Float32, m)로 발행 — 디버그 오버레이용
 
 좌우 각도(center_x_normalized, -1~1)를 카메라 화각(FOV)에 맞는 방위각으로 변환한 뒤,
 LiDAR의 해당 각도 근방 range 값들을 평균 내어 거리로 사용.
@@ -25,6 +26,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32
 from vision_msgs.msg import Detection2D, Detection2DArray
 
 
@@ -156,6 +158,7 @@ class ControlNode(Node):
         )
         self.create_subscription(LaserScan, "/scan", self.scan_callback, 10)
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.distance_pub = self.create_publisher(Float32, "/target_distance", 10)
 
         self.prev_time = self.get_clock().now()
         self.timer = self.create_timer(1.0 / 15.0, self.control_loop)  # 15Hz 제어 루프
@@ -241,6 +244,9 @@ class ControlNode(Node):
         )
 
         distance = self.get_distance_at_angle(angle_rad)
+        if distance is not None:
+            # 디버그 오버레이(바운딩박스 거리 표시)용으로 측정 거리를 공유
+            self.distance_pub.publish(Float32(data=float(distance)))
 
         angular_error = -self.center_x_normalized  # 오른쪽(+)이면 우회전(-ω, REP 103)
         angular_vel = self.angular_pid.compute(angular_error, dt)

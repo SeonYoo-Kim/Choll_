@@ -112,6 +112,7 @@ def generate_launch_description() -> LaunchDescription:
                 "debug_video_path": LaunchConfiguration("debug_video_path"),
                 "debug_video_fps": 30.0,
                 "recovery_overlay_duration_sec": 2.0,
+                "distance_display_timeout_sec": 1.0,  # 거리 수신 끊기면 라벨 숨김
             }],
         ),
     ])

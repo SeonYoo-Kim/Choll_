@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge, CvBridgeError
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import String
+from std_msgs.msg import Float32, String
 from vision_msgs.msg import Detection2D, Detection2DArray
-
 
 BLUE = (255, 80, 30)
 GREEN = (40, 220, 60)
@@ -63,11 +63,13 @@ class DebugVisualizationNode(Node):
     """Publish presentation-friendly overlay images for tracking and Re-ID."""
 
     def __init__(self) -> None:
+        """Declare parameters and wire subscriptions/publisher."""
         super().__init__("debug_visualization_node")
         self.declare_parameter("save_debug_video", False)
         self.declare_parameter("debug_video_path", "result.mp4")
         self.declare_parameter("debug_video_fps", 30.0)
         self.declare_parameter("recovery_overlay_duration_sec", 2.0)
+        self.declare_parameter("distance_display_timeout_sec", 1.0)
 
         self._save_debug_video = _parse_bool(
             self.get_parameter("save_debug_video").value
@@ -81,10 +83,15 @@ class DebugVisualizationNode(Node):
         self._recovery_overlay_duration_sec = float(
             self.get_parameter("recovery_overlay_duration_sec").value
         )
+        self._distance_display_timeout_sec = float(
+            self.get_parameter("distance_display_timeout_sec").value
+        )
 
         self._bridge = CvBridge()
         self._tracks: list[DrawBox] = []
         self._target_track_id: int | None = None
+        self._target_distance_m: float | None = None
+        self._distance_updated_at = 0.0
         self._recovery_overlay: RecoveryOverlay | None = None
         self._video_writer: cv2.VideoWriter | None = None
 
@@ -96,6 +103,9 @@ class DebugVisualizationNode(Node):
         )
         self.create_subscription(
             String, "/reid/recovery_event", self._recovery_event_callback, 10
+        )
+        self.create_subscription(
+            Float32, "/target_distance", self._distance_callback, 10
         )
         self.create_subscription(Image, "/camera/image_raw", self._image_callback, 10)
         self._publisher = self.create_publisher(Image, "/debug/image", 10)
@@ -122,6 +132,10 @@ class DebugVisualizationNode(Node):
             self._target_track_id = int(message.detections[0].id)
         except (TypeError, ValueError):
             self._target_track_id = None
+
+    def _distance_callback(self, message: Float32) -> None:
+        self._target_distance_m = float(message.data)
+        self._distance_updated_at = time.monotonic()
 
     def _recovery_event_callback(self, message: String) -> None:
         try:
@@ -155,7 +169,7 @@ class DebugVisualizationNode(Node):
         self._publish_debug_image(output, message)
         self._write_debug_video(output)
 
-    def _draw_tracks(self, frame) -> None:
+    def _draw_tracks(self, frame: np.ndarray) -> None:
         for box in self._tracks:
             is_target = box.track_id == self._target_track_id
             color = GREEN if is_target else BLUE
@@ -173,7 +187,23 @@ class DebugVisualizationNode(Node):
             )
             self._draw_label(frame, label, box.x1, max(32, box.y1 - 10), color)
 
-    def _draw_status(self, frame) -> None:
+            if is_target:
+                distance_text = self._current_distance_text()
+                if distance_text is not None:
+                    self._draw_label_right_aligned(
+                        frame, distance_text, box.x2, max(32, box.y1 - 10), GREEN
+                    )
+
+    def _current_distance_text(self) -> str | None:
+        """Return the target distance label, or None if unknown/stale."""
+        if self._target_distance_m is None:
+            return None
+        age = time.monotonic() - self._distance_updated_at
+        if age > self._distance_display_timeout_sec:
+            return None
+        return f"{self._target_distance_m:.2f}m"
+
+    def _draw_status(self, frame: np.ndarray) -> None:
         track_count = len(self._tracks)
         target_text = (
             "TARGET: NONE"
@@ -188,7 +218,7 @@ class DebugVisualizationNode(Node):
             BLACK,
         )
 
-    def _draw_recovery_overlay(self, frame) -> None:
+    def _draw_recovery_overlay(self, frame: np.ndarray) -> None:
         overlay = self._recovery_overlay
         if overlay is None:
             return
@@ -204,7 +234,7 @@ class DebugVisualizationNode(Node):
         y = max(90, height // 6)
         self._draw_banner(frame, text, x, y, RED)
 
-    def _publish_debug_image(self, frame, source_message: Image) -> None:
+    def _publish_debug_image(self, frame: np.ndarray, source_message: Image) -> None:
         try:
             output = self._bridge.cv2_to_imgmsg(frame, encoding="bgr8")
         except CvBridgeError as error:
@@ -214,7 +244,7 @@ class DebugVisualizationNode(Node):
         output.header = source_message.header
         self._publisher.publish(output)
 
-    def _write_debug_video(self, frame) -> None:
+    def _write_debug_video(self, frame: np.ndarray) -> None:
         if not self._save_debug_video:
             return
         if self._video_writer is None:
@@ -236,7 +266,7 @@ class DebugVisualizationNode(Node):
 
     @staticmethod
     def _draw_label(
-        frame,
+        frame: np.ndarray,
         text: str,
         x: int,
         y: int,
@@ -255,9 +285,25 @@ class DebugVisualizationNode(Node):
         )
         cv2.putText(frame, text, (x + 7, y - 5), font, scale, WHITE, thickness)
 
+    @classmethod
+    def _draw_label_right_aligned(
+        cls,
+        frame: np.ndarray,
+        text: str,
+        right_x: int,
+        y: int,
+        color: tuple[int, int, int],
+    ) -> None:
+        """Draw a label whose background right edge sits at ``right_x``."""
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.9
+        thickness = 2
+        (width, _height), _baseline = cv2.getTextSize(text, font, scale, thickness)
+        cls._draw_label(frame, text, right_x - width - 14, y, color)
+
     @staticmethod
     def _draw_banner(
-        frame,
+        frame: np.ndarray,
         text: str,
         x: int,
         y: int,
@@ -295,6 +341,7 @@ class DebugVisualizationNode(Node):
         )
 
     def destroy_node(self) -> None:
+        """Release the video writer before the node is destroyed."""
         if self._video_writer is not None:
             self._video_writer.release()
         super().destroy_node()

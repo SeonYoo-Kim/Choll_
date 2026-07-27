@@ -12,6 +12,82 @@
 
 ---
 
+## 2026-07-27 17:11 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/ -v` + `ruff check <변경 파일들>`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `36cc4dd` 기준 작업 트리 (디버그 영상 거리 표시 기능, 커밋 전)
+- **맥락**: 디버그 영상의 타겟 바운딩박스 우상단에 LiDAR 측정 거리(m) 표시 기능 검증.
+  - control_node: 측정 거리를 `/target_distance`(std_msgs/Float32)로 발행.
+  - debug_visualization_node: 구독 후 타겟 박스 우상단에 `X.XXm` 라벨
+    (staleness 타임아웃 `distance_display_timeout_sec`=1s 초과 시 숨김).
+  - conftest.py 스텁에 `Float32` 추가 — 추가 전에는 control_node import 실패로
+    테스트 수집 자체가 깨졌음 (해당 실행도 아래 이력 참조).
+  - 새 순수 로직 없음(발행/구독+cv2 그리기) → 신규 pytest 케이스 없이 기존 26개로 회귀 확인.
+- **ruff**: 변경 파일(control_node·debug_visualization_node·launch·conftest) `All checks passed!`
+  (debug_visualization_node의 기존 lint 이슈 — frame 타입 힌트, import 정렬, docstring —
+  이번 기회에 함께 정리. `ruff format --check`의 저장소 기존 포맷 드리프트는 미변경.)
+
+<details>
+<summary>1차 실행 — ❌ 수집 에러 (conftest 스텁에 Float32 부재)</summary>
+
+```
+ERROR collecting tests/test_control_logic.py
+ai\src\person_follow_robot\person_follow_robot\control_node.py:29: in <module>
+    from std_msgs.msg import Float32
+E   ImportError: cannot import name 'Float32' from 'std_msgs.msg' (unknown location)
+ERROR collecting tests/test_pid.py
+    (동일 원인)
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!
+============================== 2 errors in 0.17s ==============================
+```
+
+</details>
+
+<details>
+<summary>2차 실행 — pytest 전체 출력</summary>
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\SSAFY\miniforge3\python.exe
+cachedir: .pytest_cache
+rootdir: C:\SSAFY\workspace\Choll
+configfile: pyproject.toml
+plugins: anyio-4.14.1
+collecting ... collected 26 items
+
+tests/test_control_logic.py::TestNormalizeCenterX::test_image_center_maps_to_zero PASSED [  3%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_left_edge_maps_to_minus_one PASSED [  7%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_right_edge_maps_to_plus_one PASSED [ 11%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_quarter_position PASSED [ 15%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_out_of_frame_is_clamped PASSED [ 19%]
+tests/test_control_logic.py::TestNormalizeCenterX::test_non_positive_width_raises PASSED [ 23%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_center_maps_to_zero PASSED [ 26%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_right_edge_is_negative_half_fov PASSED [ 30%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_left_edge_is_positive_half_fov PASSED [ 34%]
+tests/test_control_logic.py::TestCameraBearingToLidarAngle::test_mount_offset_shifts_lookup_angle PASSED [ 38%]
+tests/test_control_logic.py::TestPidReset::test_reset_clears_integral_and_derivative_state PASSED [ 42%]
+tests/test_motor_logic.py::TestStraightLine::test_forward_gives_equal_positive_rpms PASSED [ 46%]
+tests/test_motor_logic.py::TestStraightLine::test_backward_gives_equal_negative_rpms PASSED [ 50%]
+tests/test_motor_logic.py::TestRotation::test_left_turn_makes_right_wheel_faster PASSED [ 53%]
+tests/test_motor_logic.py::TestRotation::test_spin_in_place_wheels_are_opposite PASSED [ 57%]
+tests/test_motor_logic.py::TestClamping::test_peak_clamped_to_max_rpm PASSED [ 61%]
+tests/test_motor_logic.py::TestClamping::test_clamp_preserves_left_right_ratio PASSED [ 65%]
+tests/test_motor_logic.py::TestClamping::test_zero_command_is_zero PASSED [ 69%]
+tests/test_motor_logic.py::TestValidation::test_non_positive_radius_raises PASSED [ 73%]
+tests/test_motor_logic.py::TestValidation::test_non_positive_separation_raises PASSED [ 76%]
+tests/test_motor_logic.py::TestValidation::test_negative_max_rpm_raises PASSED [ 80%]
+tests/test_pid.py::test_proportional_term_only PASSED                    [ 84%]
+tests/test_pid.py::test_output_is_clamped_to_limit PASSED                [ 88%]
+tests/test_pid.py::test_integral_accumulates_over_time PASSED            [ 92%]
+tests/test_pid.py::test_derivative_responds_to_error_change PASSED       [ 96%]
+tests/test_pid.py::test_zero_dt_disables_derivative PASSED               [100%]
+
+============================= 26 passed in 0.03s ==============================
+```
+
+</details>
+
 ## 2026-07-24 16:43 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/ -v` + `ruff check <변경 파일들>`

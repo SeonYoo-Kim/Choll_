@@ -11,9 +11,9 @@
 | DetectorNode | detector_node.py | YOLOv10s TensorRT로 사람만 검출. `.engine` 파일 필수. Ultralytics 래퍼 사용. |
 | TrackerNode | tracker_node.py | supervision ByteTrack으로 검출에 track ID 부여. `ByteTrackAdapter`가 버전별 인자명을 흡수. |
 | ReidNode | reid_node.py | **핵심.** OSNet 512-D 임베딩 + Memory Bank(FIFO, 최대 20) + 초기 등록(2초) + 추적 실패 시 코사인 유사도 재탐색. |
-| ControlNode | control_node.py | 화면 중심 오차 + LiDAR 거리 → PID → `cmd_vel`. 15Hz 루프. |
+| ControlNode | control_node.py | 화면 중심 오차 + LiDAR 거리 → PID → `cmd_vel`. 15Hz 루프. 측정 거리를 `/target_distance`로 공유. |
 | MotorNode | motor_node.py | `/cmd_vel` → 차동구동 역기구학(v,ω→좌우 RPM) → `/wheel_speed_cmd` 10Hz 발행. cmd 끊기면 [0,0]. |
-| DebugVisualizationNode | debug_visualization_node.py | 트랙/타겟/재탐색 이벤트를 프레임에 오버레이, `/debug/image` 발행 및 선택적 mp4 저장. |
+| DebugVisualizationNode | debug_visualization_node.py | 트랙/타겟/재탐색 이벤트 + 타겟 거리(박스 우상단, m)를 프레임에 오버레이, `/debug/image` 발행 및 선택적 mp4 저장. |
 
 ## 토픽 계약 (변경 시 양쪽 노드 + SYSTEM_ARCHITECTURE.md 동시 갱신)
 
@@ -27,6 +27,7 @@
 | `/reid/recovery_event` | std_msgs/String | reid | debug |
 | `/cmd_vel` | geometry_msgs/Twist | control | motor |
 | `/scan` | sensor_msgs/LaserScan | (LiDAR 드라이버) | control |
+| `/target_distance` | std_msgs/Float32 (m, LiDAR 측정) | control | debug |
 | `/wheel_speed_cmd` | std_msgs/Int32MultiArray (`[left_rpm, right_rpm]`) | motor | (STM32, micro-ROS) |
 
 `vision_msgs` BoundingBox2D의 center는 배포판에 따라 `.position.x`(신형) 또는 `.x`(구형) 레이아웃이 다릅니다.
