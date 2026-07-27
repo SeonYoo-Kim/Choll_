@@ -1,6 +1,7 @@
 package com.ssafy.backend.cart;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.when;
 
@@ -44,8 +45,9 @@ class CartServiceTests {
 		Response response = service.findById(1L);
 
 		assertEquals(1L, response.id());
-		assertEquals(CartConnectionStatus.OFFLINE, response.connectionStatus());
-		assertEquals(CartOperationStatus.IDLE, response.operationStatus());
+		assertEquals(CartService.Status.IDLE, response.status());
+		assertFalse(response.online());
 		assertNull(response.currentZoneId());
+		assertNull(response.position());
 	}
 }

@@ -47,15 +47,13 @@ class SlotServiceTests {
 		when(cartService.getCart(1L)).thenReturn(cart);
 		when(repository.findAllByCartId(1L)).thenReturn(List.of(slot));
 		when(slot.getId()).thenReturn(10L);
-		when(slot.getCart()).thenReturn(cart);
 		when(slot.getSlotNumber()).thenReturn(1);
 		when(slot.getStatus()).thenReturn(SlotStatus.EMPTY);
-		when(cart.getId()).thenReturn(1L);
 
 		List<Response> responses = service.findAll(1L);
 
 		assertEquals(1, responses.size());
-		assertEquals(SlotStatus.EMPTY, responses.getFirst().status());
+		assertEquals(SlotService.Status.EMPTY, responses.getFirst().status());
 		assertNull(responses.getFirst().book());
 		verify(repository).findAllByCartId(1L);
 	}
@@ -66,10 +64,8 @@ class SlotServiceTests {
 		when(repository.findByCartIdAndSlotNumber(1L, 30))
 			.thenReturn(Optional.of(slot));
 		when(slot.getId()).thenReturn(39L);
-		when(slot.getCart()).thenReturn(cart);
 		when(slot.getSlotNumber()).thenReturn(30);
 		when(slot.getStatus()).thenReturn(SlotStatus.EMPTY);
-		when(cart.getId()).thenReturn(1L);
 
 		Response response = service.findByNumber(1L, 30);
 

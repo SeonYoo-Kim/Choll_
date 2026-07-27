@@ -119,8 +119,8 @@ public class LibraryMapService {
 		BigDecimal resolution,
 		BigDecimal originX,
 		BigDecimal originY,
-		int width,
-		int height
+		int imageWidth,
+		int imageHeight
 	) {
 		public static Response from(LibraryMap map) {
 			return new Response(

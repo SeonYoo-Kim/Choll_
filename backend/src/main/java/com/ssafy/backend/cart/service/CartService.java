@@ -2,7 +2,6 @@ package com.ssafy.backend.cart.service;
 
 import com.ssafy.backend.cart.domain.Cart;
 import com.ssafy.backend.cart.domain.CartConnectionStatus;
-import com.ssafy.backend.cart.domain.CartOperationStatus;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
 import com.ssafy.backend.zone.domain.Zone;
@@ -33,29 +32,49 @@ public class CartService {
 	public record Response(
 		Long id,
 		String name,
-		CartConnectionStatus connectionStatus,
-		CartOperationStatus operationStatus,
-		BigDecimal positionX,
-		BigDecimal positionY,
+		Status status,
+		boolean online,
+		Long mapId,
 		Long currentZoneId,
-		String currentZoneCode,
 		String currentZoneName,
-		LocalDateTime lastCommunicationAt
+		Position position,
+		LocalDateTime lastSeenAt
 	) {
 		public static Response from(Cart cart) {
 			Zone currentZone = cart.getCurrentZone();
 			return new Response(
 				cart.getId(),
 				cart.getName(),
-				cart.getConnectionStatus(),
-				cart.getOperationStatus(),
-				cart.getPositionX(),
-				cart.getPositionY(),
+				Status.from(cart),
+				cart.getConnectionStatus() == CartConnectionStatus.ONLINE,
+				currentZone == null ? null : currentZone.getMap().getId(),
 				currentZone == null ? null : currentZone.getId(),
-				currentZone == null ? null : currentZone.getCode(),
 				currentZone == null ? null : currentZone.getName(),
+				Position.from(cart.getPositionX(), cart.getPositionY()),
 				cart.getLastCommunicationAt()
 			);
+		}
+	}
+
+	public enum Status {
+		IDLE,
+		MOVING,
+		FOLLOWING,
+		ERROR;
+
+		private static Status from(Cart cart) {
+			return switch (cart.getOperationStatus()) {
+				case IDLE -> IDLE;
+				case NAVIGATING -> MOVING;
+				case FOLLOWING -> FOLLOWING;
+				case ERROR -> ERROR;
+			};
+		}
+	}
+
+	public record Position(BigDecimal x, BigDecimal y) {
+		private static Position from(BigDecimal x, BigDecimal y) {
+			return x == null || y == null ? null : new Position(x, y);
 		}
 	}
 }

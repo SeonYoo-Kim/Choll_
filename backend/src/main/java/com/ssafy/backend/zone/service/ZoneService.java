@@ -35,6 +35,9 @@ public class ZoneService {
 	}
 
 	public List<Response> findAll(Long mapId) {
+		if (mapId != null) {
+			mapService.getMap(mapId);
+		}
 		List<Zone> zones = mapId == null
 			? repository.findAll(Sort.by("code").ascending())
 			: repository.findAllByMapIdOrderByCodeAsc(mapId);
@@ -97,7 +100,7 @@ public class ZoneService {
 		Long mapId,
 		String code,
 		String name,
-		String polygonJson
+		String boundaryData
 	) {
 		public static Response from(Zone zone) {
 			return new Response(

@@ -2,6 +2,7 @@ package com.ssafy.backend.slot.service;
 
 import com.ssafy.backend.bookcopy.domain.BookCopy;
 import com.ssafy.backend.bookshelf.domain.Bookshelf;
+import com.ssafy.backend.cart.domain.Cart;
 import com.ssafy.backend.cart.service.CartService;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
 import com.ssafy.backend.slot.domain.Slot;
@@ -26,54 +27,62 @@ public class SlotService {
 	}
 
 	public List<Response> findAll(Long cartId) {
-		cartService.getCart(cartId);
+		Long currentZoneId = currentZoneId(cartService.getCart(cartId));
 		return repository.findAllByCartId(cartId)
 			.stream()
-			.map(Response::from)
+			.map(slot -> Response.from(slot, currentZoneId))
 			.toList();
 	}
 
 	public Response findByNumber(Long cartId, int slotNumber) {
-		cartService.getCart(cartId);
+		Long currentZoneId = currentZoneId(cartService.getCart(cartId));
 		Slot slot = repository.findByCartIdAndSlotNumber(cartId, slotNumber)
 			.orElseThrow(() -> new ResourceNotFoundException(
 				"슬롯",
 				"cartId=%d, slotNumber=%d".formatted(cartId, slotNumber)
 			));
-		return Response.from(slot);
+		return Response.from(slot, currentZoneId);
+	}
+
+	private Long currentZoneId(Cart cart) {
+		return cart.getCurrentZone() == null ? null : cart.getCurrentZone().getId();
 	}
 
 	public record Response(
 		Long id,
-		Long cartId,
 		int slotNumber,
-		SlotStatus status,
-		LocalDateTime lastScannedAt,
-		BookResponse book
+		Status status,
+		boolean isTarget,
+		BookResponse book,
+		LocalDateTime lastDetectedAt
 	) {
-		public static Response from(Slot slot) {
+		public static Response from(Slot slot, Long currentZoneId) {
+			BookCopy copy = slot.getBookCopy();
+			BookResponse book = copy == null ? null : BookResponse.from(copy);
 			return new Response(
 				slot.getId(),
-				slot.getCart().getId(),
 				slot.getSlotNumber(),
-				slot.getStatus(),
-				slot.getLastScannedAt(),
-				slot.getBookCopy() == null ? null : BookResponse.from(slot.getBookCopy())
+				Status.from(slot.getStatus()),
+				book != null
+					&& currentZoneId != null
+					&& currentZoneId.equals(book.shelfZoneId()),
+				book,
+				slot.getLastScannedAt()
 			);
 		}
 	}
 
 	public record BookResponse(
-		Long bookCopyId,
+		Long id,
 		Long bookId,
-		String rfidUid,
 		String title,
+		String author,
 		String callNumber,
-		Long targetBookshelfId,
-		String targetBookshelfNumber,
-		Long targetZoneId,
-		String targetZoneCode,
-		String targetZoneName
+		String rfidTagId,
+		Long bookshelfId,
+		String bookshelfNumber,
+		Long shelfZoneId,
+		String zoneName
 	) {
 		public static BookResponse from(BookCopy copy) {
 			Bookshelf bookshelf = copy.getBookshelf();
@@ -81,15 +90,31 @@ public class SlotService {
 			return new BookResponse(
 				copy.getId(),
 				copy.getBook().getId(),
-				copy.getRfidUid(),
 				copy.getBook().getTitle(),
+				copy.getBook().getAuthor(),
 				copy.getCallNumber(),
+				copy.getRfidUid(),
 				bookshelf == null ? null : bookshelf.getId(),
 				bookshelf == null ? null : bookshelf.getShelfNumber(),
 				zone == null ? null : zone.getId(),
-				zone == null ? null : zone.getCode(),
 				zone == null ? null : zone.getName()
 			);
+		}
+	}
+
+	public enum Status {
+		EMPTY,
+		OCCUPIED,
+		RECOGNIZING,
+		RECOGNITION_FAILED;
+
+		private static Status from(SlotStatus status) {
+			return switch (status) {
+				case EMPTY -> EMPTY;
+				case OCCUPIED -> OCCUPIED;
+				case RFID_READING -> RECOGNIZING;
+				case RFID_ERROR -> RECOGNITION_FAILED;
+			};
 		}
 	}
 }
