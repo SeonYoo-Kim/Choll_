@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw';
 
 import type { StartNavigationBody } from '@/features/cart-map/api/moveCommands';
+import { zoneIdOf, zoneIndexOfBookshelf } from '@/features/cart-map/model/zones';
 import { getGetCartMockHandler } from '@/shared/api/generated/carts/carts.msw';
 import type { Slot, SlotBook } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
@@ -24,65 +25,79 @@ const emptySlot = (slotNumber: number): Slot => ({
   lastDetectedAt: null,
 });
 
+/**
+ * 책 픽스처 — 책장 번호(KDC 백단위)를 주면 담당 구역(zones.ts의 ZONE_BOOKSHELVES 기준)을
+ * 자동으로 유도한다. 구역·책장·청구기호가 항상 지도와 일치하도록 유지할 것.
+ */
 const book = (
   id: number,
   title: string,
   author: string,
-  shelfZoneId: number,
+  bookshelfNumber: string,
   callNumber: string,
-): SlotBook => ({
-  id,
-  bookId: id,
-  title,
-  author,
-  callNumber,
-  rfidTagId: `E200-3412-DC03-${String(id).padStart(4, '0')}`,
-  bookshelfId: shelfZoneId,
-  bookshelfNumber: String(shelfZoneId * 100),
-  shelfZoneId,
-  zoneName: `${shelfZoneId}구역`,
-});
+): SlotBook => {
+  const zoneIndex = zoneIndexOfBookshelf(bookshelfNumber);
+  const shelfZoneId = zoneIndex === null ? null : zoneIdOf(zoneIndex);
+  return {
+    id,
+    bookId: id,
+    title,
+    author,
+    callNumber,
+    rfidTagId: `E200-3412-DC03-${String(id).padStart(4, '0')}`,
+    bookshelfId: Number(bookshelfNumber) / 100 + 1,
+    bookshelfNumber,
+    shelfZoneId,
+    zoneName: shelfZoneId === null ? null : `${shelfZoneId}구역`,
+  };
+};
 
 /**
- * 개발용 슬롯 고정 픽스처 (Figma 목업 데이터 기준, 슬롯 30개).
- * orval이 faker로 만드는 랜덤 값 대신, 화면 확인이 쉬운 현실적인 데이터를 쓴다.
+ * 개발용 슬롯 고정 픽스처 (슬롯 30개).
+ * 카트는 3구역(담당 책장 300·400)에서 시작하므로 슬롯 1·2가 현재 구역 정리 대상(isTarget)이다.
  */
 const slotsFixture: Slot[] = [
   {
     ...emptySlot(1),
     status: SlotStatus.OCCUPIED,
     isTarget: true,
-    book: book(1, '오늘도 책을 읽습니다', '김겨울', 3, '029.8-김441ㅇ'),
+    book: book(1, '정의란 무엇인가', '마이클 샌델', '300', '340.1-샌24ㅈ'),
   },
   {
     ...emptySlot(2),
     status: SlotStatus.OCCUPIED,
     isTarget: true,
-    book: book(2, '마음의 지도', '최은영', 3, '813.7-최67ㅁ'),
+    book: book(2, '코스모스', '칼 세이건', '400', '443.1-세68ㅋ'),
   },
   {
     ...emptySlot(3),
     status: SlotStatus.OCCUPIED,
-    book: book(3, '어린 왕자', '생텍쥐페리', 2, '863-생884ㅇ'),
+    book: book(3, '어린 왕자', '생텍쥐페리', '800', '863-생884ㅇ'),
   },
   ...Array.from({ length: 7 }, (_, i) => emptySlot(i + 4)),
   { ...emptySlot(11), status: SlotStatus.RECOGNITION_FAILED },
   {
     ...emptySlot(12),
     status: SlotStatus.OCCUPIED,
-    book: book(12, '불편한 편의점', '김호연', 5, '813.7-김95ㅂ'),
+    book: book(12, '불편한 편의점', '김호연', '800', '813.7-김95ㅂ'),
   },
   {
     ...emptySlot(13),
     status: SlotStatus.OCCUPIED,
-    book: book(13, '달러구트 꿈 백화점', '이미예', 4, '813.7-이39ㄷ'),
+    book: book(13, '사피엔스', '유발 하라리', '900', '909-하293ㅅ'),
   },
-  ...Array.from({ length: 17 }, (_, i) => emptySlot(i + 14)),
+  {
+    ...emptySlot(14),
+    status: SlotStatus.OCCUPIED,
+    book: book(14, '오늘도 책을 읽습니다', '김겨울', '000', '029.8-김441ㅇ'),
+  },
+  ...Array.from({ length: 16 }, (_, i) => emptySlot(i + 15)),
 ];
 
 /** 전체 API 모킹 핸들러. 특정 응답을 바꾸고 싶으면 개별 MockHandler에 override를 넘긴다. */
 export const handlers = [
   getListSlotsMockHandler(slotsFixture),
+  // 카트에 6권 적재(슬롯 1·2·3·12·13·14), 이 중 현재 구역(3구역: 300·400 책장) 대상은 슬롯 1·2
   getGetTaskProgressMockHandler({
     totalBooks: 11,
     shelvedBooks: 5,

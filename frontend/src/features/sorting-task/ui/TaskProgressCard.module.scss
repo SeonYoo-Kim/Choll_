@@ -18,15 +18,17 @@
   margin-top: $spacing-md;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 40px; // 도넛↔수치 사이 간격 (양끝 여백은 .donut/.stats의 margin이 담당)
 }
 
 .donut {
   display: grid;
   place-items: center;
+  margin-left: 20px;
   width: 112px;
   height: 112px;
   border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .donutInner {
@@ -46,13 +48,23 @@
 }
 
 .stats {
+  // 카드의 남은 폭을 채우되, 도넛의 왼쪽 여백(20px)과 대칭으로 오른쪽도 띄운다
+  flex: 1;
+  min-width: 0;
+  margin-right: 20px;
   font-size: 14px;
 
+  // 라벨은 왼쪽, 수치는 오른쪽 끝으로 — 표처럼 정렬
   p {
     margin: 0;
+    display: flex;
+    flex-direction: row-reverse; // DOM은 수치(strong)가 먼저지만 시각적으론 라벨 먼저
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 0;
 
     & + p {
-      margin-top: $spacing-sm;
+      border-top: 1px solid $border-soft;
     }
   }
 
@@ -61,7 +73,7 @@
   }
 
   span {
-    margin-left: 4px;
     color: #999184;
+    font-size: 13px;
   }
 }

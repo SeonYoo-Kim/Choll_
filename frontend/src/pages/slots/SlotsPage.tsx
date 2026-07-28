@@ -75,7 +75,6 @@ export function SlotsPage() {
           </button>
         ))}
       </div>
-      <p className={styles.count}>{filteredSlots.length}개 슬롯을 보고 있어요.</p>
       <div className={styles.board}>
         {filteredSlots.map((slot) => (
           <SlotTile

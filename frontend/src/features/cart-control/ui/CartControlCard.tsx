@@ -23,7 +23,7 @@ export function CartControlCard() {
           }}
           className={`${styles.control} ${following ? styles.following : styles.idle}`}
         >
-          {following ? <Play size={20} fill="currentColor" /> : <Compass size={20} />}
+          {following ? <Play size={24} fill="currentColor" /> : <Compass size={24} />}
           <span>{following ? '추종 중' : '추종 시작'}</span>
         </button>
         <button
@@ -33,7 +33,7 @@ export function CartControlCard() {
           }}
           className={`${styles.control} ${styles.stop}`}
         >
-          <CircleStop size={20} />
+          <CircleStop size={24} />
           <span>이동 취소</span>
         </button>
       </div>

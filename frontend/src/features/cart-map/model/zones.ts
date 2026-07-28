@@ -40,6 +40,27 @@ export const ZONE_POSITIONS: readonly { x: number; y: number }[] = ZONE_RECTS.ma
 /** 상/하단 구역을 잇는 중앙 통로의 y 좌표 (%) */
 export const CORRIDOR_Y = 50;
 
+/**
+ * 구역별 담당 책장 번호(KDC 백단위) — 평면도 서가 배치 기준.
+ * 카트가 해당 구역에 도착하면 이 책장들의 책을 정리할 수 있다.
+ * Z1:000 / Z2:100·200 / Z3:300·400 / Z4:500 / Z5:600 / Z6:700·800 / Z7:900
+ */
+export const ZONE_BOOKSHELVES: readonly (readonly string[])[] = [
+  ['000'], // Z1 총류
+  ['100', '200'], // Z2 철학·종교
+  ['300', '400'], // Z3 사회과학·자연과학
+  ['500'], // Z4 기술과학
+  ['600'], // Z5 예술
+  ['700', '800'], // Z6 언어·문학
+  ['900'], // Z7 역사
+];
+
+/** 책장 번호(예: "300") → 담당 구역 인덱스(0-base). 목록에 없으면 null */
+export function zoneIndexOfBookshelf(bookshelfNumber: string): number | null {
+  const index = ZONE_BOOKSHELVES.findIndex((shelves) => shelves.includes(bookshelfNumber));
+  return index === -1 ? null : index;
+}
+
 /** 구역 인덱스(0-base) → 표시명: "3구역" */
 export function zoneLabel(zoneIndex: number): string {
   return `${zoneIndex + 1}구역`;

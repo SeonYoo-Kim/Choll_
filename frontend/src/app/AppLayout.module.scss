@@ -49,8 +49,9 @@
 }
 
 .logo {
-  width: 100%;
-  max-width: 168px;
+  // 사이드바 콘텐츠 폭(130px)보다 살짝 크게 — width: 100%로는 컨테이너에 묶여 안 커진다
+  width: 134px;
+  max-width: none;
   height: auto;
   object-fit: contain;
 }

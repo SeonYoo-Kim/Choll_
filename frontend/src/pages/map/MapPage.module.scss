@@ -79,6 +79,15 @@
   margin: 0 auto;
   width: 100%;
   max-width: 780px;
+
+  // 데스크톱: 지도 왼쪽 + 상태 카드 오른쪽 세로 스택
+  @media (min-width: $bp-lg) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: $spacing-lg;
+    align-items: start;
+    max-width: 1044px; // 지도 780px + 간격 24px + 카드 240px
+  }
 }
 
 .statCards {
@@ -88,6 +97,12 @@
 
   @media (min-width: $bp-sm) {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  @media (min-width: $bp-lg) {
+    margin-top: 0;
+    grid-template-columns: 1fr; // 오른쪽 열에서 세로로 3개
+    align-content: start;
   }
 }
 

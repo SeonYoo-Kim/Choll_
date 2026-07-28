@@ -22,10 +22,10 @@ describe('SlotTile', () => {
             author: '생텍쥐페리',
             callNumber: '863-생884ㅇ',
             rfidTagId: 'E200-3412-DC03-0003',
-            bookshelfId: 2,
+            bookshelfId: 9,
             bookshelfNumber: '800',
-            shelfZoneId: 2,
-            zoneName: '2구역',
+            shelfZoneId: 6,
+            zoneName: '6구역',
           },
         }}
       />,
@@ -34,10 +34,10 @@ describe('SlotTile', () => {
     expect(screen.getByText('A-03')).toBeInTheDocument();
     expect(screen.getByText('어린 왕자')).toBeInTheDocument();
     expect(screen.getByText('생텍쥐페리')).toBeInTheDocument();
-    expect(screen.getByText('2구역')).toBeInTheDocument();
+    expect(screen.getByText('6구역 · 800')).toBeInTheDocument();
   });
 
-  it('빈 슬롯은 안내 문구를 표시한다', () => {
+  it('빈 슬롯은 안내 문구 없이 제목만 표시한다', () => {
     render(
       <SlotTile
         slot={{
@@ -51,7 +51,7 @@ describe('SlotTile', () => {
     );
 
     expect(screen.getByText('비어 있는 슬롯')).toBeInTheDocument();
-    expect(screen.getByText('다음 책을 꽂아주세요')).toBeInTheDocument();
+    expect(screen.queryByText('다음 책을 꽂아주세요')).not.toBeInTheDocument();
   });
 
   it('인식 실패 슬롯은 RFID 오류 문구를 표시한다', () => {

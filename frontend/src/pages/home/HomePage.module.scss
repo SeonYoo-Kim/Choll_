@@ -86,7 +86,7 @@
 .column {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 40px;
 }
 
 .hero {
@@ -94,12 +94,12 @@
   overflow: hidden;
   border-radius: $radius-panel;
   background: $primary;
-  padding: 28px 24px;
+  padding: 23px 24px 23px;
   color: #fff;
   box-shadow: 0 10px 0 $primary-dark;
 
   @media (min-width: $bp-md) {
-    padding: 28px 32px;
+    padding: 50px 32px 40px;
   }
 }
 
@@ -152,7 +152,7 @@
 }
 
 .heroDesc {
-  margin: 12px 0 0;
+  margin: 42px 0 0; // 제목과의 간격 확대 (카드 총 높이는 hero 아래 패딩 축소로 상쇄)
   max-width: 384px;
   font-size: 14px;
   line-height: 1.7;
