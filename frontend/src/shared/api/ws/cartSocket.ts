@@ -10,10 +10,29 @@
 /** API 명세서에 정의된 이벤트 타입. 명세 확정 시 13종 전체를 채운다. */
 export type CartWsEventType =
   | 'CART_POSITION_UPDATE'
+  | 'CART_ARRIVED'
   | 'SLOT_UPDATED'
   | 'FOLLOW_TARGETS_UPDATED'
   // TODO: API 명세서의 나머지 이벤트 타입 추가
   | (string & {});
+
+/**
+ * CART_POSITION_UPDATE 페이로드 초안.
+ * position은 SLAM 좌표(m) — FE에서 MapInfo(resolution/origin)로 이미지 %로 변환한다.
+ * TODO: 노션 API 명세서 확정 시 필드명·단위를 동기화할 것 (FE 단독 확정 금지).
+ */
+export interface CartPositionUpdatePayload {
+  position: { x: number; y: number; yaw?: number };
+  /** 현재 구역 shelf_zone.id (구역 밖이면 null) */
+  zoneId: number | null;
+  zoneName?: string;
+}
+
+/** CART_ARRIVED(목적지 도착) 페이로드 초안. TODO: 노션 명세 확정 시 동기화. */
+export interface CartArrivedPayload {
+  zoneId: number;
+  zoneName?: string;
+}
 
 export interface CartWsEvent<TPayload = unknown> {
   type: CartWsEventType;

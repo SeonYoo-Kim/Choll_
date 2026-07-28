@@ -30,3 +30,14 @@ export const CORRIDOR_Y = 47;
 export function zoneLabel(zoneIndex: number): string {
   return `${zoneIndex + 1}구역`;
 }
+
+/** 구역 인덱스(0-base) → shelf_zone.id (초안 스펙·MSW 픽스처는 1-base id를 쓴다) */
+export function zoneIdOf(zoneIndex: number): number {
+  return zoneIndex + 1;
+}
+
+/** shelf_zone.id → 구역 인덱스(0-base). 범위 밖 id는 null */
+export function zoneIndexOf(zoneId: number): number | null {
+  const index = zoneId - 1;
+  return index >= 0 && index < ZONE_NAMES.length ? index : null;
+}
