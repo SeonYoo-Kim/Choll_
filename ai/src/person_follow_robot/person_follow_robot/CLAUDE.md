@@ -51,11 +51,11 @@
    ([JETSON_TO_STM.md](../../../../docs/JETSON_TO_STM.md)). agent 실행은 EM 파트와 협의.
 
 > ~~motor_node 스텁~~ — **해결됨.** 차동구동 역기구학(`cmd_vel_to_wheel_rpms`) +
-> `/wheel_speed_cmd` 10Hz 발행 + cmd_vel 타임아웃 시 정지. 순수 로직 테스트: `tests/test_motor_logic.py`.
+> `/wheel_speed_cmd` 10Hz 발행 + cmd_vel 타임아웃 시 정지. 순수 로직 테스트: `ai/test/test_motor_logic.py`.
 > ~~launch에 control/motor 미포함~~ — **해결됨.** follow_robot_launch.py가 7개 노드 전부 실행.
 
 > ~~control_node ↔ reid_node 계약 단절~~ — **해결됨.** control_node가 `/target_person`(Detection2DArray)을
-> 직접 구독하도록 재작성 (타임아웃 정지 + PID 리셋 포함). 순수 로직 테스트: `tests/test_control_logic.py`.
+> 직접 구독하도록 재작성 (타임아웃 정지 + PID 리셋 포함). 순수 로직 테스트: `ai/test/test_control_logic.py`.
 
 ## 코딩 규칙 (이 디렉토리에 강제됨)
 

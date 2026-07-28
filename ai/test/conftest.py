@@ -10,10 +10,9 @@ import sys
 import types
 from pathlib import Path
 
-# Make the ROS2 node package importable by file path.
+# Make the ROS2 node package importable by file path (this file lives in ai/test/).
 NODE_DIR = (
     Path(__file__).resolve().parents[1]
-    / "ai"
     / "src"
     / "person_follow_robot"
     / "person_follow_robot"

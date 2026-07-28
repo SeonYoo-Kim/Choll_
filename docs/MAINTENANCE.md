@@ -50,4 +50,4 @@ bash scripts/gc.sh --dry-run
 - [ ] `bash scripts/gc.sh --dry-run` 결과에 소스/문서가 없는가
 - [ ] `git status`가 깨끗한가 (산출물 미추적)
 - [ ] `.gitignore`가 새 산출물 패턴을 포함하는가
-- [ ] `ruff check .` / `pytest tests/` 통과하는가
+- [ ] `ruff check .` / `pytest ai/test/` 통과하는가
