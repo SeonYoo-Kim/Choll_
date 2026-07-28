@@ -77,7 +77,7 @@ export function startCartMove(zoneId: number): void {
   const start = ZONE_POSITIONS[currentZoneIndex];
   const destination = ZONE_POSITIONS[destinationIndex];
 
-  broadcastNavigation('STARTED', zoneId);
+  broadcastNavigation('ACCEPTED', zoneId);
   const waypoints: MapPercent[] = [
     { x: start.x, y: CORRIDOR_Y },
     { x: destination.x, y: CORRIDOR_Y },
@@ -85,6 +85,7 @@ export function startCartMove(zoneId: number): void {
   ];
   moveTimers.push(
     setTimeout(() => {
+      broadcastNavigation('STARTED', zoneId);
       broadcastZone(departureZoneId, null); // 출발 구역 이탈 → 통로
       broadcastPosition(waypoints[0]);
     }, 30),
