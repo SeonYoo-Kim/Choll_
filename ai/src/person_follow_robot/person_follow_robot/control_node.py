@@ -7,7 +7,9 @@
   타겟이 보이는데 LiDAR 거리 측정에 실패하면 NaN을 발행한다 (타겟 미검출 시 미발행)
 
 좌우 각도(center_x_normalized, -1~1)를 카메라 화각(FOV)에 맞는 방위각으로 변환한 뒤,
-LiDAR의 해당 각도 근방 range 값들을 평균 내어 거리로 사용.
+타겟 bbox의 각도 폭 범위에서 유효 range의 최소값(가장 가까운 표면=사람)을 거리로
+사용. 순간 드롭아웃(다리 틈·IR 흡수 의류·유리)은 짧은 유예 시간 동안 직전 유효
+거리를 유지해 흡수한다.
 
 각도 규약 (ROS REP 103, 오른손 좌표계): +각도 = 반시계(왼쪽). 화면 오른쪽(+x)에
 보이는 타겟의 방위각은 음수다. LiDAR의 0° 축이 카메라 광축(로봇 전방)과 어긋나게
@@ -90,6 +92,70 @@ def camera_bearing_to_lidar_angle(
     return math.radians(bearing_deg - lidar_yaw_offset_deg)
 
 
+def bbox_half_span_rad(
+    bbox_width_px: float, image_width_px: float, camera_fov_deg: float
+) -> float:
+    """타겟 bbox 픽셀 폭을 카메라 화각 기준 각도 반폭(rad)으로 환산.
+
+    Args:
+        bbox_width_px: 타겟 bbox 폭(픽셀). 음수는 0으로 취급.
+        image_width_px: 이미지 전체 폭(픽셀). 양수여야 함.
+        camera_fov_deg: 카메라 수평 화각(도).
+
+    Returns:
+        bbox가 차지하는 시야각의 절반(rad). 이미지 폭 초과 bbox는 화각 절반으로 클램프.
+
+    Raises:
+        ValueError: image_width_px가 양수가 아닐 때.
+    """
+    if image_width_px <= 0:
+        raise ValueError("image_width_px must be positive")
+    fraction = min(1.0, max(0.0, bbox_width_px / image_width_px))
+    return math.radians(fraction * camera_fov_deg / 2.0)
+
+
+def min_valid_range_in_span(
+    scan: LaserScan | None,
+    center_angle_rad: float,
+    half_span_rad: float,
+    min_window: int = 2,
+) -> float | None:
+    """360° LaserScan에서 각도 범위 내 유효 range의 최소값을 반환.
+
+    [center - half_span, center + half_span] 구간의 광선 중 유효한 것들의
+    최소값(가장 가까운 표면)을 고른다. 타겟 bbox 폭만큼 조회하면 사람 몸과
+    배경 광선이 섞여도 더 가까운 사람 쪽이 선택되고, 일부 광선이 무효
+    (다리 틈·IR 흡수 의류·유리)여도 나머지가 보완한다.
+
+    Args:
+        scan: 최신 LaserScan. 전방위(360°) 스캔을 가정하며 인덱스는 순환.
+        center_angle_rad: 조회 중심 각도(rad, LiDAR 프레임).
+        half_span_rad: 조회 반폭(rad). 0이어도 min_window만큼은 조회.
+        min_window: 반폭이 작아도 최소한 조회할 ±인덱스 수 (노이즈 완화).
+
+    Returns:
+        유효 range 최소값(m). 스캔이 없거나 유효 광선이 없으면 None.
+    """
+    if scan is None or scan.angle_increment <= 0.0:
+        return None
+    ray_count = len(scan.ranges)
+    if ray_count == 0:
+        return None
+
+    # 360° 스캔 경계 처리: 각도를 [angle_min, angle_min + 2π) 범위로 정규화
+    two_pi = 2.0 * math.pi
+    center = scan.angle_min + ((center_angle_rad - scan.angle_min) % two_pi)
+    center_index = int((center - scan.angle_min) / scan.angle_increment)
+
+    window = max(min_window, math.ceil(half_span_rad / scan.angle_increment))
+    best: float | None = None
+    for i in range(center_index - window, center_index + window + 1):
+        r = scan.ranges[i % ray_count]  # 전방위 스캔이므로 경계를 넘으면 순환
+        if scan.range_min < r < scan.range_max and (best is None or r < best):
+            best = r
+    return best
+
+
 class PID:
     """Simple PID controller with symmetric output clamping."""
 
@@ -126,6 +192,8 @@ class ControlNode(Node):
         self.declare_parameter("image_width", 640)  # camera frame_width와 일치
         self.declare_parameter("lidar_yaw_offset_deg", 0.0)  # 0°축 오프셋
         self.declare_parameter("lidar_mirrored", True)  # 각도 축 좌우 반전 (실측)
+        self.declare_parameter("bbox_span_scale", 0.8)  # bbox 폭 중 조회에 쓸 비율
+        self.declare_parameter("distance_grace_period_sec", 0.5)  # 드롭아웃 유예
         self.declare_parameter("target_timeout_sec", 1.0)  # 타겟 끊기면 정지
         self.declare_parameter("angular_kp", 0.8)
         self.declare_parameter("angular_ki", 0.0)
@@ -142,6 +210,10 @@ class ControlNode(Node):
             self.get_parameter("lidar_yaw_offset_deg").value
         )
         self.lidar_mirrored = bool(self.get_parameter("lidar_mirrored").value)
+        self.bbox_span_scale = float(self.get_parameter("bbox_span_scale").value)
+        self.distance_grace_period_sec = float(
+            self.get_parameter("distance_grace_period_sec").value
+        )
         self.image_width = int(self.get_parameter("image_width").value)
         self.target_timeout_sec = float(self.get_parameter("target_timeout_sec").value)
 
@@ -161,7 +233,10 @@ class ControlNode(Node):
         self.latest_scan: LaserScan | None = None
         self.detected = False
         self.center_x_normalized = 0.0
+        self.target_bbox_width_px = 0.0
         self.last_target_time = self.get_clock().now()
+        self.last_valid_distance: float | None = None
+        self.last_valid_distance_time = self.get_clock().now()
 
         self.create_subscription(
             Detection2DArray, "/target_person", self.target_callback, 10
@@ -191,6 +266,7 @@ class ControlNode(Node):
         try:
             center_x, _center_y = _get_bbox_center(msg.detections[0])
             self.center_x_normalized = normalize_center_x(center_x, self.image_width)
+            self.target_bbox_width_px = float(msg.detections[0].bbox.size_x)
         except (ValueError, AttributeError) as error:
             self.get_logger().error(f"타겟 메시지 해석 실패: {error}")
             self.detected = False
@@ -202,33 +278,6 @@ class ControlNode(Node):
     def scan_callback(self, msg: LaserScan) -> None:
         """Cache the newest LiDAR scan."""
         self.latest_scan = msg
-
-    def get_distance_at_angle(self, angle_rad: float) -> float | None:
-        """LiDAR scan에서 특정 각도 근방의 유효 거리값 평균을 반환."""
-        scan = self.latest_scan
-        if scan is None or scan.angle_increment <= 0.0:
-            return None
-
-        # 360° 스캔 경계 처리: 각도를 [angle_min, angle_min + 2π) 범위로 정규화
-        # (예: angle_min=-π인 스캔에서 -181°를 조회하면 +179° 쪽 광선을 쓴다)
-        two_pi = 2.0 * math.pi
-        angle_rad = scan.angle_min + ((angle_rad - scan.angle_min) % two_pi)
-
-        # 해당 각도에 가장 가까운 인덱스 계산
-        index = int((angle_rad - scan.angle_min) / scan.angle_increment)
-
-        # 주변 +-2개 인덱스 평균 (노이즈 완화)
-        window = 2
-        valid_ranges = []
-        for i in range(index - window, index + window + 1):
-            if 0 <= i < len(scan.ranges):
-                r = scan.ranges[i]
-                if scan.range_min < r < scan.range_max:
-                    valid_ranges.append(r)
-
-        if not valid_ranges:
-            return None
-        return sum(valid_ranges) / len(valid_ranges)
 
     def _target_is_stale(self) -> bool:
         """Return True if no target message arrived within the timeout window."""
@@ -260,7 +309,24 @@ class ControlNode(Node):
             self.lidar_mirrored,
         )
 
-        distance = self.get_distance_at_angle(angle_rad)
+        # 타겟 bbox가 차지하는 각도 폭에서 가장 가까운 유효 표면을 거리로 채택.
+        # bbox 가장자리의 배경 광선이 옆 물체를 잡지 않게 폭을 bbox_span_scale로 줄인다.
+        half_span_rad = bbox_half_span_rad(
+            self.target_bbox_width_px * self.bbox_span_scale,
+            self.image_width,
+            self.camera_fov_deg,
+        )
+        distance = min_valid_range_in_span(self.latest_scan, angle_rad, half_span_rad)
+
+        if distance is not None:
+            self.last_valid_distance = distance
+            self.last_valid_distance_time = now
+        elif self.last_valid_distance is not None:
+            # 순간 드롭아웃(다리 틈·IR 흡수 의류·유리)은 직전 유효 거리로 이어간다
+            held_sec = (now - self.last_valid_distance_time).nanoseconds / 1e9
+            if held_sec <= self.distance_grace_period_sec:
+                distance = self.last_valid_distance
+
         # 디버그 오버레이용으로 측정 거리를 공유. 측정 실패(/scan 없음·무효 range)도
         # NaN으로 발행해 "LiDAR 데이터 없음"을 오버레이가 구분 표시할 수 있게 한다.
         self.distance_pub.publish(

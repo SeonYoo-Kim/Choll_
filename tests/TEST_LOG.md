@@ -12,6 +12,33 @@
 
 ---
 
+## 2026-07-28 09:55 — ✅ 40 passed (+11 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/ -v` + `ruff check control_node.py follow_robot_launch.py test_control_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `53d8f01` 이후 작업 트리 (bbox 폭 조회창 + 드롭아웃 유예, 커밋 전)
+- **맥락**: 실기 영상(result_LiDAR_calibration.mp4) 분석 결과 — 타겟이 화면
+  우측일 때 조회 광선이 몸을 빗나가 배경(7.3m)을 재거나 NO LIDAR 발생.
+  원인: ±2인덱스(±1°) 초협소 조회창 + 미캘리브레이션 오프셋.
+  - `min_valid_range_in_span` 신규: bbox 각도 폭 범위의 유효 range **최소값**
+    (가장 가까운 표면=사람) 채택. 평균 방식 대체. 360° 순환 인덱스 지원.
+  - `bbox_half_span_rad` 신규: bbox 픽셀 폭 → 각도 반폭 환산 (`bbox_span_scale`
+    파라미터로 가장자리 배경 광선 배제, 기본 0.8).
+  - 드롭아웃 유예: 측정 실패 시 `distance_grace_period_sec`(기본 0.5s) 동안
+    직전 유효 거리 유지.
+  - 신규 테스트 11개: 반폭 환산(4) + 범위 조회(7: 최소값 선택, 부분 드롭아웃
+    생존, 전체 무효, 스캔 없음, 경계 순환, 최소 창 보존, 무효값 필터).
+- **주의**: 실기 검증 필요 — 우측 7.3m 오답과 NO LIDAR 빈도가 줄었는지 영상 재확인.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 40 passed in 0.04s ==============================
+```
+
+</details>
+
 ## 2026-07-28 09:21 — ✅ 29 passed (+3 신규), ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/ -v` + `ruff check control_node.py follow_robot_launch.py test_control_logic.py`
