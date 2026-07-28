@@ -1,5 +1,17 @@
-/** 도서관 구역 정보 (SLAM 지도 연동 전 데모용 — assets/map.png 평면도 기준 5개 구역) */
-export const ZONE_NAMES = ['문학', '인문', '아동', '과학', '예술'] as const;
+/**
+ * 도서관 구역 정보 (SLAM 지도 연동 전 데모용 — assets/map.png 평면도 기준 7개 구역 Z1~Z7)
+ * 구역 이름은 평면도의 인접 서가 KDC 분류를 따른다.
+ * (Z1|000·100|Z2|200·300|Z3|400·500|Z4 / Z5|600·700|Z6|800·900|Z7)
+ */
+export const ZONE_NAMES = [
+  '총류', // Z1 (하단 좌) — 000 총류
+  '철학·종교', // Z2 (하단 중좌) — 100 철학 · 200 종교
+  '사회·자연', // Z3 (하단 중우) — 300 사회과학 · 400 자연과학
+  '기술과학', // Z4 (하단 우) — 500 기술과학
+  '예술', // Z5 (상단 좌) — 600 예술
+  '언어·문학', // Z6 (상단 중) — 700 언어 · 800 문학
+  '역사', // Z7 (상단 우) — 900 역사
+] as const;
 
 /** 지도 이미지 위 각 구역의 클릭 영역 (% 단위, 이미지 좌상단 기준) */
 export interface ZoneRect {
@@ -10,11 +22,13 @@ export interface ZoneRect {
 }
 
 export const ZONE_RECTS: readonly ZoneRect[] = [
-  { left: 17.6, top: 5.9, width: 29.3, height: 38.0 }, // 1구역 (상단 좌)
-  { left: 49.8, top: 5.9, width: 29.6, height: 38.0 }, // 2구역 (상단 우)
-  { left: 14.8, top: 49.3, width: 21.3, height: 37.6 }, // 3구역 (하단 좌)
-  { left: 37.8, top: 49.3, width: 21.2, height: 37.6 }, // 4구역 (하단 중)
-  { left: 60.2, top: 49.3, width: 24.4, height: 37.6 }, // 5구역 (하단 우)
+  { left: 4.3, top: 52.0, width: 13.0, height: 44.2 }, // Z1 (하단 좌)
+  { left: 31.6, top: 52.0, width: 12.5, height: 44.2 }, // Z2 (하단 중좌)
+  { left: 58.6, top: 52.0, width: 10.7, height: 44.2 }, // Z3 (하단 중우)
+  { left: 83.7, top: 52.0, width: 11.4, height: 44.2 }, // Z4 (하단 우)
+  { left: 4.3, top: 3.9, width: 13.4, height: 44.1 }, // Z5 (상단 좌)
+  { left: 31.6, top: 3.9, width: 12.7, height: 44.1 }, // Z6 (상단 중)
+  { left: 58.6, top: 3.9, width: 36.6, height: 44.1 }, // Z7 (상단 우, 대형)
 ];
 
 /** 지도 패널 내 각 구역의 카트 정차 좌표 (% 단위, 클릭 영역의 중심) */
@@ -24,7 +38,7 @@ export const ZONE_POSITIONS: readonly { x: number; y: number }[] = ZONE_RECTS.ma
 }));
 
 /** 상/하단 구역을 잇는 중앙 통로의 y 좌표 (%) */
-export const CORRIDOR_Y = 47;
+export const CORRIDOR_Y = 50;
 
 /** 구역 인덱스(0-base) → 표시명: "3구역" */
 export function zoneLabel(zoneIndex: number): string {
