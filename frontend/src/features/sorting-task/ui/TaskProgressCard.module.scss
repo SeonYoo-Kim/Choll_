@@ -1,0 +1,67 @@
+@use '@/shared/styles/variables' as *;
+
+.card {
+  border: 1px solid $border-soft;
+  border-radius: $radius-card;
+  background: #fff;
+  padding: 20px;
+}
+
+.label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: $text-label;
+}
+
+.body {
+  margin-top: $spacing-md;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.donut {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  border-radius: 999px;
+}
+
+.donutInner {
+  display: grid;
+  place-items: center;
+  width: 90px;
+  height: 90px;
+  border-radius: 999px;
+  background: #fff;
+  text-align: center;
+
+  strong {
+    font-family: $font-display;
+    font-size: 30px;
+    font-weight: 400;
+  }
+}
+
+.stats {
+  font-size: 14px;
+
+  p {
+    margin: 0;
+
+    & + p {
+      margin-top: $spacing-sm;
+    }
+  }
+
+  strong {
+    font-size: 20px;
+  }
+
+  span {
+    margin-left: 4px;
+    color: #999184;
+  }
+}

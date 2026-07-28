@@ -1,0 +1,89 @@
+@use '@/shared/styles/variables' as *;
+
+.pageHeader {
+  margin-bottom: 0;
+}
+
+.overline {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $text-overline;
+}
+
+.pageTitle {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+}
+
+.pageDesc {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: $text-soft;
+}
+
+.filters {
+  margin-top: $spacing-lg;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.filterChip {
+  border: 1px solid #e9e2d6;
+  border-radius: 999px;
+  background: #fff;
+  padding: $spacing-sm 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #837a6d;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+
+  &:hover {
+    border-color: $primary;
+    color: #398c80;
+  }
+}
+
+.filterActive {
+  border-color: $text-main;
+  background: $text-main;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+
+  &:hover {
+    border-color: $text-main;
+    color: #fff;
+  }
+}
+
+.count {
+  margin: $spacing-md 0 0;
+  font-size: 12px;
+  color: #9a9185;
+}
+
+.board {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+
+  @media (min-width: $bp-sm) {
+    grid-template-columns: repeat(4, 1fr);
+    gap: $spacing-md;
+  }
+
+  @media (min-width: $bp-lg) {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  @media (min-width: 1280px) {
+    grid-template-columns: repeat(10, 1fr);
+  }
+}
