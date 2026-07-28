@@ -85,6 +85,7 @@ def generate_launch_description() -> LaunchDescription:
                 "camera_fov_deg": 58.0,
                 "image_width": 640,           # camera_node frame_width와 일치
                 "lidar_yaw_offset_deg": 0.0,  # 조립 후 캘리브레이션으로 확정
+                "lidar_mirrored": True,       # 실측: 좌우 반전 증상 확인 (2026-07-28)
                 "target_timeout_sec": 1.0,
                 "max_linear_vel": 0.5,
                 "max_angular_vel": 1.0,

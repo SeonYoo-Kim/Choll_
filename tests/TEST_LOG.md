@@ -12,6 +12,29 @@
 
 ---
 
+## 2026-07-28 09:21 — ✅ 29 passed (+3 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/ -v` + `ruff check control_node.py follow_robot_launch.py test_control_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `53d8f01` 기준 작업 트리 (lidar_mirrored 보정, 커밋 전)
+- **맥락**: 실기 증상 — 타겟이 화면 왼쪽이면 오른쪽 저편 물체의 거리가,
+  오른쪽이면 왼쪽 물체의 거리가 잡힘 (중앙은 정상) = LiDAR 각도 축 좌우 반전.
+  - `camera_bearing_to_lidar_angle`에 `mirrored` 인자 추가 (방위각 부호 반전,
+    장착 오프셋은 반전 후 적용). REP 103 기본 동작(mirrored=False)은 불변.
+  - control_node `lidar_mirrored` 파라미터(기본 True, 실측 반영) + launch 반영.
+  - 신규 테스트 3개: mirrored 중앙=0(대칭점 불변), 좌우 반전, 오프셋과의 결합 순서.
+- **주의**: 좌우 반전은 실기에서 방향이 맞는지 최종 확인 필요. LiDAR 장착이나
+  드라이버 reversion 설정을 바꾸면 lidar_mirrored 재검증.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 29 passed in 0.08s ==============================
+```
+
+</details>
+
 ## 2026-07-28 09:07 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/` + `ruff check debug_visualization_node.py`

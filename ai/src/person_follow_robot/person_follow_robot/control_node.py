@@ -64,6 +64,7 @@ def camera_bearing_to_lidar_angle(
     center_x_normalized: float,
     camera_fov_deg: float,
     lidar_yaw_offset_deg: float = 0.0,
+    mirrored: bool = False,
 ) -> float:
     """정규화 화면 x좌표(+는 오른쪽)를 LiDAR 프레임 방위각(rad, 반시계 +)으로 변환.
 
@@ -75,12 +76,17 @@ def camera_bearing_to_lidar_angle(
     Args:
         center_x_normalized: [-1, 1] 정규화 x. 0=화면 중앙, +1=오른쪽 끝.
         camera_fov_deg: 카메라 수평 화각(도).
-        lidar_yaw_offset_deg: LiDAR 0° 축의 장착 오프셋(도, 반시계 +).
+        lidar_yaw_offset_deg: LiDAR 0° 축의 장착 오프셋(도, LiDAR 각도 축 기준 +).
+        mirrored: LiDAR가 각도를 REP 103과 반대 방향(시계 +)으로 보고하면 True.
+            뒤집어 장착했거나 드라이버 reversion 설정에 따라 발생하며, 증상은
+            "화면 왼쪽의 타겟인데 오른쪽 물체의 거리가 잡힘"의 좌우 반전.
 
     Returns:
         LiDAR 프레임 기준 방위각(rad).
     """
     bearing_deg = -center_x_normalized * (camera_fov_deg / 2.0)
+    if mirrored:
+        bearing_deg = -bearing_deg
     return math.radians(bearing_deg - lidar_yaw_offset_deg)
 
 
@@ -119,6 +125,7 @@ class ControlNode(Node):
         self.declare_parameter("camera_fov_deg", 58.0)      # 수평 화각 (실측 58°)
         self.declare_parameter("image_width", 640)  # camera frame_width와 일치
         self.declare_parameter("lidar_yaw_offset_deg", 0.0)  # 0°축 오프셋
+        self.declare_parameter("lidar_mirrored", True)  # 각도 축 좌우 반전 (실측)
         self.declare_parameter("target_timeout_sec", 1.0)  # 타겟 끊기면 정지
         self.declare_parameter("angular_kp", 0.8)
         self.declare_parameter("angular_ki", 0.0)
@@ -134,6 +141,7 @@ class ControlNode(Node):
         self.lidar_yaw_offset_deg = float(
             self.get_parameter("lidar_yaw_offset_deg").value
         )
+        self.lidar_mirrored = bool(self.get_parameter("lidar_mirrored").value)
         self.image_width = int(self.get_parameter("image_width").value)
         self.target_timeout_sec = float(self.get_parameter("target_timeout_sec").value)
 
@@ -246,7 +254,10 @@ class ControlNode(Node):
 
         # center_x_normalized(-1~1) -> LiDAR 프레임 방위각(rad, 반시계 +)으로 변환
         angle_rad = camera_bearing_to_lidar_angle(
-            self.center_x_normalized, self.camera_fov_deg, self.lidar_yaw_offset_deg
+            self.center_x_normalized,
+            self.camera_fov_deg,
+            self.lidar_yaw_offset_deg,
+            self.lidar_mirrored,
         )
 
         distance = self.get_distance_at_angle(angle_rad)

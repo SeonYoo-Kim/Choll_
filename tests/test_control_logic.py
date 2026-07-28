@@ -54,6 +54,29 @@ class TestCameraBearingToLidarAngle:
         angle = camera_bearing_to_lidar_angle(0.0, 58.0, lidar_yaw_offset_deg=90.0)
         assert angle == pytest.approx(math.radians(-90.0))
 
+    def test_mirrored_center_is_still_zero(self):
+        # 중앙은 거울 반전의 대칭점이라 mirrored 여부와 무관하게 0이어야 한다.
+        assert camera_bearing_to_lidar_angle(0.0, 58.0, mirrored=True) == (
+            pytest.approx(0.0)
+        )
+
+    def test_mirrored_flips_left_right(self):
+        # 각도 축이 시계 +인 LiDAR에서는 화면 오른쪽 타겟이 +각도로 잡힌다.
+        expected = math.radians(29.0)
+        assert camera_bearing_to_lidar_angle(1.0, 58.0, mirrored=True) == (
+            pytest.approx(expected)
+        )
+        assert camera_bearing_to_lidar_angle(-1.0, 58.0, mirrored=True) == (
+            pytest.approx(-expected)
+        )
+
+    def test_mirror_applies_before_mount_offset(self):
+        # 반전은 방위각에만 적용되고, 장착 오프셋은 LiDAR 각도 축 기준 그대로 뺀다.
+        angle = camera_bearing_to_lidar_angle(
+            1.0, 58.0, lidar_yaw_offset_deg=10.0, mirrored=True
+        )
+        assert angle == pytest.approx(math.radians(29.0 - 10.0))
+
 
 class TestPidReset:
     def test_reset_clears_integral_and_derivative_state(self):
