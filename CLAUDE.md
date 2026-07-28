@@ -16,7 +16,8 @@ Face Recognition이 아닌 **Person Re-Identification(Re-ID)** 으로 동일 인
 | [docs/](docs/) | 프로젝트 헌장·아키텍처·AI 명세·개발 가이드 | [docs/CLAUDE.md](docs/CLAUDE.md) |
 | [ai/src/person_follow_robot/](ai/src/person_follow_robot/) | ROS2 패키지 (빌드/실행 단위) | [패키지 CLAUDE.md](ai/src/person_follow_robot/CLAUDE.md) |
 | `ai/.../person_follow_robot/` | ROS2 노드 소스 (7개 노드) | [노드 CLAUDE.md](ai/src/person_follow_robot/person_follow_robot/CLAUDE.md) |
-| [tests/](tests/) | 프레임워크 독립 로직 단위 테스트 | [tests/CLAUDE.md](tests/CLAUDE.md) |
+| [ai/test/](ai/test/) | AI: 프레임워크 독립 로직 단위 테스트 | [ai/test/CLAUDE.md](ai/test/CLAUDE.md) |
+| [tests/](tests/) | 파트 공통 테스트 규칙·공용 테스트 로그 | [tests/CLAUDE.md](tests/CLAUDE.md) |
 | [frontend/](frontend/) | FE: 사서용 카트 관리 웹 (React 18+TS+Vite) | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
 | [backend/](backend/) | BE: 허브 서버 (Java 21+Spring Boot, MySQL, MQTT) | [backend/CLAUDE.md](backend/CLAUDE.md) |
 | [embedded/](embedded/) | EM: 카트 제어 (STM32·ROS2·SLAM·RFID·MQTT) | [embedded/CLAUDE.md](embedded/CLAUDE.md) |
@@ -56,7 +57,7 @@ cd ai && colcon build --symlink-install && source install/setup.bash
 ros2 launch person_follow_robot follow_robot_launch.py
 
 # 프레임워크 독립 로직 테스트 (ROS 설치 불필요)
-pytest tests/
+pytest ai/test/
 
 # 린트/포맷 (pyproject.toml 설정)
 ruff check . && ruff format --check .
@@ -71,7 +72,7 @@ bash scripts/gc.sh          # 또는 Windows: pwsh scripts/gc.ps1
 2. 노드를 수정하면 **토픽 계약**(이름·타입)이 파이프라인의 이웃 노드와 일치하는지 확인한다. (알려진 불일치는 노드 CLAUDE.md의 "Known Gaps" 참조.)
 3. 새 파라미터는 `declare_parameter`로 선언하고 launch 파일과 문서에 반영한다.
 4. 임시 산출물(빌드, 결과 영상, 캐시)은 커밋하지 않는다. → [docs/MAINTENANCE.md](docs/MAINTENANCE.md)의 가비지 컬렉션 정책.
-5. 변경 후 `ruff check`와 `pytest tests/`를 돌리고, **결과(통과/실패 모두)를 [tests/TEST_LOG.md](tests/TEST_LOG.md)에 기록한다.**
+5. 변경 후 `ruff check`와 `pytest ai/test/`를 돌리고, **결과(통과/실패 모두)를 [ai/test/TEST_LOG.md](ai/test/TEST_LOG.md)에 기록한다.**
    "테스트 통과"라는 주장은 이 로그의 원본 출력으로 사람이 검증할 수 있어야 한다. 형식은 TEST_LOG.md 상단 규칙 참조.
 6. **커밋 메시지는 `[type] subject` 형식** (`feat`/`fix`/`refactor`/`style`/`docs`/`test`/`chore`, 50자 이하·명사형·마침표 없이).
    브랜치 전략·MR/이슈 템플릿 포함 전체 규칙: [docs/GIT_CONVENTION.md](docs/GIT_CONVENTION.md)

@@ -62,8 +62,8 @@ ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: 1}"  # 확인한
 cd ai && colcon test --packages-select person_follow_robot
 colcon test-result --verbose
 
-# 프레임워크 독립 로직 테스트는 저장소 루트의 tests/ 참조 (ROS 설치 불필요)
-pytest tests/
+# 프레임워크 독립 로직 테스트는 ai/test/ 참조 (ROS 설치 불필요, 저장소 루트에서 실행)
+pytest ai/test/
 ```
 
 > `setup.py`의 `find_packages(exclude=["test"])`가 `test/`를 패키지에서 제외합니다 — 테스트는 이 디렉토리 안에 두세요.
