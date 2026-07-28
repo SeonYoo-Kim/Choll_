@@ -68,7 +68,8 @@
     ↓
     /cmd_vel
     ↓
-    /wheel_speed_cmd   (Int32MultiArray [left_rpm, right_rpm] → STM32, micro-ROS)
+    /wheel_speed_cmd   (Int32MultiArray [제어종류, left_rpm, right_rpm] → STM32, micro-ROS.
+                        제어종류: 0=모터, 1=LED. 규격: docs/JETSON_TO_STM.md)
 
     /target_distance   (Float32, control_node → debug_visualization_node:
                         LiDAR로 측정한 타겟 거리[m], 디버그 오버레이 표시용.

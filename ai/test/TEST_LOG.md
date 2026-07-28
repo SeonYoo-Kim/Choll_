@@ -13,6 +13,30 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-28 15:35 — ✅ 62 passed (+3 신규), ruff 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check motor_node.py test_motor_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `d915f86` 이후 작업 트리 (/wheel_speed_cmd 3원소 계약 반영, 커밋 전)
+- **맥락**: EM이 JETSON_TO_STM.md 수신 규격을 `[제어종류, 좌 RPM, 우 RPM]`
+  (0=모터, 1=LED)로 변경 → motor_node가 여전히 2원소 `[left, right]`를 발행해
+  계약 불일치 상태였음.
+  - `wheel_command_data()` 신규: 페이로드 조립을 순수 함수로 분리, 항상
+    `[CMD_TYPE_MOTOR(0), left, right]` 발행. LED(1)는 예약 — motor_node 미사용.
+  - 노드 CLAUDE.md 토픽 표·SYSTEM_ARCHITECTURE.md 동시 갱신 (계약 변경 규칙).
+  - 신규 테스트 3개: 계약 레이아웃 일치, 정지 명령 `[0,0,0]`, int 강제.
+- **주의**: STM32 수신은 micro-ROS 연결 후 실기에서 확인 필요
+  (Int32MultiArray 구독자 메모리 사전 할당 필수 — EM 전달 완료).
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 62 passed in 0.12s ==============================
+```
+
+</details>
+
 ## 2026-07-28 11:32 — ✅ 59 passed (+19 신규), ruff 0건 (Claude)
 
 - **명령**: `pytest ai/test/ -v` + `ruff check search_behavior.py test_search_logic.py`

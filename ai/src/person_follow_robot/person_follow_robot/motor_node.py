@@ -2,8 +2,9 @@
 
 - /cmd_vel (geometry_msgs/Twist, control_node 발행) 구독
 - 차동구동 역기구학: (선속도 v, 각속도 ω) → 좌/우 바퀴 목표 RPM
-- /wheel_speed_cmd (std_msgs/Int32MultiArray, data=[left_rpm, right_rpm]) 발행
+- /wheel_speed_cmd (std_msgs/Int32MultiArray, data=[제어종류, left_rpm, right_rpm]) 발행
   → micro-ROS agent를 거쳐 STM32가 구독 (규격: docs/JETSON_TO_STM.md, 10~12Hz)
+  data[0] 제어종류: 0=모터 제어 (1=LED 제어는 예약 — 이 노드는 발행하지 않음)
 
 부호 규약 (ROS REP 103, 오른손 좌표계 — 프로젝트 공통):
 - +linear.x = 전진, +angular.z = 반시계(좌회전).
@@ -21,6 +22,25 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Int32MultiArray
+
+# /wheel_speed_cmd data[0] 제어종류 코드 (docs/JETSON_TO_STM.md)
+CMD_TYPE_MOTOR = 0
+CMD_TYPE_LED = 1  # 예약 — motor_node는 사용하지 않음
+
+
+def wheel_command_data(left_rpm: int, right_rpm: int) -> list[int]:
+    """모터 제어용 /wheel_speed_cmd 페이로드 [제어종류, 좌 RPM, 우 RPM]을 생성.
+
+    STM32 수신 규격(docs/JETSON_TO_STM.md)의 데이터 매핑과 1:1로 대응한다.
+
+    Args:
+        left_rpm: 좌측 바퀴 목표 RPM (음수=역회전).
+        right_rpm: 우측 바퀴 목표 RPM (음수=역회전).
+
+    Returns:
+        [CMD_TYPE_MOTOR, left_rpm, right_rpm] 정수 리스트.
+    """
+    return [CMD_TYPE_MOTOR, int(left_rpm), int(right_rpm)]
 
 
 def cmd_vel_to_wheel_rpms(
@@ -117,7 +137,7 @@ class MotorNode(Node):
         return elapsed > self.cmd_timeout_sec
 
     def publish_wheel_cmd(self) -> None:
-        """Publish [left_rpm, right_rpm] at the fixed rate (0 when stale)."""
+        """Publish [제어종류, left_rpm, right_rpm] at the fixed rate (0 when stale)."""
         left_rpm, right_rpm = 0, 0
         if not self._cmd_is_stale():
             try:
@@ -135,7 +155,7 @@ class MotorNode(Node):
                 )
 
         msg = Int32MultiArray()
-        msg.data = [left_rpm, right_rpm]
+        msg.data = wheel_command_data(left_rpm, right_rpm)
         self.wheel_pub.publish(msg)
 
 
