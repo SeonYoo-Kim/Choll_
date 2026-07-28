@@ -1,8 +1,19 @@
-import { getCartsMock } from '@/shared/api/generated/carts/carts.msw';
+import { HttpResponse, http } from 'msw';
+
+import type { CallCartBody } from '@/features/cart-map/api/moveCommands';
+import { getGetCartMockHandler } from '@/shared/api/generated/carts/carts.msw';
 import type { Slot, SlotBook } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
+import { getGetMapMockHandler } from '@/shared/api/generated/maps/maps.msw';
 import { getListSlotsMockHandler } from '@/shared/api/generated/slots/slots.msw';
 import { getGetTaskProgressMockHandler } from '@/shared/api/generated/tasks/tasks.msw';
+import {
+  cartDetailFixture,
+  cartWsHandler,
+  mapInfoFixture,
+  startCartMove,
+  stopCartMove,
+} from '@/shared/api/mocks/cartSimulator';
 
 /** 빈 슬롯 픽스처 생성 (slot.id는 slotNumber + 100으로 고정) */
 const emptySlot = (slotNumber: number): Slot => ({
@@ -78,5 +89,19 @@ export const handlers = [
     remainingBooks: 6,
     currentZoneSlotNumbers: [1, 2],
   }),
-  ...getCartsMock(),
+  // 카트 이동은 시뮬레이터 연동 — call 접수 시 WS로 위치/도착 이벤트가 브로드캐스트된다
+  getGetCartMockHandler(({ params }) => cartDetailFixture(Number(params.cartId))),
+  // 이동 명령은 BE Swagger에 아직 없어 orval 생성물이 없다 — 노션 명세 기준 수동 모킹.
+  // BE 구현 후 openapi 재생성 시 생성 MockHandler로 교체할 것.
+  http.post('*/api/carts/:cartId/commands/call', async ({ request }) => {
+    const body = (await request.json()) as CallCartBody;
+    startCartMove(body.zoneId);
+    return new HttpResponse(null, { status: 202 });
+  }),
+  http.post('*/api/carts/:cartId/commands/stop', () => {
+    stopCartMove();
+    return new HttpResponse(null, { status: 202 });
+  }),
+  getGetMapMockHandler(mapInfoFixture),
+  cartWsHandler,
 ];

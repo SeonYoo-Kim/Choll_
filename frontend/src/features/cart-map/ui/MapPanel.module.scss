@@ -32,48 +32,33 @@
 
 .canvas {
   position: relative;
-  height: 330px;
   overflow: hidden;
+  aspect-ratio: 3 / 2;
   border: 1px solid $border-panel;
   border-radius: 22px;
   background: #fffdf8;
-  padding: 20px;
 }
 
-.corridor {
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
+.mapImage {
+  display: block;
   width: 100%;
   height: 100%;
-  color: #d9e6d7;
-}
-
-.zoneGrid {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  column-gap: 24px;
-  row-gap: 76px;
-  padding-top: 44px;
+  object-fit: cover;
 }
 
 .zone {
-  position: relative;
-  height: 68px;
-  border: 1px solid #eee7db;
-  border-radius: 12px;
-  background: #fdfbf5;
-  color: #a39783;
-  text-align: center;
-  font-size: 11px;
-  font-weight: 700;
+  position: absolute;
+  border: 2px dashed transparent;
+  border-radius: 16px;
+  background: transparent;
   transition:
-    transform 0.15s,
+    border-color 0.15s,
+    background 0.15s,
     box-shadow 0.15s;
 
   &:hover {
-    transform: translateY(-2px);
+    border-color: rgba(105, 194, 182, 0.7);
+    background: rgba(105, 194, 182, 0.08);
   }
 
   &:disabled {
@@ -81,17 +66,10 @@
   }
 }
 
-.zoneNo {
-  display: block;
-  font-size: 10px;
-  font-weight: 400;
-}
-
 .zoneActive {
-  border-color: $primary;
-  background: #e8f7f3;
-  color: #397b72;
-  box-shadow: 0 0 0 4px rgba(105, 194, 182, 0.12);
+  border: 2px solid $primary;
+  background: rgba(105, 194, 182, 0.1);
+  box-shadow: 0 0 0 4px rgba(105, 194, 182, 0.15);
 }
 
 .cart {

@@ -1,4 +1,5 @@
 import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
+import { useCartMapEvents } from '@/features/cart-map/model/useCartMapEvents';
 import { ZONE_NAMES, zoneLabel } from '@/features/cart-map/model/zones';
 import { ArrivalModal } from '@/features/cart-map/ui/ArrivalModal';
 import { MapPanel } from '@/features/cart-map/ui/MapPanel';
@@ -9,6 +10,7 @@ import styles from './MapPage.module.scss';
 
 /** 지도 — SLAM 지도 위 카트 위치 확인과 목적지 지정. */
 export function MapPage() {
+  useCartMapEvents(DEMO_CART_ID);
   const { cartZone, isMoving } = useCartMapStore();
   const { data: slots } = useListSlots(DEMO_CART_ID);
 
@@ -31,7 +33,7 @@ export function MapPage() {
           <div className={styles.statCard}>
             <p>현재 위치</p>
             <strong className={styles.statPrimary}>
-              {zoneLabel(cartZone)} · {ZONE_NAMES[cartZone]}
+              {cartZone === null ? '이동 통로' : `${zoneLabel(cartZone)} · ${ZONE_NAMES[cartZone]}`}
             </strong>
           </div>
           <div className={styles.statCard}>
