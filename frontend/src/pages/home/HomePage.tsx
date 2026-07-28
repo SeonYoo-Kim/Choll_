@@ -18,8 +18,12 @@ export function HomePage() {
   const { data: slots } = useListSlots(DEMO_CART_ID);
 
   const following = runState === 'FOLLOWING';
-  const currentArea = zoneLabel(cartZone);
-  const areaBookCount = slots?.filter((slot) => slot.book?.zoneName === currentArea).length ?? 0;
+  // 이동 중(구역 밖)이면 null — 구역 표시 대신 이동 중 문구를 쓴다
+  const currentArea = cartZone === null ? null : zoneLabel(cartZone);
+  const areaBookCount =
+    currentArea === null
+      ? 0
+      : (slots?.filter((slot) => slot.book?.zoneName === currentArea).length ?? 0);
 
   return (
     <>
@@ -41,9 +45,13 @@ export function HomePage() {
             <p className={styles.heroLabel}>지금 가까운 곳</p>
             <div className={styles.heroTitleRow}>
               <h2 className={styles.heroTitle}>
-                {currentArea} · {ZONE_NAMES[cartZone]} 서가
+                {cartZone === null
+                  ? '목적지로 이동 중'
+                  : `${currentArea} · ${ZONE_NAMES[cartZone]} 서가`}
               </h2>
-              {!isMoving && <span className={styles.arrivedBadge}>도착!</span>}
+              {!isMoving && cartZone !== null && (
+                <span className={styles.arrivedBadge}>도착!</span>
+              )}
             </div>
             <p className={styles.heroDesc}>
               이 구역에 꽂아야 할 책이 <strong>{areaBookCount}권</strong> 있어요.
