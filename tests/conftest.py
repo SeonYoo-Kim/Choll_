@@ -31,15 +31,23 @@ def _stub(name: str, **attrs: object) -> types.ModuleType:
 
 
 # rclpy + rclpy.node.Node (Node used only as a base class we never instantiate here).
-_stub("rclpy", init=lambda *a, **k: None, spin=lambda *a, **k: None, shutdown=lambda *a, **k: None)
+_stub(
+    "rclpy",
+    init=lambda *a, **k: None,
+    spin=lambda *a, **k: None,
+    shutdown=lambda *a, **k: None,
+)
 _stub("rclpy.node", Node=type("Node", (), {}))
+_stub("rclpy.qos", qos_profile_sensor_data=object())
 
 # ROS message packages referenced at import time by the node modules.
 for pkg in ("std_msgs", "sensor_msgs", "geometry_msgs", "vision_msgs"):
     _stub(pkg)
     _stub(
         f"{pkg}.msg",
+        Float32=type("Float32", (), {}),
         Float32MultiArray=type("Float32MultiArray", (), {}),
+        Int32MultiArray=type("Int32MultiArray", (), {}),
         LaserScan=type("LaserScan", (), {}),
         Twist=type("Twist", (), {}),
         Image=type("Image", (), {}),
