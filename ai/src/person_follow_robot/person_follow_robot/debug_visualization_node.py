@@ -219,13 +219,16 @@ class DebugVisualizationNode(Node):
         )
         # DIST "--"는 /target_distance 미수신(control_node 미동작/타겟 미인식) 상태
         distance_text = self._current_distance_text() or "--"
+        # 하단 배치 + 축소 폰트: 상단의 바운딩박스 라벨(거리·ID)을 가리지 않게 한다
         self._draw_banner(
             frame,
             f"Re-ID Debug | Tracks: {track_count} | {target_text}"
             f" | DIST: {distance_text}",
             20,
-            42,
+            frame.shape[0] - 16,
             BLACK,
+            scale=0.55,
+            thickness=1,
         )
 
     def _draw_recovery_overlay(self, frame: np.ndarray) -> None:
@@ -326,10 +329,10 @@ class DebugVisualizationNode(Node):
         x: int,
         y: int,
         color: tuple[int, int, int],
+        scale: float = 1.1,
+        thickness: int = 3,
     ) -> None:
         font = cv2.FONT_HERSHEY_SIMPLEX
-        scale = 1.1
-        thickness = 3
         (width, height), baseline = cv2.getTextSize(text, font, scale, thickness)
         cv2.rectangle(
             frame,

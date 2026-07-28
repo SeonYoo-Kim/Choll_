@@ -12,6 +12,25 @@
 
 ---
 
+## 2026-07-28 09:07 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest tests/` + `ruff check debug_visualization_node.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `53d8f01` 기준 작업 트리 (상태 배너 하단 이동·축소, 커밋 전)
+- **맥락**: 상단 상태 배너(Re-ID Debug | Tracks | TARGET | DIST)가 바운딩박스
+  거리 라벨을 가리는 문제. `_draw_banner`에 scale/thickness 파라미터 추가
+  (기본값은 RECOVERED 오버레이용 1.1/3 유지), 상태 배너만 0.55/1로 축소해
+  프레임 하단(왼쪽)으로 이동. cv2 그리기 로직 → 기존 26개 회귀만 확인.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 26 passed in 0.04s ==============================
+```
+
+</details>
+
 ## 2026-07-28 08:53 — ✅ 26 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest tests/` + `ruff check debug_visualization_node.py`
