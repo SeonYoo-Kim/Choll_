@@ -1,21 +1,22 @@
 import { ws } from 'msw';
 
-import { toSlamPosition } from '@/features/cart-map/model/mapTransform';
+import { percentToDisplay } from '@/features/cart-map/model/mapTransform';
 import { CORRIDOR_Y, ZONE_POSITIONS, zoneIndexOf } from '@/features/cart-map/model/zones';
 import { CartDetailStatus } from '@/shared/api/generated/model';
 
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
 import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
-import type { CartWsEvent } from '@/shared/api/ws/cartSocket';
+import type { CartWsEvent, NavigationStatus } from '@/shared/api/ws/cartSocket';
 
 /**
  * 개발용 카트 이동 시뮬레이터 (가짜 BE).
- * REST callCart 모킹 핸들러가 startCartMove를 호출하면, 실제 BE처럼
- * WS로 CART_POSITION_UPDATE(경유지)와 CART_ARRIVED(도착)를 브로드캐스트한다.
+ * REST NAV-01(이동 시작) 모킹 핸들러가 startCartMove를 호출하면, 실제 BE처럼
+ * WS로 CART_POSITION_UPDATE(WS-FE-01)·CURRENT_ZONE_UPDATED(WS-FE-05)·
+ * NAVIGATION_STATUS_UPDATED(WS-FE-06)를 브로드캐스트한다.
  * 구역 좌표는 FE 지도 픽스처(zones.ts)를 재사용해 화면과 항상 일치시킨다.
  */
 
-/** 지도 메타 픽스처 — 시뮬레이터가 %↔SLAM(m) 변환에 쓰는 기준값 */
+/** 지도 메타 픽스처 — 시뮬레이터가 %↔표시 좌표(px) 변환에 쓰는 기준값 */
 export const mapInfoFixture: MapInfo = {
   id: 1,
   name: '우리 도서관 1층',
@@ -38,59 +39,83 @@ const STEP_MS = 340;
 
 let currentZoneIndex = 2;
 let isMoving = false;
+let navigationCounter = 0;
 let moveTimers: ReturnType<typeof setTimeout>[] = [];
 
 function broadcast(event: CartWsEvent): void {
   cartWsLink.broadcast(JSON.stringify(event));
 }
 
-function broadcastPosition(percent: MapPercent, zoneId: number | null): void {
+function broadcastPosition(percent: MapPercent): void {
+  const { x, y } = percentToDisplay(percent, mapInfoFixture);
   broadcast({
     type: 'CART_POSITION_UPDATE',
-    payload: { position: toSlamPosition(percent, mapInfoFixture), zoneId },
+    payload: { mapId: mapInfoFixture.id, x, y, valid: true },
   });
 }
 
-/** 목적지 구역으로 이동 시작 — 구역 → 통로 → 목적지 순서로 경유지를 브로드캐스트 */
+function broadcastZone(previousZoneId: number | null, currentZoneId: number | null): void {
+  broadcast({ type: 'CURRENT_ZONE_UPDATED', payload: { previousZoneId, currentZoneId } });
+}
+
+function broadcastNavigation(status: NavigationStatus, destinationZoneId?: number): void {
+  broadcast({
+    type: 'NAVIGATION_STATUS_UPDATED',
+    payload: { navigationId: navigationCounter, status, destinationZoneId },
+  });
+}
+
+/** NAV-01 목적지 이동 시작 — 구역 이탈 → 통로 경유 → 목적지 진입 → 도착 순서로 브로드캐스트 */
 export function startCartMove(zoneId: number): void {
   const destinationIndex = zoneIndexOf(zoneId);
   if (destinationIndex === null || isMoving || destinationIndex === currentZoneIndex) {
     return;
   }
   isMoving = true;
+  navigationCounter += 1;
+  const departureZoneId = currentZoneIndex + 1;
   const start = ZONE_POSITIONS[currentZoneIndex];
   const destination = ZONE_POSITIONS[destinationIndex];
-  const waypoints: { percent: MapPercent; zoneId: number | null }[] = [
-    { percent: { x: start.x, y: CORRIDOR_Y }, zoneId: null },
-    { percent: { x: destination.x, y: CORRIDOR_Y }, zoneId: null },
-    { percent: destination, zoneId },
+
+  broadcastNavigation('STARTED', zoneId);
+  const waypoints: MapPercent[] = [
+    { x: start.x, y: CORRIDOR_Y },
+    { x: destination.x, y: CORRIDOR_Y },
+    destination,
   ];
-  waypoints.forEach((waypoint, i) => {
-    moveTimers.push(
-      setTimeout(() => broadcastPosition(waypoint.percent, waypoint.zoneId), STEP_MS * i + 30),
-    );
-  });
   moveTimers.push(
+    setTimeout(() => {
+      broadcastZone(departureZoneId, null); // 출발 구역 이탈 → 통로
+      broadcastPosition(waypoints[0]);
+    }, 30),
+    setTimeout(() => broadcastPosition(waypoints[1]), STEP_MS + 30),
+    setTimeout(() => {
+      broadcastZone(null, zoneId); // 목적지 구역 진입
+      broadcastPosition(waypoints[2]);
+    }, STEP_MS * 2 + 30),
     setTimeout(
       () => {
         currentZoneIndex = destinationIndex;
         isMoving = false;
         moveTimers = [];
-        broadcast({ type: 'CART_ARRIVED', payload: { zoneId, zoneName: `${zoneId}구역` } });
+        broadcastNavigation('ARRIVED', zoneId);
       },
       STEP_MS * 3 + 60,
     ),
   );
 }
 
-/** 이동 취소(정지) — 예약된 경유지 브로드캐스트를 모두 취소한다 */
+/** NAV-02 목적지 이동 취소 — 예약된 브로드캐스트를 모두 취소하고 CANCELLED를 알린다 */
 export function stopCartMove(): void {
   moveTimers.forEach(clearTimeout);
   moveTimers = [];
-  isMoving = false;
+  if (isMoving) {
+    isMoving = false;
+    broadcastNavigation('CANCELLED');
+  }
 }
 
-/** 시뮬레이터 상태를 반영한 카트 상세 픽스처 (getCart 모킹 응답) */
+/** 시뮬레이터 상태를 반영한 카트 상세 픽스처 (CART-01 getCart 모킹 응답) */
 export function cartDetailFixture(cartId: number): CartDetail {
   return {
     id: cartId,
@@ -100,7 +125,7 @@ export function cartDetailFixture(cartId: number): CartDetail {
     mapId: mapInfoFixture.id,
     currentZoneId: isMoving ? null : currentZoneIndex + 1,
     currentZoneName: isMoving ? null : `${currentZoneIndex + 1}구역`,
-    position: toSlamPosition(ZONE_POSITIONS[currentZoneIndex], mapInfoFixture),
+    position: percentToDisplay(ZONE_POSITIONS[currentZoneIndex], mapInfoFixture),
     lastSeenAt: new Date().toISOString(),
   };
 }

@@ -1,4 +1,4 @@
-import { useCallCart } from '../api/moveCommands';
+import { useStartNavigation } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
 import { ZONE_NAMES, ZONE_RECTS, zoneIdOf, zoneLabel } from '../model/zones';
 
@@ -13,7 +13,7 @@ export function MapPanel() {
   const { cartZone, cartPosition, isMoving, startMove } = useCartMapStore();
   const notify = useToastStore((state) => state.show);
 
-  const { mutate: callCart, isPending } = useCallCart({
+  const { mutate: startNavigation, isPending } = useStartNavigation({
     mutation: {
       onSuccess: (_, { data }) => {
         startMove();
@@ -30,7 +30,7 @@ export function MapPanel() {
       notify(`${zoneLabel(zoneIndex)}에 이미 카트가 있어요`);
       return;
     }
-    callCart({ cartId: DEMO_CART_ID, data: { zoneId: zoneIdOf(zoneIndex) } });
+    startNavigation({ cartId: DEMO_CART_ID, data: { zoneId: zoneIdOf(zoneIndex) } });
   };
 
   return (

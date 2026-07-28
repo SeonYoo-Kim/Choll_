@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw';
 
-import type { CallCartBody } from '@/features/cart-map/api/moveCommands';
+import type { StartNavigationBody } from '@/features/cart-map/api/moveCommands';
 import { getGetCartMockHandler } from '@/shared/api/generated/carts/carts.msw';
 import type { Slot, SlotBook } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
@@ -91,14 +91,14 @@ export const handlers = [
   }),
   // 카트 이동은 시뮬레이터 연동 — call 접수 시 WS로 위치/도착 이벤트가 브로드캐스트된다
   getGetCartMockHandler(({ params }) => cartDetailFixture(Number(params.cartId))),
-  // 이동 명령은 BE Swagger에 아직 없어 orval 생성물이 없다 — 노션 명세 기준 수동 모킹.
+  // 이동 명령(NAV-01·NAV-02)은 BE Swagger에 아직 없어 orval 생성물이 없다 — 노션 명세 기준 수동 모킹.
   // BE 구현 후 openapi 재생성 시 생성 MockHandler로 교체할 것.
-  http.post('*/api/carts/:cartId/commands/call', async ({ request }) => {
-    const body = (await request.json()) as CallCartBody;
+  http.post('*/api/carts/:cartId/navigation', async ({ request }) => {
+    const body = (await request.json()) as StartNavigationBody;
     startCartMove(body.zoneId);
     return new HttpResponse(null, { status: 202 });
   }),
-  http.post('*/api/carts/:cartId/commands/stop', () => {
+  http.delete('*/api/carts/:cartId/navigation', () => {
     stopCartMove();
     return new HttpResponse(null, { status: 202 });
   }),

@@ -3,8 +3,8 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useCartMapStore } from './cartMapStore';
-import { toMapPercent } from './mapTransform';
-import { ZONE_POSITIONS, zoneIndexOf, zoneLabel } from './zones';
+import { displayToPercent } from './mapTransform';
+import { zoneLabel } from './zones';
 
 import { getGetCartQueryKey, useGetCart } from '@/shared/api/generated/carts/carts';
 import { useGetMap } from '@/shared/api/generated/maps/maps';
@@ -15,14 +15,15 @@ import { useToastStore } from '@/shared/ui/toast/toastStore';
 
 import type { MapInfo } from '@/shared/api/generated/model';
 import type {
-  CartArrivedPayload,
   CartPositionUpdatePayload,
+  CurrentZoneUpdatedPayload,
+  NavigationStatusUpdatedPayload,
 } from '@/shared/api/ws/cartSocket';
 
 /**
  * 지도 화면의 카트 상태 동기화 훅.
  * - 진입 시 REST(getCart)로 초기 위치·구역·이동 상태를 복구하고
- * - CartSocket으로 CART_POSITION_UPDATE / CART_ARRIVED를 구독해 스토어를 갱신한다.
+ * - CartSocket으로 위치(WS-FE-01)·구역(WS-FE-05)·이동 상태(WS-FE-06)를 구독해 스토어를 갱신한다.
  * - WS 재연결 시 관련 쿼리를 invalidate해 REST 재조회로 상태를 복구한다(BE-WS-03).
  */
 export function useCartMapEvents(cartId: number): void {
@@ -46,7 +47,7 @@ export function useCartMapEvents(cartId: number): void {
     }
     syncFromCart({
       position:
-        cart.position && mapInfo ? toMapPercent(cart.position, mapInfo) : undefined,
+        cart.position && mapInfo ? displayToPercent(cart.position, mapInfo) : undefined,
       zoneId: cart.currentZoneId ?? null,
       isMoving: cart.status === 'MOVING',
     });
@@ -64,31 +65,33 @@ export function useCartMapEvents(cartId: number): void {
     const offPosition = socket.on<CartPositionUpdatePayload>(
       'CART_POSITION_UPDATE',
       ({ payload }) => {
-        const { applyPosition } = useCartMapStore.getState();
-        const zone = payload.zoneId === null ? null : zoneIndexOf(payload.zoneId);
-        const percent = mapInfoRef.current
-          ? toMapPercent(payload.position, mapInfoRef.current)
-          : zone !== null
-            ? ZONE_POSITIONS[zone]
-            : null;
-        if (percent === null) {
+        const mapInfo = mapInfoRef.current;
+        if (!payload.valid || !mapInfo) {
           return;
         }
-        const enteredZone = applyPosition(percent, payload.zoneId);
-        if (enteredZone !== null) {
-          useToastStore.getState().show(`카트가 ${zoneLabel(enteredZone)}에 진입했어요`);
-        }
+        useCartMapStore.getState().applyPosition(displayToPercent(payload, mapInfo));
       },
     );
 
-    const offArrived = socket.on<CartArrivedPayload>('CART_ARRIVED', ({ payload }) => {
-      useCartMapStore.getState().applyArrival(payload.zoneId);
+    const offZone = socket.on<CurrentZoneUpdatedPayload>('CURRENT_ZONE_UPDATED', ({ payload }) => {
+      const enteredZone = useCartMapStore.getState().applyZone(payload.currentZoneId);
+      if (enteredZone !== null) {
+        useToastStore.getState().show(`카트가 ${zoneLabel(enteredZone)}에 진입했어요`);
+      }
     });
+
+    const offNavigation = socket.on<NavigationStatusUpdatedPayload>(
+      'NAVIGATION_STATUS_UPDATED',
+      ({ payload }) => {
+        useCartMapStore.getState().applyNavigation(payload.status, payload.destinationZoneId);
+      },
+    );
 
     socket.connect();
     return () => {
       offPosition();
-      offArrived();
+      offZone();
+      offNavigation();
       socket.close();
     };
   }, [cartId, queryClient]);
