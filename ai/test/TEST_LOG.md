@@ -13,6 +13,31 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-28 11:32 — ✅ 59 passed (+19 신규), ruff 0건 (Claude)
+
+- **명령**: `pytest ai/test/ -v` + `ruff check search_behavior.py test_search_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: `5b9dea4`(develop) 이후 작업 트리 (탐색 상태머신 신규, 커밋 전)
+- **맥락**: "사서 상실 → 마지막 위치 이동 → 사라진 방향 회전 탐색" 기능의
+  프레임워크 독립 부분 선행 구현 (조립 전이라 순수 로직만).
+  - `search_behavior.py` 신규: SearchBehavior 상태머신
+    (TRACKING → GOTO_LAST → SEARCH_ROTATE → SEARCH_FAILED),
+    `estimate_exit_direction`(bbox 이력 → 소실 방향), dead reckoning 거리 적분,
+    장애물 시 전진 포기, 총 탐색 시간·최대 회전각 상한, 타겟 재관측 시 즉시 복귀.
+  - **control_node 배선은 미포함** (실기 검증 불가) — 조립 후 연결.
+  - 신규 테스트 19개: 방향 추정 5(속도/위치 폴백/중앙 소실), 진입 분기 3,
+    GOTO_LAST 5(정렬→전진 순서, 적분 도착, 장애물 중단), 회전 2(방향·상한),
+    전역 규칙 4(재관측 복귀, 총 타임아웃, 비활성 0 출력, dt<=0 안전).
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 59 passed in 0.11s ==============================
+```
+
+</details>
+
 ## 2026-07-28 10:54 — ✅ 40 passed (이동 후 회귀), ruff 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `pytest`(testpaths 기본값) + `ruff check ai/test/`

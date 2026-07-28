@@ -15,6 +15,10 @@
 | MotorNode | motor_node.py | `/cmd_vel` → 차동구동 역기구학(v,ω→좌우 RPM) → `/wheel_speed_cmd` 10Hz 발행. cmd 끊기면 [0,0]. |
 | DebugVisualizationNode | debug_visualization_node.py | 트랙/타겟/재탐색 이벤트 + 타겟 거리(박스 우상단, m)를 프레임에 오버레이, `/debug/image` 발행 및 선택적 mp4 저장. |
 
+노드 외 순수 모듈: **search_behavior.py** — 타겟 상실 시 탐색 거동 상태머신
+(마지막 위치 접근 → 사라진 방향 회전 → 실패 시 정지). ROS 무관, 테스트는
+`ai/test/test_search_logic.py`. **아직 control_node에 배선되지 않음** — Known Gaps 2번 참조.
+
 ## 토픽 계약 (변경 시 양쪽 노드 + SYSTEM_ARCHITECTURE.md 동시 갱신)
 
 | 토픽 | 타입 | 발행 | 구독 |
@@ -46,7 +50,20 @@
    - 회전 방향 실기 검증: REP 103(+ω=좌회전) 기준으로 구현됨. 실기에서 반대로 돌면
      STM32 배선/모터 극성 확인 (코드 부호를 임의로 뒤집지 말 것).
 
-2. **STM32까지 실제 전달은 micro-ROS agent 필요.** motor_node는 `/wheel_speed_cmd`를
+2. **search_behavior.py는 구현·테스트 완료, control_node 배선은 미완** (2026-07-28).
+   사람이 안 보이는 상태에서 로봇을 움직이는 기능이라 실기 없이 켜지 않기로 함.
+   조립 후 배선 체크리스트:
+   - control_node에 bbox 이력 링버퍼(~0.5초) 추가 → 상실 확정 시 `TargetSnapshot`
+     (마지막 방위각, LiDAR 거리 - target_distance, `estimate_exit_direction` 결과)을
+     만들어 `start_search()` 호출.
+   - 제어 루프에서 `behavior.active`면 PID 대신 `step()` 출력을 cmd_vel로 발행
+     (LiDAR 전방(0°) 거리를 `obstacle_distance_m`로 전달).
+   - 파라미터를 `declare_parameter` + launch에 반영. **`search_enabled` 게이트를
+     기본 false로 시작**해 실기에서 명시적으로 켜고 검증.
+   - 실기 튜닝: 회전 방향 실측, 속도(0.3 m/s / 0.5 rad/s), 타임아웃(10 s)·최대 회전각(120°).
+   - dead reckoning은 EM이 엔코더 `/odom`을 올려주면 odom 적분으로 교체.
+
+3. **STM32까지 실제 전달은 micro-ROS agent 필요.** motor_node는 `/wheel_speed_cmd`를
    발행할 뿐이며, Jetson에서 micro-ROS agent가 UART로 브릿지해야 STM32에 도달합니다
    ([JETSON_TO_STM.md](../../../../docs/JETSON_TO_STM.md)). agent 실행은 EM 파트와 협의.
 
