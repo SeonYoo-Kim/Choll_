@@ -1,8 +1,8 @@
+import { useCallCart } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
 import { ZONE_NAMES, ZONE_RECTS, zoneIdOf, zoneLabel } from '../model/zones';
 
 import mapImage from '@/assets/map.png';
-import { useCallCart } from '@/shared/api/generated/carts/carts';
 import { DEMO_CART_ID } from '@/shared/config/cart';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 

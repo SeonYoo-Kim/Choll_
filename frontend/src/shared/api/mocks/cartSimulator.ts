@@ -2,7 +2,7 @@ import { ws } from 'msw';
 
 import { toSlamPosition } from '@/features/cart-map/model/mapTransform';
 import { CORRIDOR_Y, ZONE_POSITIONS, zoneIndexOf } from '@/features/cart-map/model/zones';
-import { CartStatus } from '@/shared/api/generated/model';
+import { CartDetailStatus } from '@/shared/api/generated/model';
 
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
 import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
@@ -25,8 +25,6 @@ export const mapInfoFixture: MapInfo = {
   originY: 0,
   imageWidth: 1000,
   imageHeight: 800,
-  version: 'dev-fixture',
-  active: true,
 };
 
 // 주의: 'ws://*/...'처럼 호스트가 와일드카드인 절대 URL 패턴은 브라우저의 URL 해석 과정에서
@@ -97,13 +95,11 @@ export function cartDetailFixture(cartId: number): CartDetail {
   return {
     id: cartId,
     name: '쫄래쫄래 1호',
-    status: isMoving ? CartStatus.MOVING : CartStatus.IDLE,
+    status: isMoving ? CartDetailStatus.MOVING : CartDetailStatus.IDLE,
     online: true,
-    batteryLevel: 87,
-    emergencyStopped: false,
     mapId: mapInfoFixture.id,
-    currentZoneId: isMoving ? undefined : currentZoneIndex + 1,
-    currentZoneName: isMoving ? undefined : `${currentZoneIndex + 1}구역`,
+    currentZoneId: isMoving ? null : currentZoneIndex + 1,
+    currentZoneName: isMoving ? null : `${currentZoneIndex + 1}구역`,
     position: toSlamPosition(ZONE_POSITIONS[currentZoneIndex], mapInfoFixture),
     lastSeenAt: new Date().toISOString(),
   };

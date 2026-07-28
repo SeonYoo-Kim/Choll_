@@ -1,11 +1,8 @@
-import {
-  getCallCartMockHandler,
-  getGetCartMockHandler,
-  getListCartsMockHandler,
-  getStopCartMockHandler,
-} from '@/shared/api/generated/carts/carts.msw';
-import { getFollowMock } from '@/shared/api/generated/follow/follow.msw';
-import type { Book, CallCartBody, Slot } from '@/shared/api/generated/model';
+import { HttpResponse, http } from 'msw';
+
+import type { CallCartBody } from '@/features/cart-map/api/moveCommands';
+import { getGetCartMockHandler } from '@/shared/api/generated/carts/carts.msw';
+import type { Slot, SlotBook } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
 import { getGetMapMockHandler } from '@/shared/api/generated/maps/maps.msw';
 import { getListSlotsMockHandler } from '@/shared/api/generated/slots/slots.msw';
@@ -24,6 +21,7 @@ const emptySlot = (slotNumber: number): Slot => ({
   slotNumber,
   status: SlotStatus.EMPTY,
   isTarget: false,
+  lastDetectedAt: null,
 });
 
 const book = (
@@ -32,12 +30,15 @@ const book = (
   author: string,
   shelfZoneId: number,
   callNumber: string,
-): Book => ({
+): SlotBook => ({
   id,
+  bookId: id,
   title,
   author,
   callNumber,
   rfidTagId: `E200-3412-DC03-${String(id).padStart(4, '0')}`,
+  bookshelfId: shelfZoneId,
+  bookshelfNumber: String(shelfZoneId * 100),
   shelfZoneId,
   zoneName: `${shelfZoneId}구역`,
 });
@@ -89,14 +90,18 @@ export const handlers = [
     currentZoneSlotNumbers: [1, 2],
   }),
   // 카트 이동은 시뮬레이터 연동 — call 접수 시 WS로 위치/도착 이벤트가 브로드캐스트된다
-  getListCartsMockHandler(() => [cartDetailFixture(1)]),
   getGetCartMockHandler(({ params }) => cartDetailFixture(Number(params.cartId))),
-  getCallCartMockHandler(async ({ request }) => {
+  // 이동 명령은 BE Swagger에 아직 없어 orval 생성물이 없다 — 노션 명세 기준 수동 모킹.
+  // BE 구현 후 openapi 재생성 시 생성 MockHandler로 교체할 것.
+  http.post('*/api/carts/:cartId/commands/call', async ({ request }) => {
     const body = (await request.json()) as CallCartBody;
     startCartMove(body.zoneId);
+    return new HttpResponse(null, { status: 202 });
   }),
-  getStopCartMockHandler(() => stopCartMove()),
+  http.post('*/api/carts/:cartId/commands/stop', () => {
+    stopCartMove();
+    return new HttpResponse(null, { status: 202 });
+  }),
   getGetMapMockHandler(mapInfoFixture),
   cartWsHandler,
-  ...getFollowMock(),
 ];
