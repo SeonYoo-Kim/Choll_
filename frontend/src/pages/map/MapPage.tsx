@@ -8,10 +8,31 @@ import { DEMO_CART_ID } from '@/shared/config/cart';
 
 import styles from './MapPage.module.scss';
 
+import type { CartDetailStatus } from '@/shared/api/generated/model';
+import type { NavigationStatus } from '@/shared/api/ws/cartSocket';
+
+/** CART-01 카트 동작 상태 표시 문구 */
+const CART_STATUS_LABELS: Record<CartDetailStatus, string> = {
+  IDLE: '대기 중',
+  MOVING: '이동 중',
+  FOLLOWING: '추종 중',
+  ERROR: '오류 발생',
+};
+
+/** WS-FE-06 목적지 이동 상태 표시 문구 */
+const NAV_STATUS_LABELS: Record<NavigationStatus, string> = {
+  ACCEPTED: '이동 접수됨',
+  STARTED: '목적지로 이동 중',
+  STOPPED: '이동 정지됨',
+  ARRIVED: '도착 완료',
+  CANCELLED: '이동이 취소됐어요',
+  FAILED: '이동에 실패했어요',
+};
+
 /** 지도 — SLAM 지도 위 카트 위치 확인과 목적지 지정. */
 export function MapPage() {
   useCartMapEvents(DEMO_CART_ID);
-  const { cartZone, isMoving } = useCartMapStore();
+  const { cartZone, isMoving, cartStatus, navStatus } = useCartMapStore();
   const { data: slots } = useListSlots(DEMO_CART_ID);
 
   return (
@@ -38,11 +59,11 @@ export function MapPage() {
           </div>
           <div className={styles.statCard}>
             <p>카트 상태</p>
-            <strong>{isMoving ? '이동 중' : '도착 완료'}</strong>
+            <strong>{CART_STATUS_LABELS[cartStatus]}</strong>
           </div>
           <div className={styles.statCard}>
             <p>이동 안내</p>
-            <strong>{isMoving ? '목적지로 이동 중' : '서가 선택 가능'}</strong>
+            <strong>{navStatus === null ? '서가 선택 가능' : NAV_STATUS_LABELS[navStatus]}</strong>
           </div>
         </div>
       </div>

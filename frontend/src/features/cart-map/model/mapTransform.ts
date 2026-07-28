@@ -1,30 +1,33 @@
-import type { CartPosition, MapInfo } from '@/shared/api/generated/model';
+import type { MapInfo } from '@/shared/api/generated/model';
 
-/** 지도 이미지 위 좌표 (% 단위, 좌상단 기준) */
+/** 지도 이미지 위 좌표 (% 단위, 좌상단 기준) — 화면 렌더링용 */
 export interface MapPercent {
   x: number;
   y: number;
 }
 
+/** WS 명세(WS-FE-01)의 X·Y 표시 좌표 — 지도 이미지 픽셀 단위, 좌상단 원점으로 해석 */
+export interface DisplayPosition {
+  x: number;
+  y: number;
+}
+
 /**
- * SLAM 좌표(m, 좌하단 원점·y 위쪽 증가)를 지도 이미지 %(좌상단 원점·y 아래쪽 증가)로 변환한다.
- * 축 방향(y 반전)은 ROS 지도 관례 기준 초안 — BE와 좌표계 합의 시 재확인 필요.
+ * 표시 좌표(px)를 지도 이미지 %로 변환한다.
+ * 지도 이미지 크기(imageWidth/imageHeight)가 기준이므로 화면 배율과 무관하게 동작한다.
+ * TODO: "표시 좌표"의 정확한 단위(px vs m)는 BE 구현 시 확정 필요.
  */
-export function toMapPercent(position: CartPosition, mapInfo: MapInfo): MapPercent {
-  const widthM = mapInfo.imageWidth * mapInfo.resolution;
-  const heightM = mapInfo.imageHeight * mapInfo.resolution;
+export function displayToPercent(position: DisplayPosition, mapInfo: MapInfo): MapPercent {
   return {
-    x: ((position.x - mapInfo.originX) / widthM) * 100,
-    y: (1 - (position.y - mapInfo.originY) / heightM) * 100,
+    x: (position.x / mapInfo.imageWidth) * 100,
+    y: (position.y / mapInfo.imageHeight) * 100,
   };
 }
 
-/** toMapPercent의 역변환. MSW 시뮬레이터가 %로 정의된 구역 좌표를 SLAM 좌표로 내보낼 때 쓴다. */
-export function toSlamPosition(percent: MapPercent, mapInfo: MapInfo): CartPosition {
-  const widthM = mapInfo.imageWidth * mapInfo.resolution;
-  const heightM = mapInfo.imageHeight * mapInfo.resolution;
+/** displayToPercent의 역변환. MSW 시뮬레이터가 %로 정의된 구역 좌표를 표시 좌표로 내보낼 때 쓴다. */
+export function percentToDisplay(percent: MapPercent, mapInfo: MapInfo): DisplayPosition {
   return {
-    x: mapInfo.originX + (percent.x / 100) * widthM,
-    y: mapInfo.originY + (1 - percent.y / 100) * heightM,
+    x: (percent.x / 100) * mapInfo.imageWidth,
+    y: (percent.y / 100) * mapInfo.imageHeight,
   };
 }
