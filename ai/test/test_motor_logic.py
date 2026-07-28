@@ -7,6 +7,7 @@ import pytest
 
 motor_node = importlib.import_module("motor_node")
 cmd_vel_to_wheel_rpms = motor_node.cmd_vel_to_wheel_rpms
+wheel_command_data = motor_node.wheel_command_data
 
 R = 0.065  # 바퀴 반지름 (m) — 실제 하드웨어 값
 L = 0.30  # 바퀴 간 거리 (m) — 조립 전 가정값 (로직 검증에는 영향 없음)
@@ -14,6 +15,19 @@ L = 0.30  # 바퀴 간 거리 (m) — 조립 전 가정값 (로직 검증에는 
 
 def mps_to_rpm(v: float) -> float:
     return v / (2 * math.pi * R) * 60
+
+
+class TestWheelCommandData:
+    def test_motor_command_layout_matches_contract(self):
+        # JETSON_TO_STM.md: data = [제어종류(0=모터), 좌 RPM, 우 RPM]
+        assert wheel_command_data(120, -118) == [0, 120, -118]
+
+    def test_stop_command_is_type_zero_zero_zero(self):
+        assert wheel_command_data(0, 0) == [0, 0, 0]
+
+    def test_values_are_coerced_to_int(self):
+        data = wheel_command_data(50.0, -50.0)
+        assert all(isinstance(value, int) for value in data)
 
 
 class TestStraightLine:

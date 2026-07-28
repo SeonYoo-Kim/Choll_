@@ -9,8 +9,9 @@
    - 토픽명: `/wheel_speed_cmd`
    - 메시지 타입: std_msgs/msg/Int32MultiArray
    - 데이터 매핑:
-     - data[0]: 좌측 바퀴 목표 RPM (int32)
-     - data[1]: 우측 바퀴 목표 RPM (int32)
+     - data[0]: 0 (int32, 0: 모터 제어, 1: LED 제어) 
+     - data[1]: 좌측 바퀴 목표 RPM (int32)
+     - data[2]: 우측 바퀴 목표 RPM (int32)
    - 발행 주기: 10Hz ~ 12Hz
 
 3. STM32에서 구현해야 할 micro-ROS 흐름
