@@ -67,7 +67,7 @@ describe('SlotTile', () => {
       />,
     );
 
-    expect(screen.getByText('RFID를 읽을 수 없어요')).toBeInTheDocument();
-    expect(screen.getByText('태그 상태를 확인해 주세요')).toBeInTheDocument();
+    expect(screen.getByText('RFID 인식 불가')).toBeInTheDocument();
+    expect(screen.queryByText('태그 상태를 확인해 주세요')).not.toBeInTheDocument();
   });
 });

@@ -19,10 +19,9 @@ interface SlotTileProps {
 /** 슬롯 보드의 개별 슬롯 타일. 상태별 톤 + 책 정보(제목·저자·구역)를 표시한다. */
 export function SlotTile({ slot, active = false, onClick }: SlotTileProps) {
   const isError = slot.status === SlotStatus.RECOGNITION_FAILED;
-  const title = isError ? 'RFID를 읽을 수 없어요' : (slot.book?.title ?? '비어 있는 슬롯');
-  const subtitle = isError
-    ? '태그 상태를 확인해 주세요'
-    : (slot.book?.author ?? '다음 책을 꽂아주세요');
+  const title = isError ? 'RFID 인식 불가' : (slot.book?.title ?? '비어 있는 슬롯');
+  // 에러 타일은 부제 없이 표시 (빈 문자열로 두어 타일 높이 구조는 유지)
+  const subtitle = isError ? '' : (slot.book?.author ?? '다음 책을 꽂아주세요');
 
   return (
     <button

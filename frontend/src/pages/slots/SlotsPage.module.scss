@@ -71,19 +71,18 @@
 .board {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  // minmax(0, 1fr): 열 폭을 콘텐츠(긴 책 제목)와 무관하게 균등 고정
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 
   @media (min-width: $bp-sm) {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: $spacing-md;
   }
 
+  // 데스크톱에서는 항상 10열 — 30개 슬롯이 3줄로 한눈에 들어온다
   @media (min-width: $bp-lg) {
-    grid-template-columns: repeat(6, 1fr);
-  }
-
-  @media (min-width: 1280px) {
-    grid-template-columns: repeat(10, 1fr);
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 10px;
   }
 }

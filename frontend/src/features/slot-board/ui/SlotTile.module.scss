@@ -4,10 +4,11 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0; // 그리드 셀이 콘텐츠 폭에 끌려 늘어나지 않게
   height: 128px;
   border: 2px solid;
   border-radius: $radius-tile;
-  padding: 12px;
+  padding: 10px;
   text-align: left;
   transition:
     transform 0.15s,
@@ -51,11 +52,19 @@
 }
 
 .title {
-  margin: 12px 0 0;
-  min-height: 32px;
+  // 항상 정확히 2줄 높이로 고정 — 제목 길이가 카드 크기에 영향을 주지 않는다
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 10px 0 0;
+  height: 32px;
   font-size: 11px;
   font-weight: 700;
   line-height: 16px;
+  // 한글은 어절(띄어쓰기) 단위로만 줄바꿈, 한 어절이 카드보다 길 때만 강제 분리
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .subtitle {
