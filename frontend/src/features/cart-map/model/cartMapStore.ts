@@ -14,6 +14,8 @@ interface CartMapState {
   cartZone: number | null;
   /** 지도 위 카트 좌표 (%) */
   cartPosition: MapPercent;
+  /** 지도 이미지 기준 카트 방향각 (라디안) */
+  cartYaw: number;
   /** 카트 동작 상태 (CART-01 응답 CartStatus: IDLE·MOVING·FOLLOWING·ERROR) */
   cartStatus: CartDetailStatus;
   /** 마지막으로 수신한 목적지 이동 상태 (WS-FE-06, 이동 명령 전이면 null) */
@@ -25,7 +27,7 @@ interface CartMapState {
   /** 이동 명령(NAV-01) 접수 성공 시 낙관적 표시 — WS 이벤트 도착 전 버튼 잠금용 */
   startMove: () => void;
   /** WS CART_POSITION_UPDATE(WS-FE-01) 반영 */
-  applyPosition: (position: MapPercent) => void;
+  applyPosition: (position: MapPercent, yaw: number) => void;
   /** WS CURRENT_ZONE_UPDATED(WS-FE-05) 반영. 새 구역에 진입했으면 그 인덱스를 반환(진입 알림용) */
   applyZone: (currentZoneId: number | null) => number | null;
   /** WS NAVIGATION_STATUS_UPDATED(WS-FE-06) 반영 — ARRIVED면 도착 모달을 연다 */
@@ -48,13 +50,14 @@ interface CartMapState {
  */
 export const useCartMapStore = create<CartMapState>()((set, get) => ({
   cartZone: null,
-  cartPosition: START_POSITION,
+  cartPosition: ZONE_POSITIONS[2],
+  cartYaw: 0,
   cartStatus: 'IDLE',
   navStatus: null,
   isMoving: false,
   arrivalZone: null,
   startMove: () => set({ isMoving: true, cartStatus: 'MOVING', navStatus: 'ACCEPTED' }),
-  applyPosition: (position) => set({ cartPosition: position }),
+  applyPosition: (position, yaw) => set({ cartPosition: position, cartYaw: yaw }),
   applyZone: (currentZoneId) => {
     const previousZone = get().cartZone;
     const zone = currentZoneId === null ? null : zoneIndexOf(currentZoneId);

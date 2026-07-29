@@ -15,6 +15,33 @@
 
 ---
 
+## 2026-07-28 17:43 — ✅ BE 20 tests·Z1~Z7 시드 재실행 통과 (Codex)
+
+- **명령**: `backend/gradlew.bat test`, `source backend/src/main/resources/db/test-room-bookshelves.sql`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.11, MySQL 8.4
+- **브랜치**: `backend/feature/rfid_zone_data`
+- **결과**: 10 suites, 20 tests, 0 failures, 0 errors
+- **검증 범위**: Z1~Z7 중복 없는 재구성, 책장 10개 존 배치, 소장 도서
+  67,289권 책장 연결, 테스트 RFID 5개 보존, 백엔드 전체 테스트
+
+<details>
+<summary>백엔드 Gradle 테스트 최종 출력</summary>
+
+```text
+> Task :compileJava UP-TO-DATE
+> Task :processResources
+> Task :classes
+> Task :compileTestJava UP-TO-DATE
+> Task :processTestResources NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :test
+
+BUILD SUCCESSFUL in 40s
+4 actionable tasks: 2 executed, 2 up-to-date
+```
+
+</details>
+
 ## 2026-07-27 17:07 — ✅ BE 20 tests·UTF-8 전체 재컴파일 통과 (Codex)
 
 - **명령**: `backend/gradlew.bat test --rerun-tasks`
