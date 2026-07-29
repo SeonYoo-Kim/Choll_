@@ -128,3 +128,8 @@
 .statPrimary {
   color: #398c80;
 }
+
+// 구역 라벨과 구역 이름 사이 간격 — 이름 안의 '·'(철학·종교)와 헷갈리지 않게 넓게 띄운다
+.zoneName {
+  margin-left: 0.6em;
+}

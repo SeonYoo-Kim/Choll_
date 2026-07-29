@@ -116,6 +116,7 @@ export class CartSocket {
     this.socket = socket;
 
     socket.onopen = () => {
+      console.info(`[CartSocket] 연결됨: ${base}/ws/carts/${this.cartId}`);
       if (this.hasConnectedOnce) {
         this.options.onReconnect?.();
       }
@@ -126,6 +127,7 @@ export class CartSocket {
     socket.onmessage = (message: MessageEvent<string>) => {
       try {
         const event = JSON.parse(message.data) as CartWsEvent;
+        console.info('[CartSocket] 수신:', event.type, event.payload);
         this.handlers.get(event.type)?.forEach((handler) => handler(event));
       } catch (error) {
         console.error('[CartSocket] 이벤트 파싱 실패:', error, message.data);
@@ -134,8 +136,10 @@ export class CartSocket {
 
     socket.onclose = () => {
       if (this.closedByUser) {
+        console.info('[CartSocket] 연결 종료');
         return;
       }
+      console.info(`[CartSocket] 연결 끊김 — ${this.retryDelayMs}ms 후 재연결 시도`);
       this.reconnectTimer = setTimeout(() => this.connect(), this.retryDelayMs);
       this.retryDelayMs = Math.min(
         this.retryDelayMs * 2,

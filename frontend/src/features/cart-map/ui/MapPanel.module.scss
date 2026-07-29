@@ -33,7 +33,8 @@
 .canvas {
   position: relative;
   overflow: hidden;
-  aspect-ratio: 3 / 2;
+  // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다
+  aspect-ratio: 1174 / 631;
   border: 1px solid $border-panel;
   border-radius: 22px;
   background: #fffdf8;

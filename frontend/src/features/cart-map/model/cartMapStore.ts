@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { ZONE_POSITIONS, zoneIndexOf } from './zones';
+import { START_POSITION, zoneIndexOf } from './zones';
 
 import type { MapPercent } from './mapTransform';
 import type { CartDetailStatus } from '@/shared/api/generated/model';
@@ -48,7 +48,7 @@ interface CartMapState {
  */
 export const useCartMapStore = create<CartMapState>()((set, get) => ({
   cartZone: null,
-  cartPosition: ZONE_POSITIONS[2],
+  cartPosition: START_POSITION,
   cartStatus: 'IDLE',
   navStatus: null,
   isMoving: false,
