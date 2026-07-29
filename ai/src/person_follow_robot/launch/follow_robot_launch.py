@@ -73,6 +73,9 @@ def generate_launch_description() -> LaunchDescription:
                 "memory_bank_max_features": 20,
                 "similarity_threshold": 0.90,
                 "osnet_device": "auto",
+                "auto_select_enabled": True,      # 최대 bbox(=최근접) 자동 선택
+                "auto_select_stable_frames": 15,  # 30fps 기준 0.5초 연속 최대
+                "auto_select_min_area_px": 5000.0,
             }],
         ),
         Node(

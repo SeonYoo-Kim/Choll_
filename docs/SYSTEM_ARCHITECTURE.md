@@ -9,7 +9,8 @@
                       ↓
             ByteTrack (Assign Track IDs)
                       ↓
-      Operator selects librarian (2 seconds)
+   Auto-select nearest person (largest bbox,
+     0.5 s stable) → register for 2 seconds
                       ↓
        OSNet Feature Extraction (512-D)
                       ↓
