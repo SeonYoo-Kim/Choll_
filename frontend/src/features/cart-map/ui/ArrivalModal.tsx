@@ -1,10 +1,14 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Flag, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 import { useCartMapStore } from '../model/cartMapStore';
 import { zoneLabel } from '../model/zones';
 
+import { SlotStatus } from '@/shared/api/generated/model';
 import type { Slot } from '@/shared/api/generated/model';
+import { getListSlotsQueryKey } from '@/shared/api/generated/slots/slots';
+import { DEMO_CART_ID } from '@/shared/config/cart';
 import { slotLabel } from '@/shared/utils/slotLabel';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
@@ -20,6 +24,7 @@ export function ArrivalModal({ slots }: ArrivalModalProps) {
   const { arrivalZone, dismissArrival } = useCartMapStore();
   const notify = useToastStore((state) => state.show);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   if (arrivalZone === null) {
     return null;
@@ -69,6 +74,15 @@ export function ArrivalModal({ slots }: ArrivalModalProps) {
           <button
             className={styles.secondary}
             onClick={() => {
+              // 이 구역에 꽂을 책을 모두 서가에 옮긴 것으로 처리 — 해당 슬롯을 비운다.
+              // TODO: 구역 완료를 BE에 알릴지 명세 확정 필요 — 현재는 슬롯 캐시 갱신(데모)
+              queryClient.setQueryData<Slot[]>(getListSlotsQueryKey(DEMO_CART_ID), (prev) =>
+                prev?.map((slot) =>
+                  slot.book?.zoneName === currentArea
+                    ? { ...slot, status: SlotStatus.EMPTY, isTarget: false, book: undefined }
+                    : slot,
+                ),
+              );
               dismissArrival();
               notify(`${currentArea} 정리가 완료됐어요! 멋져요 🎉`);
             }}
