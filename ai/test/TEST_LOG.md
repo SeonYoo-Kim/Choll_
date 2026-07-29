@@ -13,6 +13,37 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-29 15:08 — ✅ 91 passed (+8 신규, 1차 1건 실패 후 수정), ruff 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check reid_node.py reid_logic.py launch test_reid_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `2aec0ff` 이후 작업 트리 (재탐색 오인 방지 3종, 커밋 전)
+- **맥락**: 실기 영상(result14_70.mp4) — threshold 0.70에서 6m 뒤 검은 옷 타인을
+  SIM 0.915~0.966으로 오인 재잠금 (오인 후 force-add로 뱅크 오염 → 잠금 고착).
+  - `candidate_is_feasible` 신규: 시공간 타당성 게이트 — 마지막 관측 대비
+    중심 이동(300px/s + 60px 여유)과 크기 비율(높이=거리 프록시, 1.15 + 0.7/s)이
+    경과 시간 내 도달 가능해야 재탐색 후보 자격. 장기 재등장은 자연히 무제한.
+  - 재잠금 연속 확인: 같은 후보가 `recovery_confirm_frames`(10, 30fps 0.33초 /
+    10fps 1초) 연속 수락 조건 충족 시에만 확정 (AutoSelectStabilizer 재사용).
+  - 뱅크 오염 방지: 재잠금 직후 force-add 제거, `post_recovery_update_delay_sec`
+    (2초) 동안 뱅크 갱신 유예.
+  - similarity_threshold 기본 0.85→0.70 (게이트 조합 전제. launch `threshold:=`).
+  - **1차 실행 1건 실패**: 경과 0초에서 크기 허용 폭이 정확히 1.0이라 bbox
+    노이즈(1%)도 기각 → `size_ratio_base_tolerance`(1.15) 추가 후 통과.
+  - 신규 테스트 8개: result14 재현 기각, 장기 재등장 허용, 중심 점프 시간
+    의존, 크기 밴드 확장, 무효 입력, 음수 경과.
+- **주의**: 실기 재검증 — result14 시나리오에서 배경 인물이 feasibility gate
+  로그로 기각되는지, 진짜 재등장이 10프레임 확인 후 잡히는지.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 91 passed in 0.12s ==============================
+```
+
+</details>
+
 ## 2026-07-29 14:48 — ✅ 83 passed (회귀), ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check follow_robot_launch.py`

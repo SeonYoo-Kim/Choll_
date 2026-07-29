@@ -4,6 +4,7 @@ import importlib
 
 reid_logic = importlib.import_module("reid_logic")
 accept_recovery = reid_logic.accept_recovery
+candidate_is_feasible = reid_logic.candidate_is_feasible
 crop_quality_ok = reid_logic.crop_quality_ok
 
 W, H = 640.0, 480.0  # 실카메라 해상도
@@ -30,6 +31,40 @@ class TestCropQualityOk:
 
     def test_zero_size_rejected(self):
         assert not crop_quality_ok(320, 240, 0, 0, W, H)
+
+
+class TestCandidateIsFeasible:
+    def test_same_spot_same_size_is_feasible(self):
+        assert candidate_is_feasible(320, 400, 330, 390, elapsed_sec=0.5)
+
+    def test_result14_distant_person_rejected(self):
+        # 재현: 1.2m(높이 ~460px) 추적 중 상실 → 1초 뒤 6m 타인(높이 ~110px).
+        # 크기 비율 0.24는 1초 허용 범위(0.54~1.85)를 벗어난다.
+        assert not candidate_is_feasible(320, 460, 200, 110, elapsed_sec=1.0)
+
+    def test_distant_person_allowed_after_long_absence(self):
+        # 오래 사라졌다 돌아온 장기 재등장은 사실상 제한하지 않는다.
+        assert candidate_is_feasible(320, 460, 200, 110, elapsed_sec=10.0)
+
+    def test_center_jump_rejected_when_too_fast(self):
+        # 0.2초 만에 화면 반대편(500px 이동)은 도달 불가.
+        assert not candidate_is_feasible(70, 400, 570, 400, elapsed_sec=0.2)
+
+    def test_center_jump_allowed_given_enough_time(self):
+        # 같은 이동도 2초면 300px/s 기준 도달 가능 (60px 여유 포함).
+        assert candidate_is_feasible(70, 400, 570, 400, elapsed_sec=2.0)
+
+    def test_size_band_widens_with_time(self):
+        # 비율 0.5: 0.2초(허용 0.88~1.14)엔 기각, 2초(허용 0.42~2.4)엔 통과.
+        assert not candidate_is_feasible(320, 400, 320, 200, elapsed_sec=0.2)
+        assert candidate_is_feasible(320, 400, 320, 200, elapsed_sec=2.0)
+
+    def test_invalid_heights_rejected(self):
+        assert not candidate_is_feasible(320, 0, 320, 200, elapsed_sec=1.0)
+        assert not candidate_is_feasible(320, 400, 320, 0, elapsed_sec=1.0)
+
+    def test_negative_elapsed_treated_as_zero(self):
+        assert candidate_is_feasible(320, 400, 320, 395, elapsed_sec=-1.0)
 
 
 class TestAcceptRecovery:
