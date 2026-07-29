@@ -7,6 +7,7 @@ beforeEach(() => {
   useCartMapStore.setState({
     cartZone: 2,
     cartPosition: ZONE_POSITIONS[2],
+    cartYaw: 0,
     cartStatus: 'IDLE',
     navStatus: null,
     isMoving: false,
@@ -23,10 +24,12 @@ describe('cartMapStore', () => {
     expect(state.navStatus).toBe('ACCEPTED');
   });
 
-  it('applyPosition은 좌표만 갱신한다', () => {
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 });
-    expect(useCartMapStore.getState().cartPosition).toEqual({ x: 10, y: 20 });
-    expect(useCartMapStore.getState().cartZone).toBe(2);
+  it('applyPosition은 좌표와 방향각을 갱신한다', () => {
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 1.57);
+    const state = useCartMapStore.getState();
+    expect(state.cartPosition).toEqual({ x: 10, y: 20 });
+    expect(state.cartYaw).toBe(1.57);
+    expect(state.cartZone).toBe(2);
   });
 
   it('applyZone은 새 구역 진입 시 그 인덱스를 반환한다', () => {

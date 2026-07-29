@@ -25,16 +25,14 @@ export type CartWsEventType =
 
 /**
  * WS-FE-01 CART_POSITION_UPDATE 페이로드.
- * 명세 데이터: 지도 ID, X·Y 표시 좌표, 방향, 위치 유효 여부.
- * x·y는 지도 이미지 픽셀 기준 표시 좌표로 해석한다.
- * TODO: 필드명·좌표 단위는 BE 구현 시 확정 필요 (FE 단독 확정 금지).
+ * x·y는 지도 이미지의 좌상단을 원점으로 하는 픽셀 좌표다.
  */
 export interface CartPositionUpdatePayload {
   mapId: number;
   x: number;
   y: number;
   /** 방향각 (라디안) */
-  yaw?: number;
+  yaw: number;
   /** 위치 유효 여부 — false면 SLAM 위치 신뢰 불가 */
   valid: boolean;
 }
@@ -126,6 +124,7 @@ export class CartSocket {
     socket.onmessage = (message: MessageEvent<string>) => {
       try {
         const event = JSON.parse(message.data) as CartWsEvent;
+        console.log('[CartSocket] 위치 이벤트 수신:', event.payload);
         this.handlers.get(event.type)?.forEach((handler) => handler(event));
       } catch (error) {
         console.error('[CartSocket] 이벤트 파싱 실패:', error, message.data);
