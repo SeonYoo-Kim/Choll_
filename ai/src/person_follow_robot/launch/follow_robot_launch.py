@@ -11,6 +11,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -29,6 +30,12 @@ def generate_launch_description() -> LaunchDescription:
             "debug_video_path",
             default_value="result.mp4",
             description="Output path for saved debug video.",
+        ),
+        DeclareLaunchArgument(
+            "threshold",
+            default_value="0.85",
+            description="Re-ID cosine similarity threshold "
+            "(reid_node similarity_threshold). 예: threshold:=0.80",
         ),
         Node(
             package="person_follow_robot",
@@ -71,7 +78,10 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 "registration_duration_sec": 2.0,
                 "memory_bank_max_features": 20,
-                "similarity_threshold": 0.85,     # 0.90은 재등장 동일인도 기각 (실측)
+                # 0.90은 재등장 동일인도 기각 (실측). threshold:=값 으로 실험 가능
+                "similarity_threshold": ParameterValue(
+                    LaunchConfiguration("threshold"), value_type=float
+                ),
                 "osnet_device": "auto",
                 "auto_select_enabled": True,      # 최대 bbox(=최근접) 자동 선택
                 "auto_select_stable_frames": 15,  # 30fps 기준 0.5초 연속 최대

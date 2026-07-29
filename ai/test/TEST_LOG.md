@@ -13,6 +13,26 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-29 14:48 — ✅ 83 passed (회귀), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check follow_robot_launch.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `2aec0ff` 이후 작업 트리 (threshold launch 인자, 커밋 전)
+- **맥락**: 실기 임계값 실험용 launch 인자 추가 —
+  `ros2 launch person_follow_robot follow_robot_launch.py threshold:=0.80`.
+  `ParameterValue(value_type=float)`로 문자열 인자를 double 파라미터에 매핑
+  (미사용 시 launch가 문자열로 넘겨 타입 오류 나는 것 방지). 순수 로직 변경
+  없음 → 기존 83개 회귀만 확인. launch 인자 동작 자체는 Jetson 실기 확인 필요.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 83 passed in 0.08s ==============================
+```
+
+</details>
+
 ## 2026-07-29 14:33 — ✅ 83 passed (+12 신규), ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check reid_node.py reid_logic.py launch test_reid_logic.py`
