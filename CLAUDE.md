@@ -27,7 +27,7 @@ Face Recognition이 아닌 **Person Re-Identification(Re-ID)** 으로 동일 인
 ## 파이프라인 (데이터 흐름)
 
 ```
-RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [사서 선택 2초] → OSNet Re-ID
+RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [최근접(최대 bbox) 자동 선택 → 2초 등록] → OSNet Re-ID
     → Memory Bank → (추적 성공 | 추적 실패→Re-ID 재탐색) → Target Track ID
     → 화면 중심 오차 + LiDAR 거리 → PID → /cmd_vel → Motor
 ```

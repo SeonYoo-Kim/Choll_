@@ -1,4 +1,10 @@
-"""OSNet Re-ID node with explicit target selection and online memory bank."""
+"""OSNet Re-ID node with automatic nearest-person target selection.
+
+타겟 선택 (기본: 자동): 바운딩박스 면적이 가장 큰 사람(=가장 가까운 사람)이
+auto_select_stable_frames 프레임 연속 최대이면 자동 선택해 등록을 시작한다.
+/select_target(Int32)은 수동 오버라이드로 유지 — 대기 상태에서 수동 선택이
+먼저 오면 그 id를 사용한다. auto_select_enabled=false면 기존 수동 방식만 동작.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +12,10 @@ import copy
 import json
 import time
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
 
 import cv2
 import numpy as np
@@ -18,6 +25,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Int32, String
 from vision_msgs.msg import Detection2D, Detection2DArray
+
+from .target_auto_select import AutoSelectStabilizer, largest_track
 
 
 class ReIdState(Enum):
@@ -68,6 +77,7 @@ class MemoryBank:
     """FIFO memory bank for normalized OSNet feature vectors."""
 
     def __init__(self, max_features: int, similarity_threshold: float) -> None:
+        """Set the FIFO capacity and the match-accept threshold."""
         self._features: deque[np.ndarray] = deque(maxlen=max_features)
         self._similarity_threshold = similarity_threshold
 
@@ -126,6 +136,7 @@ class OsNetFeatureExtractor:
     """OSNet_x1_0 feature extractor using pretrained weights."""
 
     def __init__(self, device: str) -> None:
+        """Lazy-import torch/torchreid and load pretrained OSNet weights."""
         try:
             import torch
             import torchreid
@@ -173,7 +184,7 @@ class OsNetFeatureExtractor:
             raise ValueError("OSNet returned a zero feature vector")
         return vector / norm
 
-    def _to_tensor(self, rgb_image: np.ndarray) -> Any:
+    def _to_tensor(self, rgb_image: np.ndarray) -> Any:  # noqa: ANN401 — torch 지연 import라 Tensor 타입 명시 불가
         array = rgb_image.astype(np.float32) / 255.0
         mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -212,11 +223,15 @@ class ReidNode(Node):
     """Register one selected track and recover it with OSNet Re-ID."""
 
     def __init__(self) -> None:
+        """Declare parameters, load OSNet, and wire the selection pipeline."""
         super().__init__("reid_node")
         self.declare_parameter("registration_duration_sec", 2.0)
         self.declare_parameter("memory_bank_max_features", 20)
         self.declare_parameter("similarity_threshold", 0.90)
         self.declare_parameter("osnet_device", "auto")
+        self.declare_parameter("auto_select_enabled", True)
+        self.declare_parameter("auto_select_stable_frames", 15)  # 30fps 기준 0.5초
+        self.declare_parameter("auto_select_min_area_px", 5000.0)
 
         self._registration_duration_sec = float(
             self.get_parameter("registration_duration_sec").value
@@ -226,6 +241,15 @@ class ReidNode(Node):
             self.get_parameter("similarity_threshold").value
         )
         osnet_device = str(self.get_parameter("osnet_device").value)
+        self._auto_select_enabled = bool(
+            self.get_parameter("auto_select_enabled").value
+        )
+        self._auto_select_min_area_px = float(
+            self.get_parameter("auto_select_min_area_px").value
+        )
+        self._auto_select_stabilizer = AutoSelectStabilizer(
+            int(self.get_parameter("auto_select_stable_frames").value)
+        )
 
         self._bridge = CvBridge()
         self._latest_image: np.ndarray | None = None
@@ -256,7 +280,12 @@ class ReidNode(Node):
             "Re-ID node started with OSNet_x1_0 "
             f"(device={self._feature_extractor.device})"
         )
-        self.get_logger().info("Waiting for target selection")
+        if self._auto_select_enabled:
+            self.get_logger().info(
+                "Waiting for target selection (auto-select: largest bbox)"
+            )
+        else:
+            self.get_logger().info("Waiting for target selection")
 
     def _image_callback(self, message: Image) -> None:
         try:
@@ -271,6 +300,8 @@ class ReidNode(Node):
         self._current_track_ids = {candidate.track_id for candidate in candidates}
 
         if self._state == ReIdState.WAITING_SELECTION:
+            if self._auto_select_enabled:
+                self._try_auto_select(candidates)
             return
 
         if self._state == ReIdState.INITIALIZING:
@@ -297,6 +328,29 @@ class ReidNode(Node):
             return
 
         self._start_memory_bank_initialization(selected_id)
+
+    def _try_auto_select(self, candidates: list[TrackCandidate]) -> None:
+        """가장 큰 bbox 트랙이 연속으로 관찰되면 자동 선택한다."""
+        track_areas = [
+            (
+                candidate.track_id,
+                float(candidate.detection.bbox.size_x)
+                * float(candidate.detection.bbox.size_y),
+            )
+            for candidate in candidates
+        ]
+        nearest_id = largest_track(track_areas, self._auto_select_min_area_px)
+        confirmed_id = self._auto_select_stabilizer.observe(nearest_id)
+        if confirmed_id is None:
+            return
+
+        self.get_logger().info(
+            f"Auto-selected nearest person: ID={confirmed_id} "
+            f"(largest bbox for {self._auto_select_stabilizer.consecutive_frames} "
+            "consecutive frames)"
+        )
+        self._auto_select_stabilizer.reset()
+        self._start_memory_bank_initialization(confirmed_id)
 
     def _start_memory_bank_initialization(self, selected_id: int) -> None:
         self._target_track_id = selected_id
@@ -558,8 +612,14 @@ class ReidNode(Node):
         self._target_track_id = None
         self._registration_started_at = None
         self._memory_bank.clear()
+        self._auto_select_stabilizer.reset()
         self._state = ReIdState.WAITING_SELECTION
-        self.get_logger().info("Waiting for target selection")
+        if self._auto_select_enabled:
+            self.get_logger().info(
+                "Waiting for target selection (auto-select: largest bbox)"
+            )
+        else:
+            self.get_logger().info("Waiting for target selection")
 
     @staticmethod
     def _to_candidates(message: Detection2DArray) -> list[TrackCandidate]:

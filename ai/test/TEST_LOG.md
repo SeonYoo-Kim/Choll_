@@ -13,6 +13,32 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-29 14:06 — ✅ 71 passed (+9 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check reid_node.py target_auto_select.py launch test_auto_select.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `e724d6f` 이후 작업 트리 (타겟 자동 선택, 커밋 전)
+- **맥락**: 요구사항 변경 — /select_target 수동 지정 대신 **최대 bbox(=최근접) 자동 선택**.
+  - `target_auto_select.py` 신규 (순수 모듈): `largest_track`(최소 면적 필터 포함),
+    `AutoSelectStabilizer`(N프레임 연속 최대일 때만 확정 — 스쳐 가는 오탐 방지).
+  - reid_node: WAITING_SELECTION에서 자동 선택 시도, 확정 시 기존 2초 등록 흐름 재사용.
+    /select_target은 수동 오버라이드로 유지. 파라미터 3개 신설
+    (`auto_select_enabled`=True, `auto_select_stable_frames`=15, `auto_select_min_area_px`=5000).
+  - reid_node 기존 lint 부채 정리 (UP035, D107×3, ANN401 noqa).
+  - 신규 테스트 9개: 최대 면적 선택·최소 면적 필터(4), 안정화 확정·후보 교체
+    리셋·소실 리셋·재무장·클램프(5).
+- **주의**: 실기 검증 필요 — 여러 사람이 있을 때 카메라 앞 사람이 선택되는지,
+  0.5초 확정 지연이 체감상 적절한지, min_area 기본값이 실카메라에서 맞는지.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 71 passed in 0.07s ==============================
+```
+
+</details>
+
 ## 2026-07-28 15:35 — ✅ 62 passed (+3 신규), ruff 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check motor_node.py test_motor_logic.py`
