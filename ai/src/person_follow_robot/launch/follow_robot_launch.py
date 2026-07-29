@@ -11,6 +11,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -29,6 +30,12 @@ def generate_launch_description() -> LaunchDescription:
             "debug_video_path",
             default_value="result.mp4",
             description="Output path for saved debug video.",
+        ),
+        DeclareLaunchArgument(
+            "threshold",
+            default_value="0.70",
+            description="Re-ID cosine similarity threshold "
+            "(reid_node similarity_threshold). 예: threshold:=0.80",
         ),
         Node(
             package="person_follow_robot",
@@ -71,11 +78,25 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 "registration_duration_sec": 2.0,
                 "memory_bank_max_features": 20,
-                "similarity_threshold": 0.90,
+                # 실측: 동일인 재등장 <0.80, 타인(원거리 검은옷) 0.92+ —
+                # 유사도 단독으론 분리 불가. 타당성 게이트+연속 확인과 조합해
+                # 0.70 사용. threshold:=값 으로 실험 가능
+                "similarity_threshold": ParameterValue(
+                    LaunchConfiguration("threshold"), value_type=float
+                ),
                 "osnet_device": "auto",
                 "auto_select_enabled": True,      # 최대 bbox(=최근접) 자동 선택
                 "auto_select_stable_frames": 15,  # 30fps 기준 0.5초 연속 최대
                 "auto_select_min_area_px": 5000.0,
+                "feature_sample_interval_sec": 0.3,  # 뱅크 다양성 (매 프레임 추가 금지)
+                "recovery_margin": 0.05,          # 재탐색 1위-2위 최소 격차
+                "crop_side_margin_px": 4.0,       # 좌우 잘린 크롭 배제 여유
+                "crop_max_area_fraction": 0.5,    # 초근접(몸통 조각) 크롭 배제
+                "recovery_confirm_frames": 10,    # 재잠금 연속 확인 (30fps 0.33초)
+                "recovery_max_speed_px_per_sec": 300.0,  # 타당성: 중심 이동 속도
+                "recovery_center_slack_px": 60.0,
+                "recovery_size_change_rate": 0.7,  # 타당성: 초당 크기 비율 변화
+                "post_recovery_update_delay_sec": 2.0,  # 재잠금 후 뱅크 갱신 유예
             }],
         ),
         Node(

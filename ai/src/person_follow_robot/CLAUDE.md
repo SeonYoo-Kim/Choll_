@@ -47,6 +47,7 @@ cd ~/Choll
 ros2 launch person_follow_robot follow_robot_launch.py
 #   video_path:=/path/to.mp4      # USB 카메라 대신 영상 입력
 #   save_debug_video:=true        # /debug/image를 result.mp4로 저장
+#   threshold:=0.80               # Re-ID 유사도 임계값 실험 (기본 0.85)
 
 # 터미널 3) 타겟 선택 — 기본은 자동 (카메라 앞에 서면 최대 bbox가 0.5초 뒤 자동 선택됨)
 # 수동으로 고르고 싶을 때만 (launch에 auto_select_enabled:=false 주고):
