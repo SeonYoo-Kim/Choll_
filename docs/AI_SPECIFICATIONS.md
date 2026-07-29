@@ -40,17 +40,22 @@
 
 * Initialization : 2 seconds
 * Maximum Features : 20
-* Update : Online
+* Update : Online, sampled every 0.3 s (per-frame updates fill the FIFO with
+  near-identical views and break recovery — 2026-07-29 field finding)
+* Crop quality gate : side-clipped or close-up (>50 % of frame) boxes are
+  rejected (OSNet expects full-body 128x256 crops)
 
-* Threshold : 0.90
+* Threshold : 0.85 (0.90 rejected genuine re-appearances in field tests;
+  other persons scored ≤0.68)
 * Replacement : FIFO
 
 
 
 ## Target Recovery
 
-When ByteTrack loses the target, compare all detected persons using cosine similarity.  
-Select the highest similarity.
+When ByteTrack loses the target, compare all detected persons using cosine similarity.
+Accept the highest similarity if it exceeds the threshold **and** leads the
+runner-up by at least the recovery margin (0.05) to avoid misidentification.
 
 
 

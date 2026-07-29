@@ -13,6 +13,33 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-29 14:33 — ✅ 83 passed (+12 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check reid_node.py reid_logic.py launch test_reid_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `2aec0ff` 이후 작업 트리 (재인식 개선, 커밋 전)
+- **맥락**: 실기 영상(result10.mp4) 분석 — 전신·정면 재등장에도 재인식 실패.
+  원인: ①초근접(몸통 조각) 크롭으로 뱅크 등록 ②매 프레임 추가로 FIFO 뱅크가
+  최근 0.7초 동일 모습만 보유 ③임계값 0.90 과도(재등장 동일인 기각, 타인은 ≤0.68).
+  - `reid_logic.py` 신규 (순수): `crop_quality_ok`(좌우 잘림·초근접 배제,
+    상하 접촉은 1m 추종 정상 상태라 허용), `accept_recovery`(임계값 + 1·2위 마진).
+  - reid_node: 피처 추가 0.3초 샘플링(`feature_sample_interval_sec`, 재탐색
+    성공 직후는 force), 크롭 품질 게이트를 등록·갱신·자동선택에 적용,
+    임계값 0.90→0.85, `recovery_margin`=0.05.
+  - AI_SPECIFICATIONS.md의 Memory Bank/Recovery 절 동기 갱신.
+  - 신규 테스트 12개: 크롭 품질 6(잘림/초근접/상하 허용), 수락 판정 6(마진 포함).
+- **주의**: 실기 재검증 필요 — result10.mp4와 같은 시나리오(초근접 등록 시도 →
+  자동선택 보류되는지, 상실 후 전신 재등장 → 재인식되는지).
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 83 passed in 0.16s ==============================
+```
+
+</details>
+
 ## 2026-07-29 14:06 — ✅ 71 passed (+9 신규), ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check reid_node.py target_auto_select.py launch test_auto_select.py`

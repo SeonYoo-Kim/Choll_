@@ -26,6 +26,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Int32, String
 from vision_msgs.msg import Detection2D, Detection2DArray
 
+from .reid_logic import accept_recovery, crop_quality_ok
 from .target_auto_select import AutoSelectStabilizer, largest_track
 
 
@@ -227,11 +228,15 @@ class ReidNode(Node):
         super().__init__("reid_node")
         self.declare_parameter("registration_duration_sec", 2.0)
         self.declare_parameter("memory_bank_max_features", 20)
-        self.declare_parameter("similarity_threshold", 0.90)
+        self.declare_parameter("similarity_threshold", 0.85)
         self.declare_parameter("osnet_device", "auto")
         self.declare_parameter("auto_select_enabled", True)
         self.declare_parameter("auto_select_stable_frames", 15)  # 30fps 기준 0.5초
         self.declare_parameter("auto_select_min_area_px", 5000.0)
+        self.declare_parameter("feature_sample_interval_sec", 0.3)  # 뱅크 다양성
+        self.declare_parameter("recovery_margin", 0.05)  # 1위-2위 최소 격차
+        self.declare_parameter("crop_side_margin_px", 4.0)  # 좌우 잘림 판정 여유
+        self.declare_parameter("crop_max_area_fraction", 0.5)  # 초근접 배제
 
         self._registration_duration_sec = float(
             self.get_parameter("registration_duration_sec").value
@@ -240,6 +245,18 @@ class ReidNode(Node):
         similarity_threshold = float(
             self.get_parameter("similarity_threshold").value
         )
+        self._similarity_threshold = similarity_threshold
+        self._feature_sample_interval_sec = float(
+            self.get_parameter("feature_sample_interval_sec").value
+        )
+        self._recovery_margin = float(self.get_parameter("recovery_margin").value)
+        self._crop_side_margin_px = float(
+            self.get_parameter("crop_side_margin_px").value
+        )
+        self._crop_max_area_fraction = float(
+            self.get_parameter("crop_max_area_fraction").value
+        )
+        self._last_feature_added_at: float | None = None
         osnet_device = str(self.get_parameter("osnet_device").value)
         self._auto_select_enabled = bool(
             self.get_parameter("auto_select_enabled").value
@@ -330,7 +347,13 @@ class ReidNode(Node):
         self._start_memory_bank_initialization(selected_id)
 
     def _try_auto_select(self, candidates: list[TrackCandidate]) -> None:
-        """가장 큰 bbox 트랙이 연속으로 관찰되면 자동 선택한다."""
+        """가장 큰 bbox 트랙이 연속으로 관찰되면 자동 선택한다.
+
+        잘리거나 초근접인 bbox는 후보에서 제외한다 — 그런 크롭으로 등록하면
+        Memory Bank가 몸통 조각으로 오염되어 재인식이 망가진다.
+        """
+        if self._latest_image is None:
+            return  # 등록에 이미지가 필요하므로 이미지 수신 전에는 선택 보류
         track_areas = [
             (
                 candidate.track_id,
@@ -338,6 +361,7 @@ class ReidNode(Node):
                 * float(candidate.detection.bbox.size_y),
             )
             for candidate in candidates
+            if self._crop_quality_ok(candidate)
         ]
         nearest_id = largest_track(track_areas, self._auto_select_min_area_px)
         confirmed_id = self._auto_select_stabilizer.observe(nearest_id)
@@ -352,9 +376,28 @@ class ReidNode(Node):
         self._auto_select_stabilizer.reset()
         self._start_memory_bank_initialization(confirmed_id)
 
+    def _crop_quality_ok(self, candidate: TrackCandidate) -> bool:
+        """후보 bbox가 Re-ID 피처로 쓸 만한 크롭인지 판정한다."""
+        image = self._latest_image
+        if image is None:
+            return False
+        image_height, image_width = image.shape[:2]
+        center_x, center_y = _get_bbox_center(candidate.detection)
+        return crop_quality_ok(
+            center_x,
+            center_y,
+            float(candidate.detection.bbox.size_x),
+            float(candidate.detection.bbox.size_y),
+            float(image_width),
+            float(image_height),
+            self._crop_side_margin_px,
+            self._crop_max_area_fraction,
+        )
+
     def _start_memory_bank_initialization(self, selected_id: int) -> None:
         self._target_track_id = selected_id
         self._registration_started_at = time.monotonic()
+        self._last_feature_added_at = None  # 첫 피처는 즉시 수집
         self._memory_bank.clear()
         self._state = ReIdState.INITIALIZING
         self.get_logger().info(f"Target selected: ID={selected_id}")
@@ -458,7 +501,7 @@ class ReidNode(Node):
             recovery.candidate.track_id,
             recovery.best_similarity,
         )
-        self._add_target_feature(recovery.candidate)
+        self._add_target_feature(recovery.candidate, force=True)
         self.get_logger().info(
             f"Recovery Success: Recovered target as Track ID={self._target_track_id}"
         )
@@ -506,21 +549,30 @@ class ReidNode(Node):
         self.get_logger().info(
             f"Best Candidate: ID={best_id}, similarity={best_score:.3f}"
         )
-        if best_candidate is None or not self._memory_bank.is_above_threshold(
-            best_score
-        ):
-            self.get_logger().info(
-                f"Recovery Failure: best similarity below threshold "
-                f"(best={best_score:.3f})"
-            )
+        accepted_id = accept_recovery(
+            candidate_scores, self._similarity_threshold, self._recovery_margin
+        )
+        if accepted_id is None:
+            if best_candidate is not None and best_score >= self._similarity_threshold:
+                # 임계값은 넘었지만 2위와의 격차 부족 → 오인 방지 위해 보류
+                self.get_logger().info(
+                    "Recovery Failure: ambiguous match, runner-up within margin "
+                    f"(best={best_score:.3f}, margin={self._recovery_margin})"
+                )
+            else:
+                self.get_logger().info(
+                    f"Recovery Failure: best similarity below threshold "
+                    f"(best={best_score:.3f})"
+                )
             return RecoveryResult(None, candidate_scores, similarity_count, best_score)
 
+        accepted = self._find_candidate(candidates, accepted_id)
         self.get_logger().info(
-            f"Recovery match accepted: ID={best_candidate.track_id}, "
+            f"Recovery match accepted: ID={accepted_id}, "
             f"similarity={best_score:.3f}"
         )
         return RecoveryResult(
-            best_candidate,
+            accepted,
             candidate_scores,
             similarity_count,
             best_score,
@@ -564,7 +616,7 @@ class ReidNode(Node):
         )
 
     def _add_target_feature(
-        self, candidate: TrackCandidate
+        self, candidate: TrackCandidate, force: bool = False
     ) -> FeatureUpdateResult | None:
         image = self._latest_image
         if image is None:
@@ -574,12 +626,28 @@ class ReidNode(Node):
             )
             return None
 
+        # 샘플링 간격: 매 프레임 추가하면 FIFO 뱅크가 최근 0.7초의 동일한
+        # 모습으로만 채워져 재인식이 망가진다. 간격을 두어 다양성을 확보.
+        # (재탐색 성공 직후는 force=True — 새 각도의 피처를 즉시 반영)
+        now = time.monotonic()
+        if (
+            not force
+            and self._last_feature_added_at is not None
+            and now - self._last_feature_added_at < self._feature_sample_interval_sec
+        ):
+            return None
+
+        # 잘리거나 초근접인 크롭은 뱅크를 오염시키므로 건너뛴다
+        if not self._crop_quality_ok(candidate):
+            return None
+
         try:
             feature = self._feature_extractor.extract(image, candidate.detection)
             best_similarity, similarity_count = (
                 self._memory_bank.best_similarity_with_count(feature)
             )
             self._memory_bank.add(feature)
+            self._last_feature_added_at = now
             return FeatureUpdateResult(
                 similarity_count=similarity_count,
                 best_similarity=best_similarity,

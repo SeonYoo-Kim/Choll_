@@ -71,11 +71,15 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 "registration_duration_sec": 2.0,
                 "memory_bank_max_features": 20,
-                "similarity_threshold": 0.90,
+                "similarity_threshold": 0.85,     # 0.90은 재등장 동일인도 기각 (실측)
                 "osnet_device": "auto",
                 "auto_select_enabled": True,      # 최대 bbox(=최근접) 자동 선택
                 "auto_select_stable_frames": 15,  # 30fps 기준 0.5초 연속 최대
                 "auto_select_min_area_px": 5000.0,
+                "feature_sample_interval_sec": 0.3,  # 뱅크 다양성 (매 프레임 추가 금지)
+                "recovery_margin": 0.05,          # 재탐색 1위-2위 최소 격차
+                "crop_side_margin_px": 4.0,       # 좌우 잘린 크롭 배제 여유
+                "crop_max_area_fraction": 0.5,    # 초근접(몸통 조각) 크롭 배제
             }],
         ),
         Node(
