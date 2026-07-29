@@ -103,7 +103,9 @@ export function useCartMapEvents(cartId: number): void {
         if (!payload.valid || !mapInfo) {
           return;
         }
-        useCartMapStore.getState().applyPosition(displayToPercent(payload, mapInfo));
+        useCartMapStore
+          .getState()
+          .applyPosition(displayToPercent(payload, mapInfo), payload.yaw);
       },
     );
 
