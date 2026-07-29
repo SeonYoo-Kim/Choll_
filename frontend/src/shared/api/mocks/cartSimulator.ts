@@ -11,7 +11,7 @@ import { CartDetailStatus } from '@/shared/api/generated/model';
 
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
 import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
-import type { CartWsEvent, NavigationStatus } from '@/shared/api/ws/cartSocket';
+import type { CartWsEvent, FollowStatus, NavigationStatus } from '@/shared/api/ws/cartSocket';
 
 /**
  * 개발용 카트 이동 시뮬레이터 (가짜 BE).
@@ -112,6 +112,33 @@ export function startCartMove(zoneId: number): void {
   );
 }
 
+/** 추종 상태 (추종 명령 모킹용) */
+let followStatus: FollowStatus = 'STOPPED';
+
+function broadcastFollow(status: FollowStatus): void {
+  followStatus = status;
+  broadcast({ type: 'FOLLOW_STATUS_UPDATED', payload: { status } });
+}
+
+/** 추종 시작(또는 재개) — 실제 BE처럼 WS FOLLOW_STATUS_UPDATED(WS-FE-07)를 브로드캐스트 */
+export function startCartFollow(): void {
+  broadcastFollow('STARTED');
+}
+
+/** 추종 일시정지 — 추종 중일 때만 유효 */
+export function pauseCartFollow(): void {
+  if (followStatus === 'STARTED') {
+    broadcastFollow('PAUSED');
+  }
+}
+
+/** 추종 종료 */
+export function stopCartFollow(): void {
+  if (followStatus !== 'STOPPED') {
+    broadcastFollow('STOPPED');
+  }
+}
+
 /** NAV-02 목적지 이동 취소 — 예약된 브로드캐스트를 모두 취소하고 CANCELLED를 알린다 */
 export function stopCartMove(): void {
   moveTimers.forEach(clearTimeout);
@@ -127,7 +154,11 @@ export function cartDetailFixture(cartId: number): CartDetail {
   return {
     id: cartId,
     name: '쫄래쫄래 1호',
-    status: isMoving ? CartDetailStatus.MOVING : CartDetailStatus.IDLE,
+    status: isMoving
+      ? CartDetailStatus.MOVING
+      : followStatus === 'STARTED'
+        ? CartDetailStatus.FOLLOWING
+        : CartDetailStatus.IDLE,
     online: true,
     mapId: mapInfoFixture.id,
     currentZoneId: isMoving || currentZoneIndex === null ? null : currentZoneIndex + 1,

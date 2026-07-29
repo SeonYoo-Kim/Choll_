@@ -51,6 +51,12 @@
   color: #776f65;
 }
 
+// 일시정지 — 재개 가능함을 알리는 앰버 톤
+.paused {
+  background: #fdf3e0;
+  color: #a97c2f;
+}
+
 .stop {
   background: $danger-bg;
   color: #bd6257;
