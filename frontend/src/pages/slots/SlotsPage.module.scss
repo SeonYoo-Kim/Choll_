@@ -62,14 +62,8 @@
   }
 }
 
-.count {
-  margin: $spacing-md 0 0;
-  font-size: 12px;
-  color: #9a9185;
-}
-
 .board {
-  margin-top: 12px;
+  margin-top: 32px; // 필터 칩과 보드 사이 한 줄 여백
   display: grid;
   // minmax(0, 1fr): 열 폭을 콘텐츠(긴 책 제목)와 무관하게 균등 고정
   grid-template-columns: repeat(2, minmax(0, 1fr));

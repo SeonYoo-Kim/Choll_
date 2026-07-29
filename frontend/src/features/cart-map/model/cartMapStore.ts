@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { ZONE_POSITIONS, zoneIndexOf } from './zones';
+import { START_POSITION, zoneIndexOf } from './zones';
 
 import type { MapPercent } from './mapTransform';
 import type { CartDetailStatus } from '@/shared/api/generated/model';

@@ -1,7 +1,12 @@
 import { ws } from 'msw';
 
 import { percentToDisplay } from '@/features/cart-map/model/mapTransform';
-import { CORRIDOR_Y, ZONE_POSITIONS, zoneIndexOf } from '@/features/cart-map/model/zones';
+import {
+  CORRIDOR_Y,
+  START_POSITION,
+  ZONE_POSITIONS,
+  zoneIndexOf,
+} from '@/features/cart-map/model/zones';
 import { CartDetailStatus } from '@/shared/api/generated/model';
 
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
@@ -24,8 +29,8 @@ export const mapInfoFixture: MapInfo = {
   resolution: 0.05,
   originX: 0,
   originY: 0,
-  imageWidth: 1000,
-  imageHeight: 800,
+  imageWidth: 1174,
+  imageHeight: 631,
 };
 
 // 주의: 'ws://*/...'처럼 호스트가 와일드카드인 절대 URL 패턴은 브라우저의 URL 해석 과정에서
@@ -37,7 +42,8 @@ export const cartWsHandler = cartWsLink.addEventListener('connection', () => {})
 
 const STEP_MS = 340;
 
-let currentZoneIndex = 2;
+/** 현재 구역 인덱스 (null = 출발 지점 대기 — 이동·추종으로 움직이기 전 초기 상태) */
+let currentZoneIndex: number | null = null;
 let isMoving = false;
 let navigationCounter = 0;
 let moveTimers: ReturnType<typeof setTimeout>[] = [];
@@ -73,8 +79,8 @@ export function startCartMove(zoneId: number): void {
   }
   isMoving = true;
   navigationCounter += 1;
-  const departureZoneId = currentZoneIndex + 1;
-  const start = ZONE_POSITIONS[currentZoneIndex];
+  const departureZoneId = currentZoneIndex === null ? null : currentZoneIndex + 1;
+  const start = currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex];
   const destination = ZONE_POSITIONS[destinationIndex];
 
   broadcastNavigation('ACCEPTED', zoneId);
@@ -124,9 +130,12 @@ export function cartDetailFixture(cartId: number): CartDetail {
     status: isMoving ? CartDetailStatus.MOVING : CartDetailStatus.IDLE,
     online: true,
     mapId: mapInfoFixture.id,
-    currentZoneId: isMoving ? null : currentZoneIndex + 1,
-    currentZoneName: isMoving ? null : `${currentZoneIndex + 1}구역`,
-    position: percentToDisplay(ZONE_POSITIONS[currentZoneIndex], mapInfoFixture),
+    currentZoneId: isMoving || currentZoneIndex === null ? null : currentZoneIndex + 1,
+    currentZoneName: isMoving || currentZoneIndex === null ? null : `${currentZoneIndex + 1}구역`,
+    position: percentToDisplay(
+      currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex],
+      mapInfoFixture,
+    ),
     lastSeenAt: new Date().toISOString(),
   };
 }
