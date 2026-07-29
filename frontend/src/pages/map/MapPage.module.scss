@@ -129,6 +129,26 @@
   color: #398c80;
 }
 
+// 이동 중지 — 이동 중일 때만 활성화되는 위험 톤 버튼
+.stopButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 82px; // 위 statCard(패딩 16 + 라벨 + 값)의 렌더링 높이와 맞춤
+  border-radius: $radius-tile;
+  background: $danger-bg;
+  padding: $spacing-md;
+  font-size: 14px;
+  font-weight: 700;
+  color: #bd6257;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
 // 구역 라벨과 구역 이름 사이 간격 — 이름 안의 '·'(철학·종교)와 헷갈리지 않게 넓게 띄운다
 .zoneName {
   margin-left: 0.6em;
