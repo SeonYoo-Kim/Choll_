@@ -126,6 +126,7 @@ export class CartSocket {
     socket.onmessage = (message: MessageEvent<string>) => {
       try {
         const event = JSON.parse(message.data) as CartWsEvent;
+        console.log('[CartSocket] 위치 이벤트 수신:', event.payload);
         this.handlers.get(event.type)?.forEach((handler) => handler(event));
       } catch (error) {
         console.error('[CartSocket] 이벤트 파싱 실패:', error, message.data);
