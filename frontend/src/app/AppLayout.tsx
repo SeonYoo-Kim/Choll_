@@ -2,6 +2,9 @@ import { Home, MapPin, PackageOpen, Search } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
 import logo from '@/assets/logo.png';
+import { useCartMapEvents } from '@/features/cart-map/model/useCartMapEvents';
+import { CartSocketProvider } from '@/shared/api/ws/CartSocketProvider';
+import { DEMO_CART_ID } from '@/shared/config/cart';
 import { Toast } from '@/shared/ui/toast/Toast';
 
 import styles from './AppLayout.module.scss';
@@ -17,51 +20,60 @@ const NAV_ITEMS = [
 // const MOBILE_NAV_ITEMS = [...NAV_ITEMS, { to: '/settings', label: '설정', Icon: Settings2 }];
 const MOBILE_NAV_ITEMS = [...NAV_ITEMS];
 
+/** 전역 WS 이벤트를 스토어에 동기화 — 어떤 페이지에서든 카트 상태가 실시간으로 움직인다 */
+function CartRealtimeSync() {
+  useCartMapEvents(DEMO_CART_ID);
+  return null;
+}
+
 /** 공통 레이아웃 — 데스크톱 사이드바 + 모바일 하단 탭 + 페이지 Outlet. */
 export function AppLayout() {
   return (
-    <main className={styles.page}>
-      <section className={styles.frame}>
-        <aside className={styles.sidebar}>
-          <img src={logo} alt="사서만 쫄래쫄래 로고" className={styles.logo} />
-          <div className={styles.nav}>
+    <CartSocketProvider cartId={DEMO_CART_ID}>
+      <CartRealtimeSync />
+      <main className={styles.page}>
+        <section className={styles.frame}>
+          <aside className={styles.sidebar}>
+            <img src={logo} alt="사서만 쫄래쫄래 로고" className={styles.logo} />
+            <div className={styles.nav}>
+              {MOBILE_NAV_ITEMS.map(({ to, label, Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/'}
+                  className={({ isActive }) =>
+                    `${styles.navItem} ${isActive ? styles.navActive : ''}`
+                  }
+                >
+                  <Icon size={18} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          </aside>
+          <div className={styles.main}>
+            <div className={styles.content}>
+              <Outlet />
+            </div>
+          </div>
+          <nav className={styles.mobileNav}>
             {MOBILE_NAV_ITEMS.map(({ to, label, Icon }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={to === '/'}
                 className={({ isActive }) =>
-                  `${styles.navItem} ${isActive ? styles.navActive : ''}`
+                  `${styles.mobileNavItem} ${isActive ? styles.mobileNavActive : ''}`
                 }
               >
-                <Icon size={18} />
+                <Icon size={20} />
                 {label}
               </NavLink>
             ))}
-          </div>
-        </aside>
-        <div className={styles.main}>
-          <div className={styles.content}>
-            <Outlet />
-          </div>
-        </div>
-        <nav className={styles.mobileNav}>
-          {MOBILE_NAV_ITEMS.map(({ to, label, Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                `${styles.mobileNavItem} ${isActive ? styles.mobileNavActive : ''}`
-              }
-            >
-              <Icon size={20} />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-      </section>
-      <Toast />
-    </main>
+          </nav>
+        </section>
+        <Toast />
+      </main>
+    </CartSocketProvider>
   );
 }

@@ -14,10 +14,12 @@ import styles from './HomePage.module.scss';
 export function HomePage() {
   const navigate = useNavigate();
   const runState = useCartControlStore((state) => state.runState);
-  const { cartZone, isMoving } = useCartMapStore();
+  const { cartZone, isMoving, cartStatus } = useCartMapStore();
   const { data: slots } = useListSlots(DEMO_CART_ID);
 
   const following = runState === 'FOLLOWING';
+  // 이동 명령 세션(isMoving) 또는 위치 변화로 감지한 움직임(cartStatus)
+  const cartActive = isMoving || cartStatus === 'MOVING';
   // 이동 중(구역 밖)이면 null — 구역 표시 대신 이동 중 문구를 쓴다
   const currentArea = cartZone === null ? null : zoneLabel(cartZone);
   const areaBookCount =
@@ -48,6 +50,8 @@ export function HomePage() {
                 {cartZone === null ? (
                   isMoving ? (
                     '목적지로 이동 중'
+                  ) : cartActive ? (
+                    '카트가 움직이는 중'
                   ) : (
                     '출발 지점에서 대기 중'
                   )
@@ -58,7 +62,7 @@ export function HomePage() {
                   </>
                 )}
               </h2>
-              {!isMoving && cartZone !== null && (
+              {!cartActive && cartZone !== null && (
                 <span className={styles.arrivedBadge}>도착!</span>
               )}
             </div>

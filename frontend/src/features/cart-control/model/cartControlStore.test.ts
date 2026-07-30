@@ -22,4 +22,17 @@ describe('cartControlStore', () => {
     useCartControlStore.getState().setConnected(true);
     expect(useCartControlStore.getState().connected).toBe(true);
   });
+
+  it('applyFollowStatus는 추종 상태를 운행 상태로 매핑한다', () => {
+    const { applyFollowStatus } = useCartControlStore.getState();
+
+    applyFollowStatus('STARTED');
+    expect(useCartControlStore.getState().runState).toBe('FOLLOWING');
+
+    applyFollowStatus('PAUSED');
+    expect(useCartControlStore.getState().runState).toBe('PAUSED');
+
+    applyFollowStatus('STOPPED');
+    expect(useCartControlStore.getState().runState).toBe('STOPPED');
+  });
 });

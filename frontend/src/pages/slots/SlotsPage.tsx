@@ -21,7 +21,11 @@ export function SlotsPage() {
   const [selected, setSelected] = useState<Slot | null>(null);
 
   const allSlots = useMemo(() => slots ?? [], [slots]);
-  const currentArea = zoneLabel(cartZone);
+  // cartZone null = 통로·출발 지점(어느 구역도 아님). zoneLabel에 그냥 넘기면 "1구역"이 되어 거짓말을 한다
+  const currentArea = cartZone === null ? null : zoneLabel(cartZone);
+  // 구역을 벗어나면 현재 구역 필터가 성립하지 않으므로 전체로 간주한다
+  const effectiveFilter: SlotFilter =
+    filter === 'currentArea' && currentArea === null ? 'all' : filter;
 
   const counts = useMemo(
     () => ({
@@ -34,7 +38,7 @@ export function SlotsPage() {
   );
 
   const filteredSlots = useMemo(() => {
-    switch (filter) {
+    switch (effectiveFilter) {
       case 'book':
         return allSlots.filter((s) => s.status === SlotStatus.OCCUPIED);
       case 'empty':
@@ -42,18 +46,22 @@ export function SlotsPage() {
       case 'error':
         return allSlots.filter((s) => s.status === SlotStatus.RECOGNITION_FAILED);
       case 'currentArea':
-        return allSlots.filter((s) => s.book?.zoneName === currentArea);
+        // currentArea가 null이면 zoneName이 없는 책들이 걸리므로 비교하지 않는다
+        return currentArea === null
+          ? allSlots
+          : allSlots.filter((s) => s.book?.zoneName === currentArea);
       default:
         return allSlots;
     }
-  }, [allSlots, filter, currentArea]);
+  }, [allSlots, effectiveFilter, currentArea]);
 
   const filters: { id: SlotFilter; label: string }[] = [
     { id: 'all', label: `전체 ${counts.all}` },
     { id: 'book', label: `책 있음 ${counts.book}` },
     { id: 'empty', label: `비어 있음 ${counts.empty}` },
     { id: 'error', label: `인식 실패 ${counts.error}` },
-    { id: 'currentArea', label: currentArea },
+    // 구역 밖에서는 현재 구역 필터가 의미 없으므로 칩을 감춘다
+    ...(currentArea === null ? [] : [{ id: 'currentArea' as const, label: currentArea }]),
   ];
 
   return (
@@ -68,8 +76,8 @@ export function SlotsPage() {
           <button
             key={f.id}
             onClick={() => setFilter(f.id)}
-            aria-pressed={filter === f.id}
-            className={`${styles.filterChip} ${filter === f.id ? styles.filterActive : ''}`}
+            aria-pressed={effectiveFilter === f.id}
+            className={`${styles.filterChip} ${effectiveFilter === f.id ? styles.filterActive : ''}`}
           >
             {f.label}
           </button>

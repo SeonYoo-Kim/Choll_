@@ -1,21 +1,41 @@
 ### [Jetson ↔ STM32 통신 및 인터페이스 규격]
 
-1. 하드웨어 및 통신 환경
-   - 통신 방식: UART Serial
-   - 보레이트(Baud Rate): 115200 bps (또는 460800, 921600 등)
-   - 통신 프로토콜: micro-ROS (ROS 2 Humble 기반)
+> ⚠️ 현재 작성 중인 문서입니다.
+> 통신 방식 및 메시지 형식은 아직 확정되지 않았으며,
+> 아래 내용은 최종 구현 전에 반드시 검토해야 합니다.
 
-2. 수신 토픽 (Jetson -> STM32)
-   - 토픽명: `/wheel_speed_cmd`
-   - 메시지 타입: std_msgs/msg/Int32MultiArray
-   - 데이터 매핑:
-     - data[0]: 0 (int32, 0: 모터 제어, 1: LED 제어) 
-     - data[1]: 좌측 바퀴 목표 RPM (int32)
-     - data[2]: 우측 바퀴 목표 RPM (int32)
-   - 발행 주기: 10Hz ~ 12Hz
+## 1. 하드웨어 및 통신 환경
 
-3. STM32에서 구현해야 할 micro-ROS 흐름
-   - STM32CubeMX에서 UART 인터럽트/DMA 활성화
-   - micro_ros_stm32_cubemx 라이브러리 포팅
-   - `std_msgs__msg__Int32MultiArray` 구조체 구독자(Subscriber) 생성
-   - 콜백 함수 안에서 data[0], data[1] 값을 파싱하여 모터 PID 제어 루프에 입력
+- 물리 연결: USB Serial (예정)
+- Baud Rate: TBD
+- 통신 프로토콜: TBD
+
+후보
+- USB Serial
+- micro-ROS
+
+---
+
+## 2. Jetson → STM32
+
+역할
+
+- Jetson은 주행 명령을 STM32에 전달한다.
+- STM32는 이를 기반으로 모터를 제어한다.
+
+메시지 형식
+
+- TBD
+
+---
+
+## 3. STM32 → Jetson
+
+역할
+
+- 엔코더 기반 바퀴 상태 전달
+- 모터 상태 전달
+
+메시지 형식
+
+- TBD
