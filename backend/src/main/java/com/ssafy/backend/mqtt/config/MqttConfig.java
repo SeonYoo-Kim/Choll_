@@ -78,7 +78,7 @@ public class MqttConfig {
 				rfidHandler.handle(message);
 				return;
 			}
-			if (topic != null && topic.matches("^carts/\\d+/status$")) {
+			if (properties.getStatusTopic().equals(topic)) {
 				heartbeatHandler.handle(message);
 				return;
 			}

@@ -37,10 +37,10 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시)
 - **MQTT** (EM→BE, 현재 확정분):
   - `carts/{cartId}/telemetry/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계
-  - `choll/cart/rfid` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정).
-    ⚠️ 페이로드에 cartId가 없어 `mqtt.rfid-cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 EM과 재협의 필요
-  - `carts/{cartId}/status` (하트비트) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
-    무신호 시 워치독이 OFFLINE 전환. ⚠️ 페이로드 형식은 EM 미확정 — timestamp 외 필드는 무시 중
+  - `choll/cart/rfid` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
+  - `carts/status` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
+    무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
+  - ⚠️ 하트비트·RFID 토픽에 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 EM과 재협의 필요
   ⚠️ BE→EM 명령 토픽(이동·추종·LED·RFID 재인식)은 명세 작성 중 — 확정 시 API 명세서에 먼저 반영할 것
 
 ## 참고 문서

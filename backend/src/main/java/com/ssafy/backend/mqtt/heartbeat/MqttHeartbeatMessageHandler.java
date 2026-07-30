@@ -2,10 +2,9 @@ package com.ssafy.backend.mqtt.heartbeat;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.stereotype.Component;
@@ -13,7 +12,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * carts/{cartId}/status 하트비트 메시지를 파싱해 연결 상태 갱신으로 넘긴다.
+ * carts/status 하트비트 메시지를 파싱해 연결 상태 갱신으로 넘긴다.
+ * 토픽에 cartId가 없어(단일 카트 가정) mqtt.cart-id 설정값으로 귀속한다.
  * EM 페이로드 명세가 미확정이라 timestamp 외 필드는 무시하고,
  * 파싱 불가 페이로드도 생존 신호(수신 시각 기준)로 취급한다.
  */
@@ -22,35 +22,29 @@ public class MqttHeartbeatMessageHandler {
 
 	private static final Logger log =
 		LoggerFactory.getLogger(MqttHeartbeatMessageHandler.class);
-	private static final Pattern STATUS_TOPIC =
-		Pattern.compile("^carts/(\\d+)/status$");
 
 	private final ObjectMapper objectMapper;
 	private final CartConnectionService cartConnectionService;
+	private final long cartId;
 
 	public MqttHeartbeatMessageHandler(
 		ObjectMapper objectMapper,
-		CartConnectionService cartConnectionService
+		CartConnectionService cartConnectionService,
+		@Value("${mqtt.cart-id:1}") long cartId
 	) {
 		this.objectMapper = objectMapper;
 		this.cartConnectionService = cartConnectionService;
+		this.cartId = cartId;
 	}
 
 	public void handle(Message<?> message) {
-		String topic = message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC, String.class);
 		log.info(
 			"[MQTT RECEIVE] topic={}, payload={}",
-			topic,
+			message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC, String.class),
 			message.getPayload()
 		);
-		Matcher matcher = STATUS_TOPIC.matcher(topic == null ? "" : topic);
-		if (!matcher.matches()) {
-			log.warn("지원하지 않는 MQTT 하트비트 토픽입니다. topic={}", topic);
-			return;
-		}
-
 		cartConnectionService.heartbeat(
-			Long.parseLong(matcher.group(1)),
+			cartId,
 			parseMeasuredAt(String.valueOf(message.getPayload()))
 		);
 	}
