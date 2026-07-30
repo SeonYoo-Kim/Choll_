@@ -15,6 +15,7 @@ import org.springframework.integration.core.MessageProducer;
 import org.springframework.integration.mqtt.core.DefaultMqttPahoClientFactory;
 import org.springframework.integration.mqtt.core.MqttPahoClientFactory;
 import org.springframework.integration.mqtt.inbound.MqttPahoMessageDrivenChannelAdapter;
+import org.springframework.integration.mqtt.outbound.MqttPahoMessageHandler;
 import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.MessageChannel;
@@ -61,6 +62,26 @@ public class MqttConfig {
 		adapter.setConverter(new DefaultPahoMessageConverter());
 		adapter.setOutputChannel(mqttInputChannel);
 		return adapter;
+	}
+
+	@Bean
+	public MessageChannel mqttOutboundChannel() {
+		return new DirectChannel();
+	}
+
+	@Bean
+	@ServiceActivator(inputChannel = "mqttOutboundChannel")
+	public MessageHandler mqttOutbound(
+		MqttProperties properties,
+		MqttPahoClientFactory mqttClientFactory
+	) {
+		MqttPahoMessageHandler handler = new MqttPahoMessageHandler(
+			properties.getClientId() + "-pub",
+			mqttClientFactory
+		);
+		handler.setAsync(true);
+		handler.setDefaultQos(properties.getQos());
+		return handler;
 	}
 
 	@Bean

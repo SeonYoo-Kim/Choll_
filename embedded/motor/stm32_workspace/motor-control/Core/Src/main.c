@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "app.h"
+#include "app_event.h"
+#include "serial_rx.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,37 +49,13 @@ TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim8;
 
+UART_HandleTypeDef huart2;
+
 /* USER CODE BEGIN PV */
 
-//Motor1
-//PWM     : TIM3 CH1 / CH2
-//Encoder : TIM2
-//Enable  : PB8 / PB9
-
-//Motor2
-//PWM     : TIM4 CH1 / CH2
-//Encoder : TIM8
-//Enable  : PA9 / PA8
-
-/* =========================================================
- * Motor1 Encoder Variables
- * - TIM2 엔코더의 현재값, 변화량, 누적값을 저장
- * ========================================================= */
-volatile uint16_t motor1_encoder_raw = 0;
-volatile uint16_t motor1_previous_count = 0;
-volatile int16_t  motor1_encoder_delta = 0;
-volatile int32_t  motor1_encoder_total = 0;
-
-
-/* =========================================================
- * Motor2 Encoder Variables
- * - TIM8 엔코더의 현재값, 변화량, 누적값을 저장
- * ========================================================= */
-volatile uint16_t motor2_encoder_raw = 0;
-volatile uint16_t motor2_previous_count = 0;
-volatile int16_t  motor2_encoder_delta = 0;
-volatile int32_t  motor2_encoder_total = 0;
-
+/* HAL_UART_Receive_IT()가 인터럽트 컨텍스트에서 계속 참조하는 1-byte 수신 버퍼.
+ * SerialRx의 Ring Buffer로 옮겨 담긴 뒤 매번 재등록된다. */
+static uint8_t serial_rx_isr_byte = 0;
 
 /* USER CODE END PV */
 
@@ -88,184 +66,13 @@ static void MX_TIM3_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM8_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
-/* 기본 주행 함수 */
-static void Motor_Forward(uint16_t pwm);
-static void Motor_Backward(uint16_t pwm);
-static void Motor_TurnRight(uint16_t pwm);
-static void Motor_TurnLeft(uint16_t pwm);
-static void Motor_Stop(void);
-
-/* 지정 시간 동안 엔코더를 계속 갱신 */
-static void Motor_WaitAndUpdateEncoder(uint32_t duration_ms);
-
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-/**
- * @brief PWM 값을 TIM3/TIM4의 범위인 0~99로 제한
- */
-static uint16_t Motor_LimitPwm(uint16_t pwm)
-{
-    if (pwm > 99)
-    {
-        pwm = 99;
-    }
-
-    return pwm;
-}
-
-
-/**
- * @brief 로봇 전진
- *
- * 왼쪽 모터:
- * - TIM3 CH2를 사용해야 차체 기준 전진
- *
- * 오른쪽 모터:
- * - TIM4 CH1을 사용해야 차체 기준 전진
- */
-static void Motor_Forward(uint16_t pwm)
-{
-    pwm = Motor_LimitPwm(pwm);
-
-    /* Motor1: 왼쪽 모터 전진 */
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm);
-
-    /* Motor2: 오른쪽 모터 전진 */
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-}
-
-
-/**
- * @brief 로봇 후진
- *
- * 왼쪽과 오른쪽 모터를 전진의 반대 방향으로 회전
- */
-static void Motor_Backward(uint16_t pwm)
-{
-    pwm = Motor_LimitPwm(pwm);
-
-    /* Motor1: 왼쪽 모터 후진 */
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm);
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-
-    /* Motor2: 오른쪽 모터 후진 */
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm);
-}
-
-
-/**
- * @brief 제자리 우회전
- *
- * 왼쪽 바퀴는 전진하고 오른쪽 바퀴는 후진
- */
-static void Motor_TurnRight(uint16_t pwm)
-{
-    pwm = Motor_LimitPwm(pwm);
-
-    /* Motor1: 왼쪽 모터 전진 */
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm);
-
-    /* Motor2: 오른쪽 모터 후진 */
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm);
-}
-
-
-/**
- * @brief 제자리 좌회전
- *
- * 왼쪽 바퀴는 후진하고 오른쪽 바퀴는 전진
- */
-static void Motor_TurnLeft(uint16_t pwm)
-{
-    pwm = Motor_LimitPwm(pwm);
-
-    /* Motor1: 왼쪽 모터 후진 */
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm);
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-
-    /* Motor2: 오른쪽 모터 전진 */
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-}
-
-
-/**
- * @brief 좌우 모터 즉시 정지
- */
-static void Motor_Stop(void)
-{
-    /* Motor1: 왼쪽 모터 정지 */
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-
-    /* Motor2: 오른쪽 모터 정지 */
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-}
-
-
-/**
- * @brief 지정된 시간 동안 엔코더 값을 10ms마다 갱신
- *
- * 단순 HAL_Delay(10000)을 사용하면 그동안 엔코더 변수를
- * 갱신하지 못하므로, 10ms 단위로 카운트를 읽는다.
- */
-static void Motor_WaitAndUpdateEncoder(uint32_t duration_ms)
-{
-    uint32_t start_time = HAL_GetTick();
-
-    while ((HAL_GetTick() - start_time) < duration_ms)
-    {
-        /* ================================================
-         * Motor1: 왼쪽 모터 엔코더 갱신
-         * - TIM2 사용
-         * ================================================ */
-        motor1_encoder_raw =
-            (uint16_t)__HAL_TIM_GET_COUNTER(&htim2);
-
-        motor1_encoder_delta =
-            (int16_t)(motor1_encoder_raw -
-                      motor1_previous_count);
-
-        motor1_previous_count =
-            motor1_encoder_raw;
-
-        motor1_encoder_total +=
-            motor1_encoder_delta;
-
-
-        /* ================================================
-         * Motor2: 오른쪽 모터 엔코더 갱신
-         * - TIM8 사용
-         * ================================================ */
-        motor2_encoder_raw =
-            (uint16_t)__HAL_TIM_GET_COUNTER(&htim8);
-
-        motor2_encoder_delta =
-            (int16_t)(motor2_encoder_raw -
-                      motor2_previous_count);
-
-        motor2_previous_count =
-            motor2_encoder_raw;
-
-        motor2_encoder_total +=
-            motor2_encoder_delta;
-
-        HAL_Delay(10);
-    }
-}
-
 
 /* USER CODE END 0 */
 
@@ -302,97 +109,14 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM4_Init();
   MX_TIM8_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  /* =========================================================
-   * Motor1 PWM Start
-   * - TIM3 CH1: Motor1 RPWM
-   * - TIM3 CH2: Motor1 LPWM
-   * ========================================================= */
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  App_Init();
 
-
-  /* =========================================================
-   * Motor2 PWM Start
-   * - TIM4 CH1: Motor2 RPWM
-   * - TIM4 CH2: Motor2 LPWM
-   * ========================================================= */
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
-
-
-  /* =========================================================
-   * Motor1 Encoder Start
-   * - TIM2 CH1/CH2를 Encoder Mode로 시작
-   * ========================================================= */
-  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
-
-
-  /* =========================================================
-   * Motor2 Encoder Start
-   * - TIM8 CH1/CH2를 Encoder Mode로 시작
-   * ========================================================= */
-  HAL_TIM_Encoder_Start(&htim8, TIM_CHANNEL_ALL);
-
-
-  /* =========================================================
-   * Motor1 Encoder Initialization
-   * - TIM2 카운터 및 소프트웨어 누적 변수를 0으로 초기화
-   * ========================================================= */
-  __HAL_TIM_SET_COUNTER(&htim2, 0);
-
-  motor1_encoder_raw = 0;
-  motor1_previous_count = 0;
-  motor1_encoder_delta = 0;
-  motor1_encoder_total = 0;
-
-
-  /* =========================================================
-   * Motor2 Encoder Initialization
-   * - TIM8 카운터 및 소프트웨어 누적 변수를 0으로 초기화
-   * ========================================================= */
-  __HAL_TIM_SET_COUNTER(&htim8, 0);
-
-  motor2_encoder_raw = 0;
-  motor2_previous_count = 0;
-  motor2_encoder_delta = 0;
-  motor2_encoder_total = 0;
-
-
-  /* =========================================================
-   * Motor1 BTS7960 Enable
-   * - PB8: R_EN
-   * - PB9: L_EN
-   * ========================================================= */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
-
-
-  /* =========================================================
-   * Motor2 BTS7960 Enable
-   * - PA9: R_EN
-   * - PA8: L_EN
-   * ========================================================= */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
-
-
-  /* =========================================================
-   * Motor1 Initial Stop
-   * - RPWM과 LPWM을 모두 0으로 설정
-   * ========================================================= */
-  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-
-
-  /* =========================================================
-   * Motor2 Initial Stop
-   * - RPWM과 LPWM을 모두 0으로 설정
-   * ========================================================= */
-  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-  __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-
+  /* USB Serial(USART2) 초기 수신 등록. 이후 재등록은
+   * HAL_UART_RxCpltCallback()에서 매 Byte마다 수행한다. */
+  HAL_UART_Receive_IT(&huart2, &serial_rx_isr_byte, 1);
 
   /* USER CODE END 2 */
 
@@ -406,55 +130,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      /* ================================================
-       * 1. 전진 테스트
-       * - 40% 출력으로 10초 전진
-       * ================================================ */
-      Motor_Forward(40);
-      Motor_WaitAndUpdateEncoder(10000);
-
-      Motor_Stop();
-      HAL_Delay(2000);
-
-
-      /* ================================================
-       * 2. 후진 테스트
-       * - 40% 출력으로 10초 후진
-       * ================================================ */
-      Motor_Backward(40);
-      Motor_WaitAndUpdateEncoder(10000);
-
-      Motor_Stop();
-      HAL_Delay(2000);
-
-
-      /* ================================================
-       * 3. 우회전 테스트
-       * - 제자리 우회전을 10초 수행
-       * ================================================ */
-      Motor_TurnRight(40);
-      Motor_WaitAndUpdateEncoder(10000);
-
-      Motor_Stop();
-      HAL_Delay(2000);
-
-
-      /* ================================================
-       * 4. 좌회전 테스트
-       * - 제자리 좌회전을 10초 수행
-       * ================================================ */
-      Motor_TurnLeft(40);
-      Motor_WaitAndUpdateEncoder(10000);
-
-      Motor_Stop();
-
-
-      /* 모든 테스트가 끝난 뒤 정지 상태 유지 */
-      while (1)
-      {
-          Motor_Stop();
-          HAL_Delay(100);
-      }
+    App_Run();
 
     /* USER CODE END WHILE */
 
@@ -736,6 +412,39 @@ static void MX_TIM8_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -759,14 +468,6 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : USART_TX_Pin USART_RX_Pin */
-  GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pins : PA8 PA9 */
   GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -787,6 +488,49 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief  GPIO EXTI 콜백. B1 버튼(PC13) 입력은 Motor/StopController를
+  *         전혀 알지 못하고 AppEventQueue에 이벤트만 Push한다.
+  *         인터럽트 컨텍스트이므로 큐 등록 외의 동작은 하지 않는다.
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == USER_BUTTON_PIN)
+  {
+    AppEvent_t event = { .type = APP_EVENT_LATCHED_SAFE_STOP };
+    AppEventQueue_PushFromISR(&event);
+  }
+}
+
+/**
+  * @brief  USART2(USB Serial) 수신 완료 콜백.
+  *         수신된 1 Byte를 SerialRx Ring Buffer에 담고 즉시 다음 Byte
+  *         수신을 재등록하는 것 외의 동작(파싱, Motor/Controller 호출
+  *         등)은 하지 않는다. 인터럽트 컨텍스트이므로 짧게 끝난다.
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    SerialRx_PushFromISR(serial_rx_isr_byte);
+    HAL_UART_Receive_IT(&huart2, &serial_rx_isr_byte, 1);
+  }
+}
+
+/**
+  * @brief  USART2 에러 콜백. 프레이밍/패리티/노이즈/오버런 에러가 발생하면
+  *         HAL이 진행 중이던 수신을 중단시키므로(RxState -> READY), 여기서
+  *         다시 등록하지 않으면 그 이후로는 어떤 Byte도 수신되지 않는다.
+  *         해당 Byte 하나만 유실되고 다음 Byte부터 정상 수신을 재개한다.
+  */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    HAL_UART_Receive_IT(&huart2, &serial_rx_isr_byte, 1);
+  }
+}
 
 /* USER CODE END 4 */
 
