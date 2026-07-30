@@ -1,5 +1,6 @@
 package com.ssafy.backend.mqtt.config;
 
+import com.ssafy.backend.mqtt.heartbeat.MqttHeartbeatMessageHandler;
 import com.ssafy.backend.mqtt.position.MqttPositionMessageHandler;
 import com.ssafy.backend.mqtt.rfid.MqttRfidMessageHandler;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -53,6 +54,7 @@ public class MqttConfig {
 				properties.getClientId(),
 				mqttClientFactory,
 				properties.getPositionTopic(),
+				properties.getStatusTopic(),
 				properties.getRfidTopic()
 			);
 		adapter.setQos(properties.getQos());
@@ -66,6 +68,7 @@ public class MqttConfig {
 	public MessageHandler mqttMessageHandler(
 		MqttProperties properties,
 		MqttPositionMessageHandler positionHandler,
+		MqttHeartbeatMessageHandler heartbeatHandler,
 		MqttRfidMessageHandler rfidHandler
 	) {
 		return message -> {
@@ -73,6 +76,10 @@ public class MqttConfig {
 				.get(MqttHeaders.RECEIVED_TOPIC, String.class);
 			if (properties.getRfidTopic().equals(topic)) {
 				rfidHandler.handle(message);
+				return;
+			}
+			if (topic != null && topic.matches("^carts/\\d+/status$")) {
+				heartbeatHandler.handle(message);
 				return;
 			}
 			positionHandler.handle(message);

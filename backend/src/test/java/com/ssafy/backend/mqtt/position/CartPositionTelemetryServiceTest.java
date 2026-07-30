@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.ssafy.backend.cart.domain.Cart;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.map.domain.LibraryMap;
+import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import com.ssafy.backend.zone.domain.Zone;
 import java.math.BigDecimal;
@@ -36,6 +37,9 @@ class CartPositionTelemetryServiceTest {
 	private CartEventPublisher eventPublisher;
 
 	@Mock
+	private CartConnectionService connectionService;
+
+	@Mock
 	private Cart cart;
 
 	@Mock
@@ -53,7 +57,8 @@ class CartPositionTelemetryServiceTest {
 			new RecentPositionBuffer(),
 			zoneLocator,
 			zoneTracker,
-			eventPublisher
+			eventPublisher,
+			connectionService
 		);
 	}
 
@@ -75,6 +80,10 @@ class CartPositionTelemetryServiceTest {
 
 		service.accept(sample);
 
+		verify(connectionService).markAlive(
+			eq(cart),
+			org.mockito.ArgumentMatchers.any(java.time.LocalDateTime.class)
+		);
 		ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
 		verify(eventPublisher).publish(
 			eq(1L),
