@@ -21,14 +21,15 @@ export interface ZoneRect {
   height: number;
 }
 
+// 우상단(left 81.2, top 7.0)은 카트 출발 지점 — 구역이 아니므로 클릭 영역을 두지 않는다
 export const ZONE_RECTS: readonly ZoneRect[] = [
-  { left: 4.3, top: 52.0, width: 13.0, height: 44.2 }, // Z1 (하단 좌)
-  { left: 31.6, top: 52.0, width: 12.5, height: 44.2 }, // Z2 (하단 중좌)
-  { left: 58.6, top: 52.0, width: 10.7, height: 44.2 }, // Z3 (하단 중우)
-  { left: 83.7, top: 52.0, width: 11.4, height: 44.2 }, // Z4 (하단 우)
-  { left: 4.3, top: 3.9, width: 13.4, height: 44.1 }, // Z5 (상단 좌)
-  { left: 31.6, top: 3.9, width: 12.7, height: 44.1 }, // Z6 (상단 중)
-  { left: 58.6, top: 3.9, width: 36.6, height: 44.1 }, // Z7 (상단 우, 대형)
+  { left: 3.5, top: 52.6, width: 15.0, height: 40.6 }, // Z1 (하단 좌)
+  { left: 29.4, top: 52.6, width: 15.0, height: 40.6 }, // Z2 (하단 중좌)
+  { left: 55.3, top: 52.6, width: 15.0, height: 40.6 }, // Z3 (하단 중우)
+  { left: 81.2, top: 52.6, width: 15.0, height: 40.6 }, // Z4 (하단 우)
+  { left: 3.5, top: 7.0, width: 15.0, height: 40.6 }, // Z5 (상단 좌)
+  { left: 29.4, top: 7.0, width: 15.0, height: 40.6 }, // Z6 (상단 중)
+  { left: 55.3, top: 7.0, width: 15.0, height: 40.6 }, // Z7 (상단 우)
 ];
 
 /** 지도 패널 내 각 구역의 카트 정차 좌표 (% 단위, 클릭 영역의 중심) */
@@ -39,6 +40,30 @@ export const ZONE_POSITIONS: readonly { x: number; y: number }[] = ZONE_RECTS.ma
 
 /** 상/하단 구역을 잇는 중앙 통로의 y 좌표 (%) */
 export const CORRIDOR_Y = 50;
+
+/** 출발 지점(평면도 우상단 노란 영역, 구역 아님)의 카트 대기 좌표 (%) — 이동·추종 전 초기 위치 */
+export const START_POSITION: { x: number; y: number } = { x: 88.7, y: 27.3 };
+
+/**
+ * 구역별 담당 책장 번호(KDC 백단위) — 평면도 서가 배치 기준.
+ * 카트가 해당 구역에 도착하면 이 책장들의 책을 정리할 수 있다.
+ * Z1:000 / Z2:100·200 / Z3:300·400 / Z4:500 / Z5:600 / Z6:700·800 / Z7:900
+ */
+export const ZONE_BOOKSHELVES: readonly (readonly string[])[] = [
+  ['000'], // Z1 총류
+  ['100', '200'], // Z2 철학·종교
+  ['300', '400'], // Z3 사회과학·자연과학
+  ['500'], // Z4 기술과학
+  ['600'], // Z5 예술
+  ['700', '800'], // Z6 언어·문학
+  ['900'], // Z7 역사
+];
+
+/** 책장 번호(예: "300") → 담당 구역 인덱스(0-base). 목록에 없으면 null */
+export function zoneIndexOfBookshelf(bookshelfNumber: string): number | null {
+  const index = ZONE_BOOKSHELVES.findIndex((shelves) => shelves.includes(bookshelfNumber));
+  return index === -1 ? null : index;
+}
 
 /** 구역 인덱스(0-base) → 표시명: "3구역" */
 export function zoneLabel(zoneIndex: number): string {

@@ -30,7 +30,7 @@ export function HomePage() {
       <div className={styles.pageHeader}>
         <div>
           <p className={styles.overline}>CART COMMAND CENTER</p>
-          <h1 className={styles.pageTitle}>카트와 함께, 차근차근</h1>
+          <h1 className={styles.pageTitle}>카트와 함께, 쫄래쫄래</h1>
         </div>
         <div className={`${styles.followBadge} ${following ? styles.on : styles.off}`}>
           <span className={styles.dot} />
@@ -45,16 +45,31 @@ export function HomePage() {
             <p className={styles.heroLabel}>지금 가까운 곳</p>
             <div className={styles.heroTitleRow}>
               <h2 className={styles.heroTitle}>
-                {cartZone === null
-                  ? '목적지로 이동 중'
-                  : `${currentArea} · ${ZONE_NAMES[cartZone]} 서가`}
+                {cartZone === null ? (
+                  isMoving ? (
+                    '목적지로 이동 중'
+                  ) : (
+                    '출발 지점에서 대기 중'
+                  )
+                ) : (
+                  <>
+                    {currentArea}
+                    <span className={styles.heroZoneName}>{ZONE_NAMES[cartZone]}</span>
+                  </>
+                )}
               </h2>
               {!isMoving && cartZone !== null && (
                 <span className={styles.arrivedBadge}>도착!</span>
               )}
             </div>
             <p className={styles.heroDesc}>
-              이 구역에 꽂아야 할 책이 <strong>{areaBookCount}권</strong> 있어요.
+              {cartZone === null ? (
+                '지도에서 구역을 지정하면 카트가 출발해요.'
+              ) : (
+                <>
+                  이 구역에 꽂아야 할 책이 <strong>{areaBookCount}권</strong> 있어요.
+                </>
+              )}
             </p>
             <button className={styles.heroButton} onClick={() => navigate('/map')}>
               지도에서 카트 이동하기

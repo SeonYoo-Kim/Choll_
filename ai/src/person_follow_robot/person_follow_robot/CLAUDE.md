@@ -10,7 +10,7 @@
 | CameraNode | camera_node.py | 카메라/영상 → RGB 프레임 발행. AI 추론과 분리. 영상 입력 시 EOF에서 되감기. |
 | DetectorNode | detector_node.py | YOLOv10s TensorRT로 사람만 검출. `.engine` 파일 필수. Ultralytics 래퍼 사용. |
 | TrackerNode | tracker_node.py | supervision ByteTrack으로 검출에 track ID 부여. `ByteTrackAdapter`가 버전별 인자명을 흡수. |
-| ReidNode | reid_node.py | **핵심.** OSNet 512-D 임베딩 + Memory Bank(FIFO, 최대 20) + 초기 등록(2초) + 추적 실패 시 코사인 유사도 재탐색. |
+| ReidNode | reid_node.py | **핵심.** 타겟 자동 선택(최대 bbox 0.5초 연속, target_auto_select.py) + OSNet 512-D 임베딩 + Memory Bank(FIFO 20, 0.3초 샘플링, 재잠금 후 2초 갱신 유예) + 초기 등록(2초) + 재탐색(reid_logic.py: 시공간 타당성 게이트 → 임계 0.70 + 1·2위 마진 → 10프레임 연속 확인). 잘림/초근접 크롭은 등록·갱신·자동선택에서 배제. |
 | ControlNode | control_node.py | 화면 중심 오차 + LiDAR 거리 → PID → `cmd_vel`. 15Hz 루프. 측정 거리를 `/target_distance`로 공유. |
 | MotorNode | motor_node.py | `/cmd_vel` → 차동구동 역기구학(v,ω→좌우 RPM) → `/wheel_speed_cmd` 10Hz 발행. cmd 끊기면 [0,0]. |
 | DebugVisualizationNode | debug_visualization_node.py | 트랙/타겟/재탐색 이벤트 + 타겟 거리(박스 우상단, m)를 프레임에 오버레이, `/debug/image` 발행 및 선택적 mp4 저장. |
@@ -26,7 +26,7 @@
 | `/camera/image_raw` | sensor_msgs/Image | camera | detector, reid, debug |
 | `/person_detection` | vision_msgs/Detection2DArray | detector | tracker |
 | `/person_tracks` | vision_msgs/Detection2DArray (`.id`=track id) | tracker | reid, debug |
-| `/select_target` | std_msgs/Int32 | (사용자/CLI) | reid |
+| `/select_target` | std_msgs/Int32 | (사용자/CLI) | reid | ※ 수동 오버라이드용 — 기본은 자동 선택(`auto_select_enabled`) |
 | `/target_person` | vision_msgs/Detection2DArray | reid | control, debug |
 | `/reid/recovery_event` | std_msgs/String | reid | debug |
 | `/cmd_vel` | geometry_msgs/Twist | control | motor |

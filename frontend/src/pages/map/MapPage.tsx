@@ -41,7 +41,7 @@ export function MapPage() {
         <div>
           <p className={styles.overline}>LIVE CART LOCATION</p>
           <h1 className={styles.pageTitle}>도서관 지도</h1>
-          <p className={styles.pageDesc}>서가를 눌러 카트의 다음 목적지를 정해보세요.</p>
+          <p className={styles.pageDesc}>구역을 선택해 카트의 다음 목적지를 정해보세요.</p>
         </div>
         <div className={`${styles.statusBadge} ${isMoving ? styles.moving : styles.idle}`}>
           <span className={styles.dot} />
@@ -54,7 +54,18 @@ export function MapPage() {
           <div className={styles.statCard}>
             <p>현재 위치</p>
             <strong className={styles.statPrimary}>
-              {cartZone === null ? '이동 통로' : `${zoneLabel(cartZone)} · ${ZONE_NAMES[cartZone]}`}
+              {cartZone === null ? (
+                isMoving ? (
+                  '이동 통로'
+                ) : (
+                  '출발 지점'
+                )
+              ) : (
+                <>
+                  {zoneLabel(cartZone)}
+                  <span className={styles.zoneName}>{ZONE_NAMES[cartZone]}</span>
+                </>
+              )}
             </strong>
           </div>
           <div className={styles.statCard}>

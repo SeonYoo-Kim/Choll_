@@ -10,7 +10,8 @@ import styles from './MapPanel.module.scss';
 
 /** SLAM 지도 패널 — 평면도 위 구역을 눌러 카트 목적지를 지정한다. */
 export function MapPanel() {
-  const { cartZone, cartPosition, isMoving, cartStatus, startMove } = useCartMapStore();
+  const { cartZone, cartPosition, cartYaw, isMoving, cartStatus, startMove } =
+    useCartMapStore();
   const notify = useToastStore((state) => state.show);
 
   const { mutate: startNavigation, isPending } = useStartNavigation({
@@ -59,7 +60,11 @@ export function MapPanel() {
         <div
           aria-label="카트 위치"
           className={`${styles.cart} ${isMoving ? styles.cartMoving : ''}`}
-          style={{ left: `${cartPosition.x}%`, top: `${cartPosition.y}%` }}
+          style={{
+            left: `${cartPosition.x}%`,
+            top: `${cartPosition.y}%`,
+            transform: `translate(-50%, -50%) rotate(${cartYaw}rad)`,
+          }}
         >
           🛒
         </div>

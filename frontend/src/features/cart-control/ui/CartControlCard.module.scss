@@ -1,6 +1,8 @@
 @use '@/shared/styles/variables' as *;
 
 .card {
+  display: flex;
+  flex-direction: column;
   border: 1px solid $border-soft;
   border-radius: $radius-card;
   background: $bg-card;
@@ -16,6 +18,7 @@
 
 .grid {
   margin-top: $spacing-md;
+  flex: 1; // 카드의 남은 세로 공간을 전부 사용 → 버튼이 카드 높이에 맞춰 늘어난다
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
@@ -23,7 +26,7 @@
 
 .control {
   display: flex;
-  min-height: 80px;
+  min-height: 96px;
   flex-direction: column;
   align-items: flex-start;
   justify-content: space-between;
@@ -32,7 +35,8 @@
   text-align: left;
 
   span {
-    font-size: 14px;
+    align-self: flex-end; // 아이콘은 왼쪽 위, 텍스트는 오른쪽 아래
+    font-size: 17px;
     font-weight: 700;
   }
 }

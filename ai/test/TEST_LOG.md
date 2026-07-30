@@ -13,6 +13,110 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-29 15:08 — ✅ 91 passed (+8 신규, 1차 1건 실패 후 수정), ruff 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check reid_node.py reid_logic.py launch test_reid_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `2aec0ff` 이후 작업 트리 (재탐색 오인 방지 3종, 커밋 전)
+- **맥락**: 실기 영상(result14_70.mp4) — threshold 0.70에서 6m 뒤 검은 옷 타인을
+  SIM 0.915~0.966으로 오인 재잠금 (오인 후 force-add로 뱅크 오염 → 잠금 고착).
+  - `candidate_is_feasible` 신규: 시공간 타당성 게이트 — 마지막 관측 대비
+    중심 이동(300px/s + 60px 여유)과 크기 비율(높이=거리 프록시, 1.15 + 0.7/s)이
+    경과 시간 내 도달 가능해야 재탐색 후보 자격. 장기 재등장은 자연히 무제한.
+  - 재잠금 연속 확인: 같은 후보가 `recovery_confirm_frames`(10, 30fps 0.33초 /
+    10fps 1초) 연속 수락 조건 충족 시에만 확정 (AutoSelectStabilizer 재사용).
+  - 뱅크 오염 방지: 재잠금 직후 force-add 제거, `post_recovery_update_delay_sec`
+    (2초) 동안 뱅크 갱신 유예.
+  - similarity_threshold 기본 0.85→0.70 (게이트 조합 전제. launch `threshold:=`).
+  - **1차 실행 1건 실패**: 경과 0초에서 크기 허용 폭이 정확히 1.0이라 bbox
+    노이즈(1%)도 기각 → `size_ratio_base_tolerance`(1.15) 추가 후 통과.
+  - 신규 테스트 8개: result14 재현 기각, 장기 재등장 허용, 중심 점프 시간
+    의존, 크기 밴드 확장, 무효 입력, 음수 경과.
+- **주의**: 실기 재검증 — result14 시나리오에서 배경 인물이 feasibility gate
+  로그로 기각되는지, 진짜 재등장이 10프레임 확인 후 잡히는지.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 91 passed in 0.12s ==============================
+```
+
+</details>
+
+## 2026-07-29 14:48 — ✅ 83 passed (회귀), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check follow_robot_launch.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `2aec0ff` 이후 작업 트리 (threshold launch 인자, 커밋 전)
+- **맥락**: 실기 임계값 실험용 launch 인자 추가 —
+  `ros2 launch person_follow_robot follow_robot_launch.py threshold:=0.80`.
+  `ParameterValue(value_type=float)`로 문자열 인자를 double 파라미터에 매핑
+  (미사용 시 launch가 문자열로 넘겨 타입 오류 나는 것 방지). 순수 로직 변경
+  없음 → 기존 83개 회귀만 확인. launch 인자 동작 자체는 Jetson 실기 확인 필요.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 83 passed in 0.08s ==============================
+```
+
+</details>
+
+## 2026-07-29 14:33 — ✅ 83 passed (+12 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check reid_node.py reid_logic.py launch test_reid_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `2aec0ff` 이후 작업 트리 (재인식 개선, 커밋 전)
+- **맥락**: 실기 영상(result10.mp4) 분석 — 전신·정면 재등장에도 재인식 실패.
+  원인: ①초근접(몸통 조각) 크롭으로 뱅크 등록 ②매 프레임 추가로 FIFO 뱅크가
+  최근 0.7초 동일 모습만 보유 ③임계값 0.90 과도(재등장 동일인 기각, 타인은 ≤0.68).
+  - `reid_logic.py` 신규 (순수): `crop_quality_ok`(좌우 잘림·초근접 배제,
+    상하 접촉은 1m 추종 정상 상태라 허용), `accept_recovery`(임계값 + 1·2위 마진).
+  - reid_node: 피처 추가 0.3초 샘플링(`feature_sample_interval_sec`, 재탐색
+    성공 직후는 force), 크롭 품질 게이트를 등록·갱신·자동선택에 적용,
+    임계값 0.90→0.85, `recovery_margin`=0.05.
+  - AI_SPECIFICATIONS.md의 Memory Bank/Recovery 절 동기 갱신.
+  - 신규 테스트 12개: 크롭 품질 6(잘림/초근접/상하 허용), 수락 판정 6(마진 포함).
+- **주의**: 실기 재검증 필요 — result10.mp4와 같은 시나리오(초근접 등록 시도 →
+  자동선택 보류되는지, 상실 후 전신 재등장 → 재인식되는지).
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 83 passed in 0.16s ==============================
+```
+
+</details>
+
+## 2026-07-29 14:06 — ✅ 71 passed (+9 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check reid_node.py target_auto_select.py launch test_auto_select.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `e724d6f` 이후 작업 트리 (타겟 자동 선택, 커밋 전)
+- **맥락**: 요구사항 변경 — /select_target 수동 지정 대신 **최대 bbox(=최근접) 자동 선택**.
+  - `target_auto_select.py` 신규 (순수 모듈): `largest_track`(최소 면적 필터 포함),
+    `AutoSelectStabilizer`(N프레임 연속 최대일 때만 확정 — 스쳐 가는 오탐 방지).
+  - reid_node: WAITING_SELECTION에서 자동 선택 시도, 확정 시 기존 2초 등록 흐름 재사용.
+    /select_target은 수동 오버라이드로 유지. 파라미터 3개 신설
+    (`auto_select_enabled`=True, `auto_select_stable_frames`=15, `auto_select_min_area_px`=5000).
+  - reid_node 기존 lint 부채 정리 (UP035, D107×3, ANN401 noqa).
+  - 신규 테스트 9개: 최대 면적 선택·최소 면적 필터(4), 안정화 확정·후보 교체
+    리셋·소실 리셋·재무장·클램프(5).
+- **주의**: 실기 검증 필요 — 여러 사람이 있을 때 카메라 앞 사람이 선택되는지,
+  0.5초 확정 지연이 체감상 적절한지, min_area 기본값이 실카메라에서 맞는지.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 71 passed in 0.07s ==============================
+```
+
+</details>
+
 ## 2026-07-28 15:35 — ✅ 62 passed (+3 신규), ruff 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check motor_node.py test_motor_logic.py`

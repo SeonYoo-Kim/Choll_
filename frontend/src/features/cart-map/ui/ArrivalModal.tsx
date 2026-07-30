@@ -42,13 +42,16 @@ export function ArrivalModal({ slots }: ArrivalModalProps) {
         <p className={styles.desc}>
           이 구역에 꽂아야 할 책이 <strong>{arrivalSlots.length}권</strong> 있습니다.
           <br />
-          빛나는 슬롯을 꺼내 서가에 꽂아주세요.
+          빛나는 슬롯에서 책을 꺼내 서가에 꽂아주세요.
         </p>
         <div className={styles.slotGrid}>
           {arrivalSlots.map((slot) => (
             <div key={slot.slotNumber} className={styles.slot}>
               <span className={styles.slotId}>SLOT {slotLabel(slot.slotNumber)}</span>
               <p className={styles.slotTitle}>{slot.book?.title}</p>
+              {slot.book?.bookshelfNumber && (
+                <span className={styles.slotShelf}>{slot.book.bookshelfNumber}</span>
+              )}
               <span className={styles.ping} />
             </div>
           ))}
