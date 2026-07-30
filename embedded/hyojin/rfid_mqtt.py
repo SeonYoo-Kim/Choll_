@@ -16,11 +16,10 @@ import paho.mqtt.client as mqtt
 # User Config
 # ============================================================
 
-CART_ID = "cart_01"
 
-MQTT_BROKER_HOST = "192.168.0.31"
+MQTT_BROKER_HOST = "192.168.0.33"
 MQTT_BROKER_PORT = 1883
-MQTT_TOPIC = f"choll/cart/{CART_ID}/rfid"
+MQTT_TOPIC = f"choll/cart/rfid"
 
 SPI_BUS = 0
 SPI_DEVICE = 0
@@ -28,14 +27,14 @@ SPI_SPEED_HZ = 1_000_000
 
 # BCM GPIO 번호 기준
 SLOT_CONFIG = [
-    {"slot_id": "slot_1", "cs_pin": 16},
-    {"slot_id": "slot_2", "cs_pin": 20},
-    {"slot_id": "slot_3", "cs_pin": 5},
-    {"slot_id": "slot_4", "cs_pin": 6},
-    {"slot_id": "slot_5", "cs_pin": 13},
+    {"slot_id": 1, "cs_pin": 16},
+    {"slot_id": 2, "cs_pin": 20},
+    {"slot_id": 3, "cs_pin": 5},
+    {"slot_id": 4, "cs_pin": 6},
+    {"slot_id": 5, "cs_pin": 13},
 ]
 
-CARD_LOST_TIMEOUT = 2.0
+CARD_LOST_TIMEOUT = 1.0
 SCAN_INTERVAL = 0.05
 
 # UID는 대문자 HEX 문자열 기준
@@ -157,7 +156,7 @@ class GPIOManager:
 
                     self.chip = h
                     self.chip_num = chip_num
-                    print(f"[GPIO] using gpiochip{chip_num}")
+                    #print(f"[GPIO] using gpiochip{chip_num}")
                     return
 
                 except Exception as e:
@@ -395,13 +394,12 @@ class MFRC522:
 # ============================================================
 
 class RFIDMQTTPublisher:
-    def __init__(self, broker_host, broker_port, topic, cart_id):
+    def __init__(self, broker_host, broker_port, topic):
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.topic = topic
-        self.cart_id = cart_id
 
-        client_id = f"{cart_id}_rfid_publisher"
+        client_id = f"rfid_publisher"
 
         # paho-mqtt 1.x / 2.x 호환
         try:
@@ -422,19 +420,11 @@ class RFIDMQTTPublisher:
         print(f"[MQTT] connected, topic={self.topic}")
 
     def publish_event(self, slot_id, uid, event):
-        book_info = BOOK_MAP.get(uid, {})
-
         payload = {
-            "cart_id": self.cart_id,
-            "slot_id": slot_id,
-            "uid": uid,
-            "event": event,
+            "slot_id": int(slot_id),
+            "uid": str(uid),
+            "event": str(event),
             "timestamp": datetime.now(timezone.utc).astimezone().isoformat(timespec="milliseconds"),
-
-            "book_id": book_info.get("book_id"),
-            "title": book_info.get("title"),
-            "target_zone_id": book_info.get("target_zone_id"),
-            "shelf": book_info.get("shelf"),
         }
 
         payload_str = json.dumps(payload, ensure_ascii=False)
@@ -481,13 +471,13 @@ class RFIDApp:
 
         # Raspberry Pi 5에서 환경에 따라 no_cs 설정이 Errno 22를 낼 수 있음.
         # 수동 CS를 쓰므로 실패해도 무시.
-        try:
-            self.spi.no_cs = True
-            print("[SPI] no_cs=True")
-        except Exception as e:
-            print(f"[SPI] no_cs ignored: {e}")
+        # try:
+        #     self.spi.no_cs = True
+        #     print("[SPI] no_cs=True")
+        # except Exception as e:
+        #     print(f"[SPI] no_cs ignored: {e}")
 
-        print(f"[SPI] opened bus={SPI_BUS}, device={SPI_DEVICE}, speed={SPI_SPEED_HZ}")
+        # print(f"[SPI] opened bus={SPI_BUS}, device={SPI_DEVICE}, speed={SPI_SPEED_HZ}")
 
     def setup_gpio(self):
         cs_pins = [cfg["cs_pin"] for cfg in SLOT_CONFIG]
@@ -506,10 +496,10 @@ class RFIDApp:
             )
 
             version = reader.read_version()
-            print(
-                f"[RFID] {cfg['slot_id']} CS=GPIO{cfg['cs_pin']} "
-                f"VersionReg=0x{version:02X}"
-            )
+            # print(
+            #     f"[RFID] {cfg['slot_id']} CS=GPIO{cfg['cs_pin']} "
+            #     f"VersionReg=0x{version:02X}"
+            # )
 
             if version in (0x00, 0xFF):
                 print(
@@ -534,7 +524,6 @@ class RFIDApp:
             broker_host=MQTT_BROKER_HOST,
             broker_port=MQTT_BROKER_PORT,
             topic=MQTT_TOPIC,
-            cart_id=CART_ID,
         )
         self.publisher.connect()
 
@@ -648,7 +637,6 @@ def main():
 
     finally:
         app.cleanup()
-        print("[APP] stopped")
 
 
 if __name__ == "__main__":
