@@ -4,6 +4,7 @@ import { NavLink, Outlet } from 'react-router';
 import logo from '@/assets/logo.png';
 import { useCartControlEvents } from '@/features/cart-control/model/useCartControlEvents';
 import { useCartMapEvents } from '@/features/cart-map/model/useCartMapEvents';
+import { useSlotBoardEvents } from '@/features/slot-board/model/useSlotBoardEvents';
 import { CartSocketProvider } from '@/shared/api/ws/CartSocketProvider';
 import { DEMO_CART_ID } from '@/shared/config/cart';
 import { Toast } from '@/shared/ui/toast/Toast';
@@ -25,6 +26,7 @@ const MOBILE_NAV_ITEMS = [...NAV_ITEMS];
 function CartRealtimeSync() {
   useCartMapEvents(DEMO_CART_ID);
   useCartControlEvents();
+  useSlotBoardEvents(DEMO_CART_ID);
   return null;
 }
 

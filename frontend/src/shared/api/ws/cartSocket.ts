@@ -7,6 +7,8 @@
  * - 재연결 시 REST 재조회로 상태 복구 (BE-WS-03) → onReconnect 콜백에서 query invalidate 수행
  */
 
+import type { Slot } from '@/shared/api/generated/model';
+
 /** API 명세서(노션 WS-FE-01~13)에 정의된 이벤트 타입 13종. */
 export type CartWsEventType =
   | 'CART_POSITION_UPDATE' // WS-FE-01 카트 위치 변경
@@ -38,6 +40,12 @@ export interface CartPositionUpdatePayload {
 }
 
 /**
+ * WS-FE-04 SLOT_UPDATED 페이로드 — REST GET /slots 항목(Slot)과 동일하다.
+ * BE가 같은 DTO(SlotService.Response)를 REST와 WS 양쪽에 쓴다 (BE 확인: 2026-07-30).
+ */
+export type SlotUpdatedPayload = Slot;
+
+/**
  * WS-FE-05 CURRENT_ZONE_UPDATED 페이로드. 명세 데이터: 이전 구역, 현재 구역.
  * 구역 밖(통로 등)이면 null. TODO: 필드명 BE 확정 필요.
  */
@@ -48,12 +56,7 @@ export interface CurrentZoneUpdatedPayload {
 
 /** WS-FE-06의 이동 상태. 명세 발생 조건: 접수·시작·정지·도착·취소·실패 */
 export type NavigationStatus =
-  | 'ACCEPTED'
-  | 'STARTED'
-  | 'STOPPED'
-  | 'ARRIVED'
-  | 'CANCELLED'
-  | 'FAILED';
+  'ACCEPTED' | 'STARTED' | 'STOPPED' | 'ARRIVED' | 'CANCELLED' | 'FAILED';
 
 /**
  * WS-FE-06 NAVIGATION_STATUS_UPDATED 페이로드.
