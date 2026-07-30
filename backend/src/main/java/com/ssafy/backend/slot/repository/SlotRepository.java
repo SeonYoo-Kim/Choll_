@@ -35,4 +35,6 @@ public interface SlotRepository extends JpaRepository<Slot, Long> {
 		@Param("cartId") Long cartId,
 		@Param("slotNumber") int slotNumber
 	);
+
+	Optional<Slot> findByBookCopyId(Long bookCopyId);
 }
