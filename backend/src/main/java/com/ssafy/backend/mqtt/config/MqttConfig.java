@@ -1,6 +1,7 @@
 package com.ssafy.backend.mqtt.config;
 
 import com.ssafy.backend.mqtt.position.MqttPositionMessageHandler;
+import com.ssafy.backend.mqtt.rfid.MqttRfidMessageHandler;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -14,6 +15,7 @@ import org.springframework.integration.mqtt.core.DefaultMqttPahoClientFactory;
 import org.springframework.integration.mqtt.core.MqttPahoClientFactory;
 import org.springframework.integration.mqtt.inbound.MqttPahoMessageDrivenChannelAdapter;
 import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
+import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 
@@ -50,7 +52,8 @@ public class MqttConfig {
 			new MqttPahoMessageDrivenChannelAdapter(
 				properties.getClientId(),
 				mqttClientFactory,
-				properties.getPositionTopic()
+				properties.getPositionTopic(),
+				properties.getRfidTopic()
 			);
 		adapter.setQos(properties.getQos());
 		adapter.setConverter(new DefaultPahoMessageConverter());
@@ -60,7 +63,19 @@ public class MqttConfig {
 
 	@Bean
 	@ServiceActivator(inputChannel = "mqttInputChannel")
-	public MessageHandler mqttPositionHandler(MqttPositionMessageHandler handler) {
-		return handler::handle;
+	public MessageHandler mqttMessageHandler(
+		MqttProperties properties,
+		MqttPositionMessageHandler positionHandler,
+		MqttRfidMessageHandler rfidHandler
+	) {
+		return message -> {
+			String topic = message.getHeaders()
+				.get(MqttHeaders.RECEIVED_TOPIC, String.class);
+			if (properties.getRfidTopic().equals(topic)) {
+				rfidHandler.handle(message);
+				return;
+			}
+			positionHandler.handle(message);
+		};
 	}
 }
