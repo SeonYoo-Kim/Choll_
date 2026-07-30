@@ -1,0 +1,60 @@
+@use '@/shared/styles/variables' as *;
+
+// AppLayout 콘텐츠 영역 안에 들어간다 — 배경·테두리는 레이아웃에 맡기고 안내 문구만 놓는다.
+// min-height: 100%로 .content를 꽉 채워야 align-content가 영역 정중앙을 잡는다.
+.wrap {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 100%;
+  padding: 32px $spacing-lg;
+  text-align: center;
+}
+
+.emoji {
+  margin: 0;
+  font-size: 36px;
+}
+
+.title {
+  margin: $spacing-md 0 $spacing-sm;
+  color: $text-main;
+  font-family: $font-display;
+  font-size: 20px;
+}
+
+.desc {
+  margin: 0 0 $spacing-lg;
+  color: $text-muted;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.button {
+  padding: 10px 22px;
+  border: none;
+  border-radius: 999px;
+  background: $primary;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    background: $primary-dark;
+  }
+}
+
+.detail {
+  max-width: 100%;
+  margin: $spacing-md 0 0;
+  padding: $spacing-sm;
+  border-radius: $radius-tile;
+  background: $danger-bg;
+  color: $danger-text;
+  font-family: $font-mono;
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
