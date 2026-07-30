@@ -34,13 +34,24 @@ const STILLNESS_MS = 3_000;
 export function useCartMapEvents(cartId: number): void {
   const queryClient = useQueryClient();
   const socket = useCartSocket();
-  const { data: cart } = useGetCart(cartId);
+  // 이 훅은 AppLayout에서 마운트되므로 여기서 던지면 사이드바까지 사라진다.
+  // 초기 복구가 실패해도 WS가 위치를 계속 주므로, 던지지 않고 토스트로만 알린다.
+  const { data: cart, isError: isCartError } = useGetCart(cartId, {
+    query: { throwOnError: false },
+  });
   // WS 위치 이벤트가 알려준 지도 id — REST(cart.mapId)가 비어 있어도 지도를 조회할 수 있게 한다
   const [wsMapId, setWsMapId] = useState<number | null>(null);
   const mapId = wsMapId ?? cart?.mapId ?? null;
-  const { data: mapInfo } = useGetMap(mapId ?? 0, {
-    query: { enabled: mapId != null },
+  const { data: mapInfo, isError: isMapError } = useGetMap(mapId ?? 0, {
+    query: { enabled: mapId != null, throwOnError: false },
   });
+
+  // 던지지 않는 대신 조용히 넘어가지도 않게 한 번 알린다
+  useEffect(() => {
+    if (isCartError || isMapError) {
+      useToastStore.getState().show('카트 상태를 불러오지 못했어요. 실시간 정보만 표시됩니다');
+    }
+  }, [isCartError, isMapError]);
 
   // 소켓 핸들러는 마운트 시 한 번 등록되므로, 최신 mapInfo는 ref로 전달한다
   const mapInfoRef = useRef<MapInfo | undefined>(mapInfo);
