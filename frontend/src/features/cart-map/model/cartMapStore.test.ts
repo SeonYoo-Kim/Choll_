@@ -24,12 +24,49 @@ describe('cartMapStore', () => {
     expect(state.navStatus).toBe('ACCEPTED');
   });
 
-  it('applyPosition은 좌표와 방향각을 갱신한다', () => {
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 1.57);
+  it('applyPosition은 좌표·방향각을 갱신하고 좌표로 현재 구역을 판정한다', () => {
+    // (10, 20)은 Z5(인덱스 4) 클릭 영역 안 — Z3에서 Z5로 진입한 상황
+    const result = useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 1.57);
     const state = useCartMapStore.getState();
     expect(state.cartPosition).toEqual({ x: 10, y: 20 });
     expect(state.cartYaw).toBe(1.57);
-    expect(state.cartZone).toBe(2);
+    expect(state.cartZone).toBe(4);
+    expect(result.enteredZone).toBe(4);
+  });
+
+  it('applyPosition은 구역 밖 좌표(통로)면 구역을 null로 만든다', () => {
+    const result = useCartMapStore.getState().applyPosition({ x: 50, y: 50 }, 0);
+    expect(useCartMapStore.getState().cartZone).toBeNull();
+    expect(result.enteredZone).toBeNull();
+  });
+
+  it('applyPosition은 좌표가 움직이면 대기 상태를 이동 중으로 올린다', () => {
+    const result = useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    expect(result.moved).toBe(true);
+    expect(useCartMapStore.getState().cartStatus).toBe('MOVING');
+  });
+
+  it('applyPosition은 같은 좌표(정지)면 상태를 올리지 않는다', () => {
+    const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[2], 0);
+    expect(result.moved).toBe(false);
+    expect(useCartMapStore.getState().cartStatus).toBe('IDLE');
+  });
+
+  it('applyPosition은 추종 중 상태를 이동 중으로 덮지 않는다', () => {
+    useCartMapStore.setState({ cartStatus: 'FOLLOWING' });
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    expect(useCartMapStore.getState().cartStatus).toBe('FOLLOWING');
+  });
+
+  it('markStationary는 위치 파생 이동 중 상태만 대기로 되돌린다', () => {
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    useCartMapStore.getState().markStationary();
+    expect(useCartMapStore.getState().cartStatus).toBe('IDLE');
+
+    // 이동 명령 세션 중(isMoving)에는 건드리지 않는다
+    useCartMapStore.getState().startMove();
+    useCartMapStore.getState().markStationary();
+    expect(useCartMapStore.getState().cartStatus).toBe('MOVING');
   });
 
   it('applyZone은 새 구역 진입 시 그 인덱스를 반환한다', () => {

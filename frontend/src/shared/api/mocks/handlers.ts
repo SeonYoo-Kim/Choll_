@@ -12,7 +12,10 @@ import {
   cartDetailFixture,
   cartWsHandler,
   mapInfoFixture,
+  pauseCartFollow,
+  startCartFollow,
   startCartMove,
+  stopCartFollow,
   stopCartMove,
 } from '@/shared/api/mocks/cartSimulator';
 
@@ -169,6 +172,19 @@ export const handlers = [
   }),
   http.delete('*/api/carts/:cartId/navigation', () => {
     stopCartMove();
+    return new HttpResponse(null, { status: 202 });
+  }),
+  // 추종 명령(시작/일시정지/종료)도 BE Swagger에 아직 없다 — followCommands.ts와 짝 맞춘 수동 모킹.
+  http.post('*/api/carts/:cartId/follow', () => {
+    startCartFollow();
+    return new HttpResponse(null, { status: 202 });
+  }),
+  http.post('*/api/carts/:cartId/follow/pause', () => {
+    pauseCartFollow();
+    return new HttpResponse(null, { status: 202 });
+  }),
+  http.delete('*/api/carts/:cartId/follow', () => {
+    stopCartFollow();
     return new HttpResponse(null, { status: 202 });
   }),
   getGetMapMockHandler(mapInfoFixture),
