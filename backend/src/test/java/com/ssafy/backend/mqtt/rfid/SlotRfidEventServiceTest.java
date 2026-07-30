@@ -11,10 +11,12 @@ import com.ssafy.backend.book.domain.Book;
 import com.ssafy.backend.bookcopy.domain.BookCopy;
 import com.ssafy.backend.bookcopy.repository.BookCopyRepository;
 import com.ssafy.backend.cart.domain.Cart;
+import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.slot.domain.Slot;
 import com.ssafy.backend.slot.domain.SlotStatus;
 import com.ssafy.backend.slot.repository.SlotRepository;
 import com.ssafy.backend.slot.service.SlotService;
+import com.ssafy.backend.task.service.TaskService;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import java.time.Instant;
 import java.util.Optional;
@@ -42,6 +44,12 @@ class SlotRfidEventServiceTest {
 	private CartEventPublisher eventPublisher;
 
 	@Mock
+	private CartConnectionService connectionService;
+
+	@Mock
+	private TaskService taskService;
+
+	@Mock
 	private Cart cart;
 
 	@Mock
@@ -57,7 +65,9 @@ class SlotRfidEventServiceTest {
 		service = new SlotRfidEventService(
 			slotRepository,
 			bookCopyRepository,
-			eventPublisher
+			eventPublisher,
+			connectionService,
+			taskService
 		);
 	}
 
@@ -93,12 +103,26 @@ class SlotRfidEventServiceTest {
 
 		assertThat(slot.getStatus()).isEqualTo(SlotStatus.OCCUPIED);
 		assertThat(slot.getBookCopy()).isEqualTo(bookCopy);
+		verify(connectionService).markAlive(
+			eq(cart),
+			org.mockito.ArgumentMatchers.any(java.time.LocalDateTime.class)
+		);
 		ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
 		verify(eventPublisher).publish(eq(1L), eq("SLOT_UPDATED"), captor.capture());
 		SlotService.Response payload = (SlotService.Response) captor.getValue();
 		assertThat(payload.slotNumber()).isEqualTo(1);
 		assertThat(payload.status()).isEqualTo(SlotService.Status.OCCUPIED);
 		assertThat(payload.book().title()).isEqualTo("초록 눈 코끼리");
+		verify(taskService).recordLoaded(
+			eq(cart),
+			eq(bookCopy),
+			org.mockito.ArgumentMatchers.any(java.time.LocalDateTime.class)
+		);
+		verify(eventPublisher).publish(
+			eq(1L),
+			eq("TASK_PROGRESS_UPDATED"),
+			org.mockito.ArgumentMatchers.any()
+		);
 	}
 
 	@Test
@@ -143,6 +167,11 @@ class SlotRfidEventServiceTest {
 			eq(1L),
 			eq("SLOT_UPDATED"),
 			org.mockito.ArgumentMatchers.any()
+		);
+		verify(taskService).recordShelved(
+			eq(cart),
+			eq(bookCopy),
+			org.mockito.ArgumentMatchers.any(java.time.LocalDateTime.class)
 		);
 	}
 

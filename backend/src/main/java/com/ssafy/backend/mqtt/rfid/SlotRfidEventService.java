@@ -3,10 +3,12 @@ package com.ssafy.backend.mqtt.rfid;
 import com.ssafy.backend.bookcopy.domain.BookCopy;
 import com.ssafy.backend.bookcopy.repository.BookCopyRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
+import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.slot.domain.Slot;
 import com.ssafy.backend.slot.domain.SlotStatus;
 import com.ssafy.backend.slot.repository.SlotRepository;
 import com.ssafy.backend.slot.service.SlotService;
+import com.ssafy.backend.task.service.TaskService;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -27,19 +29,26 @@ public class SlotRfidEventService {
 	private static final Logger log = LoggerFactory.getLogger(SlotRfidEventService.class);
 	private static final ZoneId DATABASE_ZONE = ZoneId.of("Asia/Seoul");
 	private static final String SLOT_UPDATED_EVENT_TYPE = "SLOT_UPDATED";
+	private static final String TASK_PROGRESS_EVENT_TYPE = "TASK_PROGRESS_UPDATED";
 
 	private final SlotRepository slotRepository;
 	private final BookCopyRepository bookCopyRepository;
 	private final CartEventPublisher eventPublisher;
+	private final CartConnectionService connectionService;
+	private final TaskService taskService;
 
 	public SlotRfidEventService(
 		SlotRepository slotRepository,
 		BookCopyRepository bookCopyRepository,
-		CartEventPublisher eventPublisher
+		CartEventPublisher eventPublisher,
+		CartConnectionService connectionService,
+		TaskService taskService
 	) {
 		this.slotRepository = slotRepository;
 		this.bookCopyRepository = bookCopyRepository;
 		this.eventPublisher = eventPublisher;
+		this.connectionService = connectionService;
+		this.taskService = taskService;
 	}
 
 	@Transactional
@@ -51,12 +60,19 @@ public class SlotRfidEventService {
 				"cartId=%d, slotNumber=%d".formatted(event.cartId(), event.slotNumber())
 			));
 		LocalDateTime scannedAt = LocalDateTime.ofInstant(event.measuredAt(), DATABASE_ZONE);
+		// RFID 태깅도 카트 생존 신호 — 하트비트가 끊겨도 태깅 중이면 ONLINE 유지
+		connectionService.markAlive(slot.getCart(), scannedAt);
 
 		switch (event.type()) {
 			case DETECTED -> detect(slot, event.uid(), scannedAt);
-			case REMOVED -> slot.clear(scannedAt);
+			case REMOVED -> remove(slot, scannedAt);
 		}
 		publishSlotUpdated(slot);
+		eventPublisher.publish(
+			slot.getCart().getId(),
+			TASK_PROGRESS_EVENT_TYPE,
+			taskService.findProgress(slot.getCart().getId())
+		);
 
 		log.info(
 			"RFID 슬롯 이벤트 처리 cartId={}, slotNumber={}, uid={}, event={}, status={}",
@@ -81,6 +97,16 @@ public class SlotRfidEventService {
 		}
 		releaseIfHeldElsewhere(copy.get(), slot, scannedAt);
 		slot.assignBook(copy.get(), scannedAt);
+		taskService.recordLoaded(slot.getCart(), copy.get(), scannedAt);
+	}
+
+	private void remove(Slot slot, LocalDateTime scannedAt) {
+		BookCopy removedCopy = slot.getBookCopy();
+		slot.clear(scannedAt);
+		if (removedCopy != null) {
+			// 카트에서 제거 = 서가에 꽂음으로 간주 → 정리 작업 완료
+			taskService.recordShelved(slot.getCart(), removedCopy, scannedAt);
+		}
 	}
 
 	private void releaseIfHeldElsewhere(BookCopy copy, Slot target, LocalDateTime scannedAt) {

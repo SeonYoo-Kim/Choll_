@@ -67,6 +67,17 @@ export interface NavigationStatusUpdatedPayload {
   failReason?: string;
 }
 
+/** WS-FE-07의 추종 상태. 시작·일시정지·종료. TODO: 값 이름 BE 확정 필요 */
+export type FollowStatus = 'STARTED' | 'PAUSED' | 'STOPPED';
+
+/**
+ * WS-FE-07 FOLLOW_STATUS_UPDATED 페이로드.
+ * TODO: 필드명 BE 확정 필요.
+ */
+export interface FollowStatusUpdatedPayload {
+  status: FollowStatus;
+}
+
 export interface CartWsEvent<TPayload = unknown> {
   type: CartWsEventType;
   payload: TPayload;

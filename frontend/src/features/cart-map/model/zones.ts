@@ -59,6 +59,18 @@ export const ZONE_BOOKSHELVES: readonly (readonly string[])[] = [
   ['900'], // Z7 역사
 ];
 
+/** 지도 % 좌표가 속한 구역 인덱스(0-base). 어느 구역 영역에도 없으면(통로·출발 지점 등) null */
+export function zoneIndexOfPoint(point: { x: number; y: number }): number | null {
+  const index = ZONE_RECTS.findIndex(
+    (rect) =>
+      point.x >= rect.left &&
+      point.x <= rect.left + rect.width &&
+      point.y >= rect.top &&
+      point.y <= rect.top + rect.height,
+  );
+  return index === -1 ? null : index;
+}
+
 /** 책장 번호(예: "300") → 담당 구역 인덱스(0-base). 목록에 없으면 null */
 export function zoneIndexOfBookshelf(bookshelfNumber: string): number | null {
   const index = ZONE_BOOKSHELVES.findIndex((shelves) => shelves.includes(bookshelfNumber));

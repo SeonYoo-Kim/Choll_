@@ -1,7 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
 
 import type { Slot } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
+import { getListSlotsQueryKey } from '@/shared/api/generated/slots/slots';
+import { DEMO_CART_ID } from '@/shared/config/cart';
 import { slotLabel } from '@/shared/utils/slotLabel';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
@@ -15,7 +18,22 @@ interface SlotDetailModalProps {
 /** 슬롯 클릭 시 표시되는 상세 모달 — 책 정보와 RFID 상태, 재인식 요청. */
 export function SlotDetailModal({ slot, onClose }: SlotDetailModalProps) {
   const notify = useToastStore((state) => state.show);
+  const queryClient = useQueryClient();
   const isError = slot.status === SlotStatus.RECOGNITION_FAILED;
+
+  // 이 슬롯을 비움 처리 — 책을 서가에 옮긴 것으로 본다.
+  // TODO: 비움 확인을 BE에 알릴지 명세 확정 필요 — 현재는 슬롯 캐시 갱신(데모)
+  const confirmEmptied = () => {
+    queryClient.setQueryData<Slot[]>(getListSlotsQueryKey(DEMO_CART_ID), (prev) =>
+      prev?.map((item) =>
+        item.slotNumber === slot.slotNumber
+          ? { ...item, status: SlotStatus.EMPTY, isTarget: false, book: undefined }
+          : item,
+      ),
+    );
+    notify('슬롯을 비움으로 표시했어요');
+    onClose();
+  };
 
   return (
     <div className={styles.backdrop}>
@@ -46,13 +64,7 @@ export function SlotDetailModal({ slot, onClose }: SlotDetailModalProps) {
           </p>
         </div>
         <div className={styles.actions}>
-          <button
-            className={styles.primary}
-            onClick={() => {
-              notify('슬롯 비움 상태를 확인했어요');
-              onClose();
-            }}
-          >
+          <button className={styles.primary} onClick={confirmEmptied}>
             <Check size={16} className={styles.checkIcon} />
             비움 확인됨
           </button>

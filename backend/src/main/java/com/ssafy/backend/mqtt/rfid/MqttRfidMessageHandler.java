@@ -30,7 +30,7 @@ public class MqttRfidMessageHandler {
 	public MqttRfidMessageHandler(
 		ObjectMapper objectMapper,
 		SlotRfidEventService slotRfidEventService,
-		@Value("${mqtt.rfid-cart-id:1}") long rfidCartId
+		@Value("${mqtt.cart-id:1}") long rfidCartId
 	) {
 		this.objectMapper = objectMapper;
 		this.slotRfidEventService = slotRfidEventService;

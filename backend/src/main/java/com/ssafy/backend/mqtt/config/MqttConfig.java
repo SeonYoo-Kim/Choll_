@@ -1,5 +1,6 @@
 package com.ssafy.backend.mqtt.config;
 
+import com.ssafy.backend.mqtt.heartbeat.MqttHeartbeatMessageHandler;
 import com.ssafy.backend.mqtt.position.MqttPositionMessageHandler;
 import com.ssafy.backend.mqtt.rfid.MqttRfidMessageHandler;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -14,6 +15,7 @@ import org.springframework.integration.core.MessageProducer;
 import org.springframework.integration.mqtt.core.DefaultMqttPahoClientFactory;
 import org.springframework.integration.mqtt.core.MqttPahoClientFactory;
 import org.springframework.integration.mqtt.inbound.MqttPahoMessageDrivenChannelAdapter;
+import org.springframework.integration.mqtt.outbound.MqttPahoMessageHandler;
 import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.MessageChannel;
@@ -53,6 +55,7 @@ public class MqttConfig {
 				properties.getClientId(),
 				mqttClientFactory,
 				properties.getPositionTopic(),
+				properties.getStatusTopic(),
 				properties.getRfidTopic()
 			);
 		adapter.setQos(properties.getQos());
@@ -62,10 +65,31 @@ public class MqttConfig {
 	}
 
 	@Bean
+	public MessageChannel mqttOutboundChannel() {
+		return new DirectChannel();
+	}
+
+	@Bean
+	@ServiceActivator(inputChannel = "mqttOutboundChannel")
+	public MessageHandler mqttOutbound(
+		MqttProperties properties,
+		MqttPahoClientFactory mqttClientFactory
+	) {
+		MqttPahoMessageHandler handler = new MqttPahoMessageHandler(
+			properties.getClientId() + "-pub",
+			mqttClientFactory
+		);
+		handler.setAsync(true);
+		handler.setDefaultQos(properties.getQos());
+		return handler;
+	}
+
+	@Bean
 	@ServiceActivator(inputChannel = "mqttInputChannel")
 	public MessageHandler mqttMessageHandler(
 		MqttProperties properties,
 		MqttPositionMessageHandler positionHandler,
+		MqttHeartbeatMessageHandler heartbeatHandler,
 		MqttRfidMessageHandler rfidHandler
 	) {
 		return message -> {
@@ -73,6 +97,10 @@ public class MqttConfig {
 				.get(MqttHeaders.RECEIVED_TOPIC, String.class);
 			if (properties.getRfidTopic().equals(topic)) {
 				rfidHandler.handle(message);
+				return;
+			}
+			if (properties.getStatusTopic().equals(topic)) {
+				heartbeatHandler.handle(message);
 				return;
 			}
 			positionHandler.handle(message);

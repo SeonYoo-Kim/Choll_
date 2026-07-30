@@ -5,7 +5,8 @@ import time
 import json
 import signal
 import sys
-from datetime import datetime, timezone
+import threading
+from datetime import datetime, timezone, timedelta
 
 import spidev
 import lgpio
@@ -20,6 +21,11 @@ import paho.mqtt.client as mqtt
 MQTT_BROKER_HOST = "192.168.0.33"
 MQTT_BROKER_PORT = 1883
 MQTT_TOPIC = f"choll/cart/rfid"
+
+# 하트비트 / 상태(LWT) 설정
+HEARTBEAT_TOPIC = "carts/status"
+HEARTBEAT_INTERVAL_SEC = 5.0
+KST = timezone(timedelta(hours=9))
 
 SPI_BUS = 0
 SPI_DEVICE = 0
@@ -36,40 +42,6 @@ SLOT_CONFIG = [
 
 CARD_LOST_TIMEOUT = 1.0
 SCAN_INTERVAL = 0.05
-
-# UID는 대문자 HEX 문자열 기준
-BOOK_MAP = {
-    "3E40F306": {
-        "target_zone_id": "Z2",
-        "shelf": 100,
-        "book_id": 122020,
-        "title": "긍정의 한마디",
-    },
-    "C7A90207": {
-        "target_zone_id": "Z3",
-        "shelf": 300,
-        "book_id": 125616,
-        "title": "초고령사회 일본에서 길을 찾다",
-    },
-    "AA180307": {
-        "target_zone_id": "Z4",
-        "shelf": 500,
-        "book_id": 119581,
-        "title": "패션, 공학을 입다",
-    },
-    "F54E0207": {
-        "target_zone_id": "Z6",
-        "shelf": 700,
-        "book_id": 154130,
-        "title": "1등 일본어",
-    },
-    "0437F306": {
-        "target_zone_id": "Z7",
-        "shelf": 900,
-        "book_id": 136053,
-        "title": "지도에서 사라진 나라들",
-    },
-}
 
 
 # ============================================================
@@ -410,7 +382,21 @@ class RFIDMQTTPublisher:
         except Exception:
             self.client = mqtt.Client(client_id=client_id)
 
+        # LWT: 비정상 종료(전원 차단, 크래시 등) 시
+        # 브로커가 대신 offline 상태를 retain으로 발행해준다.
+        # 반드시 connect() 전에 등록해야 함.
+        self.client.will_set(
+            HEARTBEAT_TOPIC,
+            json.dumps({"status": "offline"}),
+            qos=1,
+            retain=True,
+        )
+        self.client.on_connect = self._on_connect
+
         self.connected = False
+
+        self._hb_stop = threading.Event()
+        self._hb_thread = None
 
     def connect(self):
         print(f"[MQTT] connecting to {self.broker_host}:{self.broker_port}")
@@ -418,6 +404,50 @@ class RFIDMQTTPublisher:
         self.client.loop_start()
         self.connected = True
         print(f"[MQTT] connected, topic={self.topic}")
+
+        self._start_heartbeat()
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
+        # paho-mqtt 1.x / 2.x 콜백 시그니처 모두 호환.
+        # 연결/재연결 시마다 online 상태를 retain으로 발행해서
+        # LWT가 남긴 offline 상태를 덮어쓴다.
+        client.publish(
+            HEARTBEAT_TOPIC,
+            json.dumps({"status": "online"}),
+            qos=1,
+            retain=True,
+        )
+        print(f"[MQTT] on_connect: published online status to {HEARTBEAT_TOPIC}")
+
+    def _start_heartbeat(self):
+        if self._hb_thread is not None and self._hb_thread.is_alive():
+            return
+
+        self._hb_stop.clear()
+        self._hb_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name="mqtt-heartbeat",
+            daemon=True,
+        )
+        self._hb_thread.start()
+        print(
+            f"[MQTT] heartbeat started: topic={HEARTBEAT_TOPIC}, "
+            f"interval={HEARTBEAT_INTERVAL_SEC}s"
+        )
+
+    def _heartbeat_loop(self):
+        # 5초마다 하트비트 발행. 먼저 한 번 쏘고 나서 대기.
+        while not self._hb_stop.is_set():
+            payload = json.dumps({
+                "timestamp": datetime.now(KST).isoformat(timespec="milliseconds")
+            })
+
+            try:
+                self.client.publish(HEARTBEAT_TOPIC, payload)
+            except Exception as e:
+                print(f"[MQTT] heartbeat publish failed: {e}")
+
+            self._hb_stop.wait(HEARTBEAT_INTERVAL_SEC)
 
     def publish_event(self, slot_id, uid, event):
         payload = {
@@ -441,6 +471,27 @@ class RFIDMQTTPublisher:
         return result
 
     def close(self):
+        # 하트비트 스레드 정지
+        self._hb_stop.set()
+        if self._hb_thread is not None:
+            self._hb_thread.join(timeout=2.0)
+
+        # 정상 종료 시에는 LWT가 발행되지 않으므로
+        # offline 상태를 직접 retain으로 발행하고 나서 끊는다.
+        try:
+            info = self.client.publish(
+                HEARTBEAT_TOPIC,
+                json.dumps({"status": "offline"}),
+                qos=1,
+                retain=True,
+            )
+            try:
+                info.wait_for_publish(timeout=2.0)
+            except Exception:
+                time.sleep(0.3)
+        except Exception:
+            pass
+
         try:
             self.client.loop_stop()
             self.client.disconnect()

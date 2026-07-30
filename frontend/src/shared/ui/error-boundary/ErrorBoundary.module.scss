@@ -1,0 +1,60 @@
+@use '@/shared/styles/variables' as *;
+
+// 라우터 바깥에서 뜨는 전체 화면 폴백 — AppLayout이 없으니 배경을 직접 깐다
+.wrap {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 100vh;
+  padding: $spacing-lg;
+  background: $bg-page;
+  text-align: center;
+}
+
+.emoji {
+  margin: 0;
+  font-size: 40px;
+}
+
+.title {
+  margin: $spacing-md 0 $spacing-sm;
+  color: $text-main;
+  font-family: $font-display;
+  font-size: 22px;
+}
+
+.desc {
+  margin: 0 0 $spacing-lg;
+  color: $text-muted;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.button {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 999px;
+  background: $primary;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    background: $primary-dark;
+  }
+}
+
+.detail {
+  max-width: 420px;
+  margin: $spacing-md 0 0;
+  padding: $spacing-sm;
+  border-radius: $radius-tile;
+  background: $danger-bg;
+  color: $danger-text;
+  font-family: $font-mono;
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
