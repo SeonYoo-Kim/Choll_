@@ -11,6 +11,7 @@ import com.ssafy.backend.book.domain.Book;
 import com.ssafy.backend.bookcopy.domain.BookCopy;
 import com.ssafy.backend.bookcopy.repository.BookCopyRepository;
 import com.ssafy.backend.cart.domain.Cart;
+import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.slot.domain.Slot;
 import com.ssafy.backend.slot.domain.SlotStatus;
 import com.ssafy.backend.slot.repository.SlotRepository;
@@ -42,6 +43,9 @@ class SlotRfidEventServiceTest {
 	private CartEventPublisher eventPublisher;
 
 	@Mock
+	private CartConnectionService connectionService;
+
+	@Mock
 	private Cart cart;
 
 	@Mock
@@ -57,7 +61,8 @@ class SlotRfidEventServiceTest {
 		service = new SlotRfidEventService(
 			slotRepository,
 			bookCopyRepository,
-			eventPublisher
+			eventPublisher,
+			connectionService
 		);
 	}
 
@@ -93,6 +98,10 @@ class SlotRfidEventServiceTest {
 
 		assertThat(slot.getStatus()).isEqualTo(SlotStatus.OCCUPIED);
 		assertThat(slot.getBookCopy()).isEqualTo(bookCopy);
+		verify(connectionService).markAlive(
+			eq(cart),
+			org.mockito.ArgumentMatchers.any(java.time.LocalDateTime.class)
+		);
 		ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
 		verify(eventPublisher).publish(eq(1L), eq("SLOT_UPDATED"), captor.capture());
 		SlotService.Response payload = (SlotService.Response) captor.getValue();

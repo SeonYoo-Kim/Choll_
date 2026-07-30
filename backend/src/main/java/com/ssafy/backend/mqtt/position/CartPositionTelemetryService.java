@@ -1,9 +1,9 @@
 package com.ssafy.backend.mqtt.position;
 
 import com.ssafy.backend.cart.domain.Cart;
-import com.ssafy.backend.cart.domain.CartConnectionStatus;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
+import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import com.ssafy.backend.zone.domain.Zone;
 import java.math.BigDecimal;
@@ -30,19 +30,22 @@ public class CartPositionTelemetryService {
 	private final ZoneLocator zoneLocator;
 	private final StableZoneTracker zoneTracker;
 	private final CartEventPublisher eventPublisher;
+	private final CartConnectionService connectionService;
 
 	public CartPositionTelemetryService(
 		CartRepository cartRepository,
 		RecentPositionBuffer positionBuffer,
 		ZoneLocator zoneLocator,
 		StableZoneTracker zoneTracker,
-		CartEventPublisher eventPublisher
+		CartEventPublisher eventPublisher,
+		CartConnectionService connectionService
 	) {
 		this.cartRepository = cartRepository;
 		this.positionBuffer = positionBuffer;
 		this.zoneLocator = zoneLocator;
 		this.zoneTracker = zoneTracker;
 		this.eventPublisher = eventPublisher;
+		this.connectionService = connectionService;
 	}
 
 	@Transactional
@@ -64,11 +67,8 @@ public class CartPositionTelemetryService {
 			DATABASE_ZONE
 		);
 
-		cart.updateStatus(
-			CartConnectionStatus.ONLINE,
-			cart.getOperationStatus(),
-			measuredAt
-		);
+		// 위치 수신도 생존 신호 — OFFLINE→ONLINE 전환 시 연결 이벤트 발행 포함
+		connectionService.markAlive(cart, measuredAt);
 		cart.updatePosition(position.x(), position.y(), currentZone, measuredAt);
 
 		eventPublisher.publish(position.cartId(), POSITION_EVENT_TYPE, new PositionEventPayload(

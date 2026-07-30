@@ -26,7 +26,9 @@ STM32(MCU) · ROS 2 · DC 모터 · SLAM · LiDAR · CAN · Ubuntu 22.04.5 LTS
 - 구독: `/wheel_speed_cmd` (`std_msgs/msg/Int32MultiArray`) — `data[0]` 좌측 RPM, `data[1]` 우측 RPM, 10~12 Hz
 
 **카트 → Backend (MQTT, 현재 확정분)**:
-- `carts/{cartId}/telemetry/position` (SLAM 위치), `carts/{cartId}/status` (동작 상태), `carts/{cartId}/events/slots` (슬롯·RFID)
+- `carts/{cartId}/telemetry/position` (SLAM 위치), `carts/{cartId}/status` (동작 상태·하트비트),
+  `choll/cart/rfid` (슬롯·RFID — 2026-07-30 실물 기준 확정, 페이로드 `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}`.
+  ⚠️ cartId 미포함: BE가 `mqtt.rfid-cart-id`로 귀속하므로 다중 카트 도입 시 BE와 재협의)
 - BE→EM 명령 토픽(이동·추종·LED·RFID 재인식)은 명세 작성 중
 
 > ⚠️ 위 계약(토픽명·타입·매핑)을 바꾸려면 AI 파트(`motor_node`)·BE 파트와 동시에 바꿔야 합니다.

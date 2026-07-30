@@ -3,6 +3,7 @@ package com.ssafy.backend.mqtt.rfid;
 import com.ssafy.backend.bookcopy.domain.BookCopy;
 import com.ssafy.backend.bookcopy.repository.BookCopyRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
+import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.slot.domain.Slot;
 import com.ssafy.backend.slot.domain.SlotStatus;
 import com.ssafy.backend.slot.repository.SlotRepository;
@@ -31,15 +32,18 @@ public class SlotRfidEventService {
 	private final SlotRepository slotRepository;
 	private final BookCopyRepository bookCopyRepository;
 	private final CartEventPublisher eventPublisher;
+	private final CartConnectionService connectionService;
 
 	public SlotRfidEventService(
 		SlotRepository slotRepository,
 		BookCopyRepository bookCopyRepository,
-		CartEventPublisher eventPublisher
+		CartEventPublisher eventPublisher,
+		CartConnectionService connectionService
 	) {
 		this.slotRepository = slotRepository;
 		this.bookCopyRepository = bookCopyRepository;
 		this.eventPublisher = eventPublisher;
+		this.connectionService = connectionService;
 	}
 
 	@Transactional
@@ -51,6 +55,8 @@ public class SlotRfidEventService {
 				"cartId=%d, slotNumber=%d".formatted(event.cartId(), event.slotNumber())
 			));
 		LocalDateTime scannedAt = LocalDateTime.ofInstant(event.measuredAt(), DATABASE_ZONE);
+		// RFID 태깅도 카트 생존 신호 — 하트비트가 끊겨도 태깅 중이면 ONLINE 유지
+		connectionService.markAlive(slot.getCart(), scannedAt);
 
 		switch (event.type()) {
 			case DETECTED -> detect(slot, event.uid(), scannedAt);
