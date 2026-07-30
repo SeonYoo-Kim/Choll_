@@ -33,7 +33,12 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 
 - **REST**: `/api/carts/{cartId}/...`, `/api/maps/{mapId}/...` (CART/SLOT/MAP/TASK/NAV/FOLLOW)
 - **WebSocket**: `/ws/carts/{cartId}`, JSON, BE→FE 이벤트 13종 (WS-FE-01~13)
-- **MQTT** (EM→BE, 현재 확정분): `carts/{cartId}/telemetry/position`, `carts/{cartId}/status`, `carts/{cartId}/events/slots`
+  — 실구현 2종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계)
+- **MQTT** (EM→BE, 현재 확정분):
+  - `carts/{cartId}/telemetry/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계
+  - `choll/cart/rfid` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정).
+    ⚠️ 페이로드에 cartId가 없어 `mqtt.rfid-cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 EM과 재협의 필요
+  - `carts/{cartId}/status` (하트비트) — 명세만 있고 수신 미구현
   ⚠️ BE→EM 명령 토픽(이동·추종·LED·RFID 재인식)은 명세 작성 중 — 확정 시 API 명세서에 먼저 반영할 것
 
 ## 참고 문서

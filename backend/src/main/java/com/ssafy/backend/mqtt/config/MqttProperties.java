@@ -9,6 +9,9 @@ public class MqttProperties {
 	private String brokerUrl = "tcp://localhost:1883";
 	private String clientId = "chollae-backend";
 	private String positionTopic = "carts/+/telemetry/position";
+	private String rfidTopic = "choll/cart/rfid";
+	// RFID 페이로드에 cartId가 없어(EM 계약, 단일 카트 가정) 설정으로 대상 카트를 지정한다
+	private long rfidCartId = 1L;
 	private int qos;
 
 	public boolean isEnabled() {
@@ -41,6 +44,22 @@ public class MqttProperties {
 
 	public void setPositionTopic(String positionTopic) {
 		this.positionTopic = positionTopic;
+	}
+
+	public String getRfidTopic() {
+		return rfidTopic;
+	}
+
+	public void setRfidTopic(String rfidTopic) {
+		this.rfidTopic = rfidTopic;
+	}
+
+	public long getRfidCartId() {
+		return rfidCartId;
+	}
+
+	public void setRfidCartId(long rfidCartId) {
+		this.rfidCartId = rfidCartId;
 	}
 
 	public int getQos() {
