@@ -2,6 +2,7 @@ import { Home, MapPin, PackageOpen, Search } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
 import logo from '@/assets/logo.png';
+import { useCartControlEvents } from '@/features/cart-control/model/useCartControlEvents';
 import { useCartMapEvents } from '@/features/cart-map/model/useCartMapEvents';
 import { CartSocketProvider } from '@/shared/api/ws/CartSocketProvider';
 import { DEMO_CART_ID } from '@/shared/config/cart';
@@ -23,6 +24,7 @@ const MOBILE_NAV_ITEMS = [...NAV_ITEMS];
 /** 전역 WS 이벤트를 스토어에 동기화 — 어떤 페이지에서든 카트 상태가 실시간으로 움직인다 */
 function CartRealtimeSync() {
   useCartMapEvents(DEMO_CART_ID);
+  useCartControlEvents();
   return null;
 }
 
