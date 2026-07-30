@@ -1,0 +1,36 @@
+# =====================================
+# STM32CubeIDE Build Outputs
+# =====================================
+
+# STM32 Workspace
+.metadata/
+
+# Build output
+**/Debug/
+**/Release/
+
+# Binary files
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# Object files
+*.o
+*.d
+*.su
+
+# Launch files
+*.launch
+
+# Temporary
+*.tmp
+*.bak
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Preference
+**/.settings/
