@@ -38,6 +38,7 @@
     align-self: flex-end; // 아이콘은 왼쪽 위, 텍스트는 오른쪽 아래
     font-size: 17px;
     font-weight: 700;
+    word-break: keep-all; // 좁은 화면에서 "추종 시/작"처럼 글자 단위로 잘리지 않고 "추종/시작"으로 개행
   }
 }
 
