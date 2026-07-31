@@ -131,6 +131,23 @@ def generate_launch_description() -> LaunchDescription:
         ),
         Node(
             package="person_follow_robot",
+            executable="target_position_node",
+            name="target_position_node",
+            output="screen",
+            parameters=[{
+                "cart_pose_topic": "/robot_pose",  # EM SLAM 포즈 계약 확정 시 갱신
+                "target_position_topic": "/target_position",
+                "map_frame_id": "map",
+                "camera_fov_deg": 58.0,
+                "image_width": 640,
+                "lidar_yaw_offset_deg": 0.0,
+                "lidar_mirrored": True,
+                "bbox_span_scale": 0.8,
+                "pose_timeout_sec": 1.0,
+            }],
+        ),
+        Node(
+            package="person_follow_robot",
             executable="debug_visualization_node",
             name="debug_visualization_node",
             output="screen",

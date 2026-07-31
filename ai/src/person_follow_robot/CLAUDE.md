@@ -79,7 +79,8 @@ pytest ai/test/
 | `tracker_node` | tracker_node.py | ByteTrack ID 부여 |
 | `reid_node` | reid_node.py | OSNet Re-ID + Memory Bank + 타겟 선택/재탐색 |
 | `control_node` | control_node.py | PID (거리/각도) → cmd_vel |
-| `motor_node` | motor_node.py | cmd_vel → 좌우 바퀴 RPM(/wheel_speed_cmd) |
+| `motor_node` | motor_node.py | cmd_vel → 좌우 바퀴 RPM(/wheel_speed_cmd) (레거시, EM 재활용 예정) |
+| `target_position_node` | target_position_node.py | 카트 포즈(SLAM)+방위각+거리 → 사서 지도 좌표 /target_position |
 | `debug_visualization_node` | debug_visualization_node.py | 오버레이 영상 발행/저장 |
 
 ## 규칙

@@ -37,7 +37,7 @@ export function SearchPage() {
     <>
       <p className={styles.overline}>FIND A BOOK</p>
       <h1 className={styles.pageTitle}>도서 검색</h1>
-      <p className={styles.pageDesc}>제목·청구기호·RFID 태그로 바로 찾을 수 있어요.</p>
+      <p className={styles.pageDesc}>제목·청구기호로 바로 찾을 수 있어요.</p>
       <div className={styles.searchBox}>
         <Search size={20} className={styles.searchIcon} />
         <input

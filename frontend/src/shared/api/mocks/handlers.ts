@@ -56,8 +56,8 @@ const book = (
 };
 
 /**
- * 개발용 슬롯 고정 픽스처 (슬롯 30개, 책 15권 적재).
- * 카트는 출발 지점에서 시작한다 — 300·400 책장 책 11권(슬롯 1·2·4~10·15·16)은
+ * 개발용 슬롯 고정 픽스처 (슬롯 12개, 책 11권 적재).
+ * 카트는 출발 지점에서 시작한다 — 300·400 책장 책 9권(슬롯 1·2·4~10)은
  * 3구역 도착 시 정리 대상이 되는 데모 데이터다(isTarget).
  */
 const slotsFixture: Slot[] = [
@@ -126,40 +126,18 @@ const slotsFixture: Slot[] = [
     status: SlotStatus.OCCUPIED,
     book: book(12, '불편한 편의점', '김호연', '800', '813.7-김95ㅂ'),
   },
-  {
-    ...emptySlot(13),
-    status: SlotStatus.OCCUPIED,
-    book: book(13, '사피엔스', '유발 하라리', '900', '909-하293ㅅ'),
-  },
-  {
-    ...emptySlot(14),
-    status: SlotStatus.OCCUPIED,
-    book: book(14, '오늘도 책을 읽습니다', '김겨울', '000', '029.8-김441ㅇ'),
-  },
-  {
-    ...emptySlot(15),
-    status: SlotStatus.OCCUPIED,
-    isTarget: true,
-    book: book(15, '국가란 무엇인가', '유시민', '300', '340.2-유58ㄱ'),
-  },
-  {
-    ...emptySlot(16),
-    status: SlotStatus.OCCUPIED,
-    isTarget: true,
-    book: book(16, '하리하라의 생물학 카페', '이은희', '400', '470.4-이68ㅎ'),
-  },
-  ...Array.from({ length: 14 }, (_, i) => emptySlot(i + 17)),
 ];
 
 /** 전체 API 모킹 핸들러. 특정 응답을 바꾸고 싶으면 개별 MockHandler에 override를 넘긴다. */
 export const handlers = [
   getListSlotsMockHandler(slotsFixture),
-  // 카트에 15권 적재, 이 중 3구역(300·400 책장) 도착 시 대상은 11권(슬롯 1·2·4~10·15·16)
+  // 카트에 11권 적재, 이 중 3구역(300·400 책장) 도착 시 대상은 9권(슬롯 1·2·4~10)
   getGetTaskProgressMockHandler({
-    totalBooks: 20,
+    totalSlots: 12,
+    totalBooks: 16,
     shelvedBooks: 5,
-    remainingBooks: 15,
-    currentZoneSlotNumbers: [1, 2, 4, 5, 6, 7, 8, 9, 10, 15, 16],
+    remainingBooks: 11,
+    currentZoneSlotNumbers: [1, 2, 4, 5, 6, 7, 8, 9, 10],
   }),
   // 카트 이동은 시뮬레이터 연동 — call 접수 시 WS로 위치/도착 이벤트가 브로드캐스트된다
   getGetCartMockHandler(({ params }) => cartDetailFixture(Number(params.cartId))),

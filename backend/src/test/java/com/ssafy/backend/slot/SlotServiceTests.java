@@ -61,15 +61,15 @@ class SlotServiceTests {
 	@Test
 	void findsSlotByNumber() {
 		when(cartService.getCart(1L)).thenReturn(cart);
-		when(repository.findByCartIdAndSlotNumber(1L, 30))
+		when(repository.findByCartIdAndSlotNumber(1L, 12))
 			.thenReturn(Optional.of(slot));
-		when(slot.getId()).thenReturn(39L);
-		when(slot.getSlotNumber()).thenReturn(30);
+		when(slot.getId()).thenReturn(12L);
+		when(slot.getSlotNumber()).thenReturn(12);
 		when(slot.getStatus()).thenReturn(SlotStatus.EMPTY);
 
-		Response response = service.findByNumber(1L, 30);
+		Response response = service.findByNumber(1L, 12);
 
-		assertEquals(30, response.slotNumber());
+		assertEquals(12, response.slotNumber());
 		assertNull(response.book());
 	}
 }

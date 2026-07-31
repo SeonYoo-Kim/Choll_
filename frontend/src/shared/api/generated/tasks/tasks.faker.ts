@@ -11,6 +11,7 @@ import type { TaskProgress } from '../model';
 export const getGetTaskProgressResponseMock = (
   overrideResponse: Partial<Extract<TaskProgress, object>> = {},
 ): TaskProgress => ({
+  totalSlots: faker.number.int(),
   totalBooks: faker.number.int(),
   shelvedBooks: faker.number.int(),
   remainingBooks: faker.number.int(),

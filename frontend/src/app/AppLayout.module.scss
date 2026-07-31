@@ -15,10 +15,8 @@
 }
 
 .frame {
-  margin: 0 auto;
   display: grid;
   min-height: calc(100vh - 16px);
-  max-width: 1480px;
   overflow: hidden;
   border: 1px solid $border-frame;
   border-radius: 20px;

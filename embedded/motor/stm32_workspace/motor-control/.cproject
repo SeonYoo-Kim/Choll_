@@ -50,6 +50,13 @@
 									<listOptionValue builtIn="false" value="../Drivers/BSP/STM32F4xx-Nucleo"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Device/ST/STM32F4xx/Include"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Include"/>
+									<listOptionValue builtIn="false" value="../Application/App"/>
+									<listOptionValue builtIn="false" value="../Application/Motor"/>
+									<listOptionValue builtIn="false" value="../Application/Controller"/>
+									<listOptionValue builtIn="false" value="../Application/Communication"/>
+									<listOptionValue builtIn="false" value="../Application/Encoder"/>
+									<listOptionValue builtIn="false" value="../Application/Safety"/>
+									<listOptionValue builtIn="false" value="../Application/Common"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.2115022146" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -76,6 +83,7 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 					</sourceEntries>
@@ -128,6 +136,13 @@
 									<listOptionValue builtIn="false" value="../Drivers/BSP/STM32F4xx-Nucleo"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Device/ST/STM32F4xx/Include"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Include"/>
+									<listOptionValue builtIn="false" value="../Application/App"/>
+									<listOptionValue builtIn="false" value="../Application/Motor"/>
+									<listOptionValue builtIn="false" value="../Application/Controller"/>
+									<listOptionValue builtIn="false" value="../Application/Communication"/>
+									<listOptionValue builtIn="false" value="../Application/Encoder"/>
+									<listOptionValue builtIn="false" value="../Application/Safety"/>
+									<listOptionValue builtIn="false" value="../Application/Common"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.641160202" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -154,6 +169,7 @@
 						</toolChain>
 					</folderInfo>
 					<sourceEntries>
+						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Core"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 					</sourceEntries>

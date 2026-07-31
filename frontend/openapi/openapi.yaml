@@ -244,6 +244,9 @@ components:
     TaskProgress:
       type: object
       properties:
+        totalSlots:
+          type: integer
+          format: int32
         totalBooks:
           type: integer
           format: int32
@@ -263,6 +266,7 @@ components:
         - remainingBooks
         - shelvedBooks
         - totalBooks
+        - totalSlots
     Slot:
       type: object
       properties:

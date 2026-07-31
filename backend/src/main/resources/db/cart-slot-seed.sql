@@ -1,5 +1,6 @@
--- 카트 1대와 빈 슬롯 30개를 생성합니다.
+-- 카트 1대와 빈 슬롯 12개를 생성합니다.
 -- 실제 RFID나 소장 도서는 연결하지 않으며, 여러 번 실행해도 중복 생성되지 않습니다.
+-- 슬롯이 30개이던 시절 시드된 DB에서는 13번 이후 슬롯을 삭제해 12개로 맞춥니다.
 
 START TRANSACTION;
 
@@ -25,6 +26,10 @@ ON DUPLICATE KEY UPDATE
 
 SET @default_cart_id = LAST_INSERT_ID();
 
+DELETE FROM slots
+WHERE cart_id = @default_cart_id
+  AND slot_number > 12;
+
 INSERT INTO slots (
     cart_id,
     slot_number,
@@ -43,25 +48,7 @@ INSERT INTO slots (
     (@default_cart_id,  9, 'EMPTY', NULL, NULL),
     (@default_cart_id, 10, 'EMPTY', NULL, NULL),
     (@default_cart_id, 11, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 12, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 13, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 14, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 15, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 16, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 17, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 18, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 19, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 20, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 21, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 22, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 23, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 24, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 25, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 26, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 27, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 28, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 29, 'EMPTY', NULL, NULL),
-    (@default_cart_id, 30, 'EMPTY', NULL, NULL)
+    (@default_cart_id, 12, 'EMPTY', NULL, NULL)
 ON DUPLICATE KEY UPDATE
     id = LAST_INSERT_ID(id);
 

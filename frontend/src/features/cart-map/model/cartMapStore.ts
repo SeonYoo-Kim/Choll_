@@ -107,7 +107,8 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
       return;
     }
     if (status === 'ARRIVED') {
-      const zone = destinationZoneId === undefined ? get().cartZone : zoneIndexOf(destinationZoneId);
+      const zone =
+        destinationZoneId === undefined ? get().cartZone : zoneIndexOf(destinationZoneId);
       set({
         navStatus: status,
         isMoving: false,
@@ -123,7 +124,8 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   syncFromCart: ({ position, zoneId, status }) =>
     set((state) => ({
       cartPosition: position ?? state.cartPosition,
-      cartZone: zoneId === undefined ? state.cartZone : zoneId === null ? null : zoneIndexOf(zoneId),
+      cartZone:
+        zoneId === undefined ? state.cartZone : zoneId === null ? null : zoneIndexOf(zoneId),
       cartStatus: status ?? state.cartStatus,
       isMoving: status === undefined ? state.isMoving : status === 'MOVING',
     })),
