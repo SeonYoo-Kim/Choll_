@@ -13,7 +13,7 @@ import styles from './SlotsPage.module.scss';
 
 type SlotFilter = 'all' | 'book' | 'empty' | 'error' | 'currentArea';
 
-/** 슬롯 관리 — 30개 슬롯 보드 + 상태 필터 + 슬롯 상세. */
+/** 슬롯 관리 — 12개 슬롯 보드 + 상태 필터 + 슬롯 상세. */
 export function SlotsPage() {
   const { data: slots } = useListSlots(DEMO_CART_ID);
   const cartZone = useCartMapStore((state) => state.cartZone);
