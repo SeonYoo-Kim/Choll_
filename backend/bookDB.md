@@ -227,7 +227,7 @@ Book 도메인에서 관리할 수 없는 비도서 자료는 제외합니다.
 | `Bookshelf` | 10개 |
 | `BookshelfRange` | 10개 |
 | `Cart` | 1대 |
-| `Slot` | 30개 |
+| `Slot` | 12개 |
 | RFID가 등록된 `BookCopy` | 5권 |
 | 도서가 적재된 `Slot` | 0개 |
 | 다른 도서관에서 삭제한 `BookCopy` | 272,555권 |

@@ -53,7 +53,7 @@ public class SlotService {
 	public record Response(
 		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Long id,
-		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "1", maximum = "30")
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "1", maximum = "12")
 		int slotNumber,
 		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		Status status,

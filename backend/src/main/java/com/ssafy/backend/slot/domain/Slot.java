@@ -34,7 +34,7 @@ import lombok.NoArgsConstructor;
 	},
 	check = @CheckConstraint(
 		name = "ck_slot_number",
-		constraint = "slot_number between 1 and 30"
+		constraint = "slot_number between 1 and 12"
 	)
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
