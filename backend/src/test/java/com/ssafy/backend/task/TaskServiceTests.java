@@ -77,6 +77,7 @@ class TaskServiceTests {
 
 		TaskService.ProgressResponse response = service.findProgress(1L);
 
+		assertEquals(2, response.totalSlots());
 		assertEquals(4, response.totalBooks());
 		assertEquals(3, response.shelvedBooks());
 		assertEquals(1, response.remainingBooks());
