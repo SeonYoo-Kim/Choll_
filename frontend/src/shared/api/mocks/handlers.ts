@@ -126,28 +126,6 @@ const slotsFixture: Slot[] = [
     status: SlotStatus.OCCUPIED,
     book: book(12, '불편한 편의점', '김호연', '800', '813.7-김95ㅂ'),
   },
-  {
-    ...emptySlot(13),
-    status: SlotStatus.OCCUPIED,
-    book: book(13, '사피엔스', '유발 하라리', '900', '909-하293ㅅ'),
-  },
-  {
-    ...emptySlot(14),
-    status: SlotStatus.OCCUPIED,
-    book: book(14, '오늘도 책을 읽습니다', '김겨울', '000', '029.8-김441ㅇ'),
-  },
-  {
-    ...emptySlot(15),
-    status: SlotStatus.OCCUPIED,
-    isTarget: true,
-    book: book(15, '국가란 무엇인가', '유시민', '300', '340.2-유58ㄱ'),
-  },
-  {
-    ...emptySlot(16),
-    status: SlotStatus.OCCUPIED,
-    isTarget: true,
-    book: book(16, '하리하라의 생물학 카페', '이은희', '400', '470.4-이68ㅎ'),
-  },
   ...Array.from({ length: 14 }, (_, i) => emptySlot(i + 17)),
 ];
 
@@ -159,7 +137,7 @@ export const handlers = [
     totalBooks: 20,
     shelvedBooks: 5,
     remainingBooks: 15,
-    currentZoneSlotNumbers: [1, 2, 4, 5, 6, 7, 8, 9, 10, 15, 16],
+    currentZoneSlotNumbers: [1, 2, 4, 5, 6, 7, 8, 9, 10],
   }),
   // 카트 이동은 시뮬레이터 연동 — call 접수 시 WS로 위치/도착 이벤트가 브로드캐스트된다
   getGetCartMockHandler(({ params }) => cartDetailFixture(Number(params.cartId))),

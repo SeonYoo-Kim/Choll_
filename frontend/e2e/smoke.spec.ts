@@ -13,7 +13,7 @@ test('홈이 카트 현황과 제어를 렌더링한다', async ({ page }) => {
 test('슬롯 관리가 MSW 픽스처 슬롯을 렌더링한다', async ({ page }) => {
   await page.goto('/slots');
 
-  await expect(page.getByText('전체 30')).toBeVisible();
+  await expect(page.getByText('전체 12')).toBeVisible();
   await expect(page.getByText('어린 왕자')).toBeVisible();
   await expect(page.getByText('RFID를 읽을 수 없어요')).toBeVisible();
 });
