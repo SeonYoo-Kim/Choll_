@@ -29,10 +29,13 @@ Face Recognition이 아닌 **Person Re-Identification(Re-ID)** 으로 동일 인
 ```
 RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [최근접(최대 bbox) 자동 선택 → 2초 등록] → OSNet Re-ID
     → Memory Bank → (추적 성공 | 추적 실패→Re-ID 재탐색) → Target Track ID
-    → 화면 중심 오차 + LiDAR 거리 → PID → /cmd_vel → Motor
+    → 방위각(카메라) + 거리(LiDAR) + 카트 포즈(SLAM, EM) → 타겟 지도 좌표 /target_position
+    → (EM) SLAM 내비게이션 경로 계획 → STM32 모터 구동
 ```
 
-노드 단위 매핑: `camera_node → detector_node → tracker_node → reid_node → control_node → motor_node` (+ `debug_visualization_node`).
+**AI의 책임은 `/target_position` 발행까지** (2026-07-31 아키텍처 변경). 속도 명령 생성은 EM(SLAM Nav)으로 이관.
+노드 단위 매핑: `camera_node → detector_node → tracker_node → reid_node → target_position_node` (+ `debug_visualization_node`).
+`control_node·motor_node`(PID→cmd_vel→RPM)는 EM이 STM 쪽에서 재활용 예정이라 보존 (launch에서는 데모용으로 유지).
 자세한 토픽 계약은 [SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md)와 노드 CLAUDE.md를 참조.
 
 ## 절대 규칙 (docs/DEVELOPMENT_GUIDE.md의 코딩 규칙 요약)

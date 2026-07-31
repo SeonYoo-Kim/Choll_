@@ -11,13 +11,16 @@
 | DetectorNode | detector_node.py | YOLOv10s TensorRT로 사람만 검출. `.engine` 파일 필수. Ultralytics 래퍼 사용. |
 | TrackerNode | tracker_node.py | supervision ByteTrack으로 검출에 track ID 부여. `ByteTrackAdapter`가 버전별 인자명을 흡수. |
 | ReidNode | reid_node.py | **핵심.** 타겟 자동 선택(최대 bbox 0.5초 연속, target_auto_select.py) + OSNet 512-D 임베딩 + Memory Bank(FIFO 20, 0.3초 샘플링, 재잠금 후 2초 갱신 유예) + 초기 등록(2초) + 재탐색(reid_logic.py: 시공간 타당성 게이트 → 임계 0.70 + 1·2위 마진 → 10프레임 연속 확인). 잘림/초근접 크롭은 등록·갱신·자동선택에서 배제. |
-| ControlNode | control_node.py | 화면 중심 오차 + LiDAR 거리 → PID → `cmd_vel`. 15Hz 루프. 측정 거리를 `/target_distance`로 공유. |
-| MotorNode | motor_node.py | `/cmd_vel` → 차동구동 역기구학(v,ω→좌우 RPM) → `/wheel_speed_cmd` 10Hz 발행. cmd 끊기면 [0,0]. |
+| TargetPositionNode | target_position_node.py | **신규(2026-07-31, AI의 최종 출력).** 카트 포즈(SLAM) + 카메라 방위각 + LiDAR 거리 → 사서의 지도 좌표 `/target_position` 발행. 이후 경로 계획·모터는 EM(SLAM Nav) 몫. |
+| ControlNode | control_node.py | (레거시 — EM이 재활용 예정, 데모용 유지) 화면 중심 오차 + LiDAR 거리 → PID → `cmd_vel`. 측정 거리를 `/target_distance`로 공유(디버그 오버레이가 사용). |
+| MotorNode | motor_node.py | (레거시 — EM이 재활용 예정, 데모용 유지) `/cmd_vel` → 차동구동 역기구학 → `/wheel_speed_cmd` 10Hz. cmd 끊기면 [0,0]. |
 | DebugVisualizationNode | debug_visualization_node.py | 트랙/타겟/재탐색 이벤트 + 타겟 거리(박스 우상단, m)를 프레임에 오버레이, `/debug/image` 발행 및 선택적 mp4 저장. |
 
 노드 외 순수 모듈: **search_behavior.py** — 타겟 상실 시 탐색 거동 상태머신
 (마지막 위치 접근 → 사라진 방향 회전 → 실패 시 정지). ROS 무관, 테스트는
-`ai/test/test_search_logic.py`. **아직 control_node에 배선되지 않음** — Known Gaps 2번 참조.
+`ai/test/test_search_logic.py`. **아직 배선되지 않음** — Known Gaps 3번 참조.
+(SLAM 전환 후에는 "상실 시 마지막 좌표 유지 발행 + 회전 탐색"을 target_position_node에
+배선하는 형태로 재검토 — 접근 이동은 SLAM Nav가 대신하게 됨.)
 
 ## 토픽 계약 (변경 시 양쪽 노드 + SYSTEM_ARCHITECTURE.md 동시 갱신)
 
@@ -32,6 +35,8 @@
 | `/cmd_vel` | geometry_msgs/Twist | control | motor |
 | `/scan` | sensor_msgs/LaserScan | (LiDAR 드라이버) | control |
 | `/target_distance` | std_msgs/Float32 (m, LiDAR 측정. NaN=측정 실패) | control | debug |
+| `/target_position` | geometry_msgs/PointStamped (frame=map, 사서 지도 좌표 m) | target_position | (EM SLAM Nav) |
+| 카트 포즈 (협의 중) | geometry_msgs/PoseStamped 가정, 기본 `/robot_pose` | (EM SLAM) | target_position |
 | `/wheel_speed_cmd` | std_msgs/Int32MultiArray (`[제어종류, left_rpm, right_rpm]`, 0=모터·1=LED) | motor | (STM32, micro-ROS) |
 
 `vision_msgs` BoundingBox2D의 center는 배포판에 따라 `.position.x`(신형) 또는 `.x`(구형) 레이아웃이 다릅니다.
@@ -50,7 +55,14 @@
    - 회전 방향 실기 검증: REP 103(+ω=좌회전) 기준으로 구현됨. 실기에서 반대로 돌면
      STM32 배선/모터 극성 확인 (코드 부호를 임의로 뒤집지 말 것).
 
-2. **search_behavior.py는 구현·테스트 완료, control_node 배선은 미완** (2026-07-28).
+2. **SLAM 연동 토픽 계약 미확정** (2026-07-31, target_position_node).
+   - 카트 포즈 입력: `/robot_pose`(PoseStamped, frame=map)로 **가정**하고 구현.
+     EM이 실제로 주는 토픽명·타입(PoseWithCovarianceStamped 가능성)·프레임 확정 시
+     `cart_pose_topic` 파라미터/구독 타입과 이 문서·SYSTEM_ARCHITECTURE를 갱신할 것.
+   - `/target_position` 소비 방식(EM이 직접 goal로 쓰는지, 주기·좌표 단위 m 확인)도 협의 필요.
+   - 확정 전까지 실기에서는 포즈 미수신으로 발행이 보류된다 (경고 로그로 확인 가능).
+
+3. **search_behavior.py는 구현·테스트 완료, control_node 배선은 미완** (2026-07-28).
    사람이 안 보이는 상태에서 로봇을 움직이는 기능이라 실기 없이 켜지 않기로 함.
    조립 후 배선 체크리스트:
    - control_node에 bbox 이력 링버퍼(~0.5초) 추가 → 상실 확정 시 `TargetSnapshot`
@@ -63,7 +75,7 @@
    - 실기 튜닝: 회전 방향 실측, 속도(0.3 m/s / 0.5 rad/s), 타임아웃(10 s)·최대 회전각(120°).
    - dead reckoning은 EM이 엔코더 `/odom`을 올려주면 odom 적분으로 교체.
 
-3. **STM32까지 실제 전달은 micro-ROS agent 필요.** motor_node는 `/wheel_speed_cmd`를
+4. **STM32까지 실제 전달은 micro-ROS agent 필요.** motor_node는 `/wheel_speed_cmd`를
    발행할 뿐이며, Jetson에서 micro-ROS agent가 UART로 브릿지해야 STM32에 도달합니다
    ([JETSON_TO_STM.md](../../../../docs/JETSON_TO_STM.md)). agent 실행은 EM 파트와 협의.
 

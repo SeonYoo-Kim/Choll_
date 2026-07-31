@@ -13,6 +13,36 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-31 09:33 — ✅ 103 passed (+12 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check target_position_node.py setup.py launch conftest.py test_target_position.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop `fab1f07` 이후 작업 트리 (target_position_node 신규, 커밋 전)
+- **맥락**: **아키텍처 변경** — AI는 cmd_vel/RPM 생성에서 손을 떼고, SLAM(EM) 포즈
+  + 카메라 방위각 + LiDAR 거리로 **사서의 지도 좌표(/target_position)를 발행**하는
+  것까지만 담당. 경로 계획·모터는 EM(SLAM Nav→STM32)으로 이관.
+  - `target_position_node.py` 신규: /target_person + /scan(BEST_EFFORT) + 카트
+    포즈(PoseStamped, 토픽 계약 협의 중 — Known Gaps 2번) 구독 →
+    PointStamped(frame=map) 발행. 미관측/거리 실패/포즈 stale 시 미발행.
+  - 순수 함수 3종: `yaw_from_quaternion`, `robot_frame_bearing`(센서 보정 없는
+    물리 방위각 — LiDAR 조회각과 구분), `target_position_in_map`.
+    거리 측정은 control_node의 기존 순수 함수 재사용.
+  - control_node/motor_node는 EM 재활용 예정으로 무수정 보존 (launch 데모용 유지).
+  - **1차 수집 에러**: 상대 import가 pytest 단일 모듈 import와 충돌 →
+    try/except 폴백으로 해결. conftest에 PointStamped/PoseStamped 스텁 추가.
+  - 신규 테스트 12개: 쿼터니언→yaw 4, 물리 방위각 3, 지도 좌표 변환 5.
+- **주의**: 실기 검증은 EM SLAM 포즈 토픽 확정 후 가능 (그 전에는 포즈 미수신
+  경고와 함께 발행 보류가 정상).
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 103 passed in 0.11s =============================
+```
+
+</details>
+
 ## 2026-07-29 15:08 — ✅ 91 passed (+8 신규, 1차 1건 실패 후 수정), ruff 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check reid_node.py reid_logic.py launch test_reid_logic.py`
