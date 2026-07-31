@@ -15,7 +15,12 @@ pipeline {
 			steps {
 				withCredentials([file(credentialsId: 'choll-app-env', variable: 'ENV_FILE')]) {
 					sh '''
-						set -a; . "$ENV_FILE"; set +a
+						# Windows에서 만든 .env 방어: CRLF 줄바꿈·BOM 제거 후 필요한 값만 추출
+						sed -e 's/\\r$//' -e '1s/^\\xef\\xbb\\xbf//' "$ENV_FILE" > env.clean
+						export DB_URL="$(grep -m1 '^DB_URL=' env.clean | cut -d= -f2-)"
+						export DB_USERNAME="$(grep -m1 '^DB_USERNAME=' env.clean | cut -d= -f2-)"
+						export DB_PASSWORD="$(grep -m1 '^DB_PASSWORD=' env.clean | cut -d= -f2-)"
+						rm -f env.clean
 						# 테스트는 브로커 없이 돈다 (contextLoads가 MQTT 연결을 시도하지 않도록)
 						export MQTT_ENABLED=false
 						export WS_POSITION_TEST_ENABLED=false
@@ -36,7 +41,8 @@ pipeline {
 			steps {
 				withCredentials([file(credentialsId: 'choll-app-env', variable: 'ENV_FILE')]) {
 					sh '''
-						cp "$ENV_FILE" infra/.env
+						# CRLF·BOM 정리한 .env를 compose에 전달 (\\r이 값 끝에 붙으면 DB 인증 실패)
+						sed -e 's/\\r$//' -e '1s/^\\xef\\xbb\\xbf//' "$ENV_FILE" > infra/.env
 						docker compose -p choll-app -f infra/docker-compose.app.yml up -d
 						rm -f infra/.env
 					'''
