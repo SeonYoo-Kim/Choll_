@@ -120,6 +120,14 @@ export class CartSocket {
 
   connect(): void {
     this.closedByUser = false;
+    // 이미 살아있는 연결이 있으면 그대로 사용 (StrictMode 이중 실행 등 중복 connect 방지)
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
     const base =
       this.options.baseUrl ||
       import.meta.env.VITE_WS_URL ||
@@ -127,7 +135,10 @@ export class CartSocket {
     const socket = new WebSocket(`${base}/ws/carts/${this.cartId}`);
     this.socket = socket;
 
+    // 각 핸들러는 자신이 현재 소켓일 때만 동작한다 — close() 후 뒤늦게 도착하는
+    // 낡은 소켓의 이벤트(특히 onclose)가 재연결을 일으켜 연결이 2개가 되는 것을 방지
     socket.onopen = () => {
+      if (this.socket !== socket) return;
       console.info(`[CartSocket] 연결됨: ${base}/ws/carts/${this.cartId}`);
       if (this.hasConnectedOnce) {
         this.options.onReconnect?.();
@@ -137,6 +148,7 @@ export class CartSocket {
     };
 
     socket.onmessage = (message: MessageEvent<string>) => {
+      if (this.socket !== socket) return;
       try {
         const event = JSON.parse(message.data) as CartWsEvent;
         console.info('[CartSocket] 수신:', event.type, event.payload);
@@ -147,8 +159,8 @@ export class CartSocket {
     };
 
     socket.onclose = () => {
+      if (this.socket !== socket) return;
       if (this.closedByUser) {
-        console.info('[CartSocket] 연결 종료');
         return;
       }
       console.info(`[CartSocket] 연결 끊김 — ${this.retryDelayMs}ms 후 재연결 시도`);
@@ -176,7 +188,10 @@ export class CartSocket {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.socket?.close();
-    this.socket = null;
+    if (this.socket) {
+      console.info('[CartSocket] 연결 종료');
+      this.socket.close();
+      this.socket = null;
+    }
   }
 }
