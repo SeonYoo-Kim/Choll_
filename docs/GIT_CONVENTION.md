@@ -46,7 +46,14 @@
 [docs] 실행 방법 추가
 ```
 
-## 3. Merge Request 템플릿
+## 3. Merge Request
+
+### 머지는 사람이 한다 (AI 에이전트 규칙)
+
+- AI 에이전트는 **피처 브랜치 커밋·푸시, MR 생성까지만** 수행한다.
+- `develop`·`master`(main)에 대한 **직접 푸시 및 로컬 머지 금지** — 머지 버튼은 담당자가 GitLab에서 직접 누른다. (2026-07-31 합의)
+
+### MR 템플릿
 
 ```markdown
 ## 📌 요약 (Summary)

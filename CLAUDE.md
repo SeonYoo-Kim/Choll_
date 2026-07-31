@@ -79,3 +79,4 @@ bash scripts/gc.sh          # 또는 Windows: pwsh scripts/gc.ps1
    "테스트 통과"라는 주장은 이 로그의 원본 출력으로 사람이 검증할 수 있어야 한다. 형식은 TEST_LOG.md 상단 규칙 참조.
 6. **커밋 메시지는 `[type] subject` 형식** (`feat`/`fix`/`refactor`/`style`/`docs`/`test`/`chore`, 50자 이하·명사형·마침표 없이).
    브랜치 전략·MR/이슈 템플릿 포함 전체 규칙: [docs/GIT_CONVENTION.md](docs/GIT_CONVENTION.md)
+7. **머지는 사람이 한다.** 에이전트는 피처 브랜치 푸시와 MR 생성까지만 — `develop`/`main` 직접 푸시·로컬 머지 금지.
