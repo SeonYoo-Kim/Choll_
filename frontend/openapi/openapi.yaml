@@ -1,0 +1,352 @@
+openapi: 3.1.0
+info:
+  title: OpenAPI definition
+  version: v0
+servers:
+  - url: http://localhost:8080
+    description: Generated server url
+paths:
+  /api/maps/{mapId}:
+    get:
+      tags:
+        - maps
+      operationId: getMap
+      parameters:
+        - name: mapId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/MapInfo'
+  /api/maps/{mapId}/zones:
+    get:
+      tags:
+        - maps
+      operationId: listShelfZones
+      parameters:
+        - name: mapId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShelfZone'
+  /api/carts/{cartId}:
+    get:
+      tags:
+        - carts
+      operationId: getCart
+      parameters:
+        - name: cartId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/CartDetail'
+  /api/carts/{cartId}/tasks/progress:
+    get:
+      tags:
+        - tasks
+      operationId: getTaskProgress
+      parameters:
+        - name: cartId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/TaskProgress'
+  /api/carts/{cartId}/slots:
+    get:
+      tags:
+        - slots
+      operationId: listSlots
+      parameters:
+        - name: cartId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+  /api/carts/{cartId}/slots/{slotNumber}:
+    get:
+      tags:
+        - slots
+      operationId: getSlot
+      parameters:
+        - name: cartId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: slotNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+      responses:
+        '200':
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/Slot'
+components:
+  schemas:
+    MapInfo:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        imageUrl:
+          type: string
+        resolution:
+          type: number
+        originX:
+          type: number
+        originY:
+          type: number
+        imageWidth:
+          type: integer
+          format: int32
+        imageHeight:
+          type: integer
+          format: int32
+      required:
+        - id
+        - imageHeight
+        - imageUrl
+        - imageWidth
+        - name
+        - originX
+        - originY
+        - resolution
+    ShelfZone:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        mapId:
+          type: integer
+          format: int64
+        code:
+          type: string
+        name:
+          type: string
+        boundaryData:
+          type: string
+      required:
+        - boundaryData
+        - code
+        - id
+        - mapId
+        - name
+    CartDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - IDLE
+            - MOVING
+            - FOLLOWING
+            - ERROR
+        online:
+          type: boolean
+        mapId:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        currentZoneId:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        currentZoneName:
+          type:
+            - string
+            - 'null'
+        position:
+          $ref: '#/components/schemas/CartPosition'
+        lastSeenAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+      required:
+        - currentZoneId
+        - currentZoneName
+        - id
+        - lastSeenAt
+        - mapId
+        - name
+        - online
+        - status
+    CartPosition:
+      type: object
+      properties:
+        x:
+          type: number
+        'y':
+          type: number
+      required:
+        - x
+        - 'y'
+    TaskProgress:
+      type: object
+      properties:
+        totalSlots:
+          type: integer
+          format: int32
+        totalBooks:
+          type: integer
+          format: int32
+        shelvedBooks:
+          type: integer
+          format: int32
+        remainingBooks:
+          type: integer
+          format: int32
+        currentZoneSlotNumbers:
+          type: array
+          items:
+            type: integer
+            format: int32
+      required:
+        - currentZoneSlotNumbers
+        - remainingBooks
+        - shelvedBooks
+        - totalBooks
+        - totalSlots
+    Slot:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        slotNumber:
+          type: integer
+          format: int32
+          maximum: 30
+          minimum: 1
+        status:
+          type: string
+          enum:
+            - EMPTY
+            - OCCUPIED
+            - RECOGNIZING
+            - RECOGNITION_FAILED
+        isTarget:
+          type: boolean
+        book:
+          $ref: '#/components/schemas/SlotBook'
+        lastDetectedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+      required:
+        - id
+        - isTarget
+        - lastDetectedAt
+        - slotNumber
+        - status
+    SlotBook:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        bookId:
+          type: integer
+          format: int64
+        title:
+          type: string
+        author:
+          type:
+            - string
+            - 'null'
+        callNumber:
+          type: string
+        rfidTagId:
+          type:
+            - string
+            - 'null'
+        bookshelfId:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        bookshelfNumber:
+          type:
+            - string
+            - 'null'
+        shelfZoneId:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        zoneName:
+          type:
+            - string
+            - 'null'
+      required:
+        - author
+        - bookId
+        - bookshelfId
+        - bookshelfNumber
+        - callNumber
+        - id
+        - rfidTagId
+        - shelfZoneId
+        - title
+        - zoneName

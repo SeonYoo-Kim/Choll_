@@ -1,0 +1,98 @@
+@use '@/shared/styles/variables' as *;
+
+.panel {
+  border: 1px solid $border-soft;
+  border-radius: $radius-panel;
+  background: $bg-panel;
+  padding: 20px;
+
+  @media (min-width: $bp-lg) {
+    padding: 24px;
+  }
+}
+
+.header {
+  margin-bottom: $spacing-md;
+}
+
+.overline {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #9b927f;
+}
+
+.title {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.canvas {
+  position: relative;
+  overflow: hidden;
+  // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다
+  aspect-ratio: 1174 / 631;
+  border: 1px solid $border-panel;
+  border-radius: 22px;
+  background: #fffdf8;
+}
+
+.mapImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.zone {
+  position: absolute;
+  border: 2px dashed transparent;
+  border-radius: 16px;
+  background: transparent;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+
+  &:hover {
+    border-color: rgba(105, 194, 182, 0.7);
+    background: rgba(105, 194, 182, 0.08);
+  }
+
+  &:disabled {
+    cursor: wait;
+  }
+}
+
+.zoneActive {
+  border: 2px solid $primary;
+  background: rgba(105, 194, 182, 0.1);
+  box-shadow: 0 0 0 4px rgba(105, 194, 182, 0.15);
+}
+
+.cart {
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: 16px;
+  background: $text-main;
+  font-size: 16px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+  transition:
+    left 0.3s ease-in-out,
+    top 0.3s ease-in-out,
+    transform 0.3s ease-in-out;
+}
+
+.cartMoving {
+  outline: 4px solid rgba(105, 194, 182, 0.3);
+}

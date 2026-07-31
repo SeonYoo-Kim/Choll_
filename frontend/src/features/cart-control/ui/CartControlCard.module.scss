@@ -1,0 +1,64 @@
+@use '@/shared/styles/variables' as *;
+
+.card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid $border-soft;
+  border-radius: $radius-card;
+  background: $bg-card;
+  padding: 20px;
+}
+
+.label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: $text-label;
+}
+
+.grid {
+  margin-top: $spacing-md;
+  flex: 1; // 카드의 남은 세로 공간을 전부 사용 → 버튼이 카드 높이에 맞춰 늘어난다
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.control {
+  display: flex;
+  min-height: 96px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-radius: 16px;
+  padding: $spacing-md;
+  text-align: left;
+
+  span {
+    align-self: flex-end; // 아이콘은 왼쪽 위, 텍스트는 오른쪽 아래
+    font-size: 17px;
+    font-weight: 700;
+    word-break: keep-all; // 좁은 화면에서 "추종 시/작"처럼 글자 단위로 잘리지 않고 "추종/시작"으로 개행
+  }
+}
+
+.following {
+  background: #e7f7f4;
+  color: #328b7e;
+}
+
+.idle {
+  background: #f4f0e7;
+  color: #776f65;
+}
+
+// 일시정지 — 재개 가능함을 알리는 앰버 톤
+.paused {
+  background: #fdf3e0;
+  color: #a97c2f;
+}
+
+.stop {
+  background: $danger-bg;
+  color: #bd6257;
+}

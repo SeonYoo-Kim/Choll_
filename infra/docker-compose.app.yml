@@ -1,0 +1,30 @@
+# 애플리케이션 배포 compose — Jenkins Deploy 단계에서 실행한다.
+# 전제:
+#   - 이미지 choll-backend / choll-web 은 CI Build 단계에서 미리 빌드됨
+#   - 외부 네트워크 choll-net 존재 (docker network create choll-net),
+#     인프라 compose(~/infra)의 mosquitto 도 같은 네트워크에 연결돼 있어야
+#     backend 가 tcp://mosquitto:1883 으로 브로커에 닿는다
+#   - .env 는 Jenkins Secret file 자격증명에서 배포 시점에 주입 (저장소에 없음)
+services:
+  backend:
+    image: choll-backend:latest
+    container_name: choll-backend
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - choll-net
+
+  web:
+    image: choll-web:latest
+    container_name: choll-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - choll-net
+
+networks:
+  choll-net:
+    external: true

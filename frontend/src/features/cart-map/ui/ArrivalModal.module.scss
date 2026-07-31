@@ -1,0 +1,185 @@
+@use '@/shared/styles/variables' as *;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: $spacing-md;
+  background: rgba(69, 65, 57, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100dvh - 2 * $spacing-md);
+  overflow: hidden;
+  border-radius: 28px;
+  background: $bg-card;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+
+  // 책이 많아 목록이 길어지면 슬롯 그리드만 스크롤한다
+  > :not(.slotGrid) {
+    flex-shrink: 0;
+  }
+
+  @media (min-width: $bp-md) {
+    padding: 32px;
+  }
+}
+
+.close {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f7f0e4;
+  color: #887e71;
+}
+
+.flag {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: $accent;
+  color: #926b30;
+}
+
+.overline {
+  margin: 20px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $text-overline;
+}
+
+.title {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.desc {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #7a7165;
+
+  strong {
+    color: $primary-text;
+  }
+}
+
+.slotGrid {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  // ping 애니메이션·카드 그림자가 스크롤 영역 가장자리에서 잘리지 않도록 여백 확보
+  padding: 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+
+  @media (min-width: $bp-md) {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+.slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 2px solid $primary;
+  border-radius: 16px;
+  background: #edfbf7;
+  padding: $spacing-md;
+  box-shadow: 0 5px 0 #b7e8df;
+}
+
+.slotId {
+  position: relative;
+  top: -5px;
+  font-family: $font-mono;
+  font-size: 11px;
+  font-weight: 700;
+  color: #468b82;
+}
+
+.slotTitle {
+  margin: 12px 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+// 제목 길이와 무관하게 카드 하단에 고정되는 책장 번호 배지
+.slotShelf {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7a7165;
+}
+
+.ping {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: $primary;
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes ping {
+  75%,
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.actions {
+  margin-top: 28px;
+  display: flex;
+  gap: 12px;
+}
+
+.primary {
+  flex: 1;
+  border-radius: 12px;
+  background: $primary;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 4px 0 #4aa69a;
+}
+
+.secondary {
+  border-radius: 12px;
+  background: #f7f0e3;
+  padding: 0 $spacing-md;
+  font-size: 14px;
+  font-weight: 700;
+  color: #766b5c;
+}

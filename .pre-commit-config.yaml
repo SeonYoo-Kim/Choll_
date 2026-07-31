@@ -1,0 +1,19 @@
+# Pre-commit hooks. 설치: `pip install pre-commit && pre-commit install`
+# 커밋 시 자동으로 lint/format을 실행해 규칙 위반을 사전에 차단한다.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff          # 린트 (자동 수정)
+        args: [--fix]
+      - id: ruff-format   # 포맷
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files   # 모델/영상 등 대용량 파일 커밋 차단
+        args: [--maxkb=2048]
+      - id: check-merge-conflict

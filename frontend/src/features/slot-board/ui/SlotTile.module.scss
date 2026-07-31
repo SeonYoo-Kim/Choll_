@@ -1,0 +1,90 @@
+@use '@/shared/styles/variables' as *;
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; // 그리드 셀이 콘텐츠 폭에 끌려 늘어나지 않게
+  height: 128px;
+  border: 2px solid;
+  border-radius: $radius-tile;
+  padding: 10px;
+  text-align: left;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.active {
+  transform: translateY(-4px);
+  outline: 4px solid rgba(255, 230, 166, 0.7);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+}
+
+.book {
+  border-color: $slot-book-border;
+  background: $slot-book-bg;
+  color: $slot-book-text;
+}
+
+.empty {
+  border-color: $slot-empty-border;
+  background: $slot-empty-bg;
+  color: $slot-empty-text;
+}
+
+.error {
+  border-color: $slot-error-border;
+  background: $slot-error-bg;
+  color: $slot-error-text;
+}
+
+.id {
+  font-family: $font-mono;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.title {
+  // 항상 정확히 2줄 높이로 고정 — 제목 길이가 카드 크기에 영향을 주지 않는다
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 10px 0 0;
+  height: 32px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  // 한글은 어절(띄어쓰기) 단위로만 줄바꿈, 한 어절이 카드보다 길 때만 강제 분리
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 16px;
+  opacity: 0.7;
+}
+
+.zone {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}

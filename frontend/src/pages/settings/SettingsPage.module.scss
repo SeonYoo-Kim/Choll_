@@ -1,0 +1,151 @@
+@use '@/shared/styles/variables' as *;
+
+.pageHeader {
+  margin-bottom: 28px;
+}
+
+.overline {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $text-overline;
+}
+
+.pageTitle {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 34px;
+  font-weight: 400;
+}
+
+.pageDesc {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: $text-soft;
+}
+
+.grid {
+  display: grid;
+  max-width: 1024px;
+  gap: 20px;
+
+  @media (min-width: $bp-md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.card {
+  border: 1px solid $border-soft;
+  border-radius: $radius-card;
+  background: #fff;
+  padding: 20px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cardIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.mint {
+  background: $primary-bg;
+  color: #398c80;
+}
+
+.red {
+  background: $danger-bg;
+  color: $danger-text;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.cardDesc {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: $text-muted;
+}
+
+.statGrid {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  text-align: center;
+}
+
+.stat {
+  border-radius: 12px;
+  background: $bg-soft;
+  padding: 12px;
+
+  strong {
+    display: block;
+    font-size: 18px;
+    color: #398c80;
+  }
+
+  span {
+    font-size: 10px;
+    color: $text-muted;
+  }
+}
+
+.switchList {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  span {
+    font-size: 14px;
+    font-weight: 700;
+  }
+}
+
+.switch {
+  position: relative;
+  height: 28px;
+  width: 48px;
+  border-radius: 999px;
+  background: #ded8cd;
+  transition: background 0.15s;
+}
+
+.switchOn {
+  background: $primary;
+
+  .knob {
+    left: 24px;
+  }
+}
+
+.knob {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: left 0.15s;
+}

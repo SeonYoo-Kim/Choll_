@@ -1,0 +1,44 @@
+# Linting / formatting config for the person-following robot.
+# Python 프로젝트의 ".eslintrc" 역할 — DEVELOPMENT_GUIDE.md의 코딩 규칙을 강제한다.
+# 실행: `ruff check .`  /  `ruff format .`
+
+[project]
+name = "person_follow_robot"
+version = "0.1.0"
+description = "Library robot: person detection(YOLO) + LiDAR fusion + PID following"
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+# ROS2 빌드 산출물과 서드파티는 검사 대상에서 제외.
+extend-exclude = ["ai/build", "ai/install", "ai/log"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle(PEP8), F: pyflakes, I: isort, D: pydocstyle(docstring 필수),
+# UP: pyupgrade, B: bugbear, ANN: 타입힌트, PLW0603: global 문 사용 금지.
+select = ["E", "W", "F", "I", "D", "UP", "B", "ANN", "PLW0603"]
+ignore = [
+    "D203",  # one-blank-line-before-class (D211와 충돌)
+    "D213",  # multi-line-summary-second-line (D212와 충돌)
+    "ANN101", # self 타입힌트 불필요
+    "ANN102", # cls 타입힌트 불필요
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트는 docstring/타입힌트 규칙을 완화.
+"ai/**/test/**" = ["D", "ANN"]
+# launch/setup 파일은 docstring 규칙 완화.
+"**/launch/*.py" = ["D"]
+"**/setup.py" = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["ai/test"]
+python_files = ["test_*.py"]

@@ -1,0 +1,158 @@
+@use '@/shared/styles/variables' as *;
+
+.page {
+  min-height: 100vh;
+  background: $bg-page;
+  padding: 8px;
+
+  @media (min-width: $bp-sm) {
+    padding: $spacing-md;
+  }
+
+  @media (min-width: $bp-md) {
+    padding: $spacing-lg;
+  }
+}
+
+.frame {
+  display: grid;
+  min-height: calc(100vh - 16px);
+  overflow: hidden;
+  border: 1px solid $border-frame;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 70px rgba(93, 75, 44, 0.12);
+
+  @media (min-width: $bp-sm) {
+    min-height: calc(100vh - 32px);
+    border-radius: 28px;
+  }
+
+  @media (min-width: $bp-md) {
+    min-height: calc(100vh - 48px);
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+}
+
+.sidebar {
+  display: none;
+  border-right: 1px solid $border-soft;
+  background: $bg-card;
+  padding: 20px 10px 20px 20px;
+
+  @media (min-width: $bp-md) {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.logo {
+  // 사이드바 콘텐츠 폭(130px)보다 살짝 크게 — width: 100%로는 컨테이너에 묶여 안 커진다
+  width: 134px;
+  max-width: none;
+  height: auto;
+  object-fit: contain;
+}
+
+.nav {
+  margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  padding: 12px $spacing-md;
+  font-size: 14px;
+  font-weight: 700;
+  color: #8b8275;
+  text-decoration: none;
+
+  &:hover {
+    background: #f7f1e5;
+  }
+}
+
+.navActive {
+  background: $primary-bg;
+  color: #388d81;
+
+  &:hover {
+    background: $primary-bg;
+  }
+}
+
+.main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-md $spacing-md 96px;
+
+  @media (min-width: $bp-sm) {
+    padding: 20px 20px 96px;
+  }
+
+  @media (min-width: $bp-md) {
+    padding: 32px;
+  }
+}
+
+.mobileNav {
+  position: fixed;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  justify-content: space-around;
+  border: 1px solid $border-frame;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 6px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(6px);
+
+  @media (min-width: $bp-sm) {
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    padding: $spacing-sm;
+  }
+
+  @media (min-width: $bp-md) {
+    display: none;
+  }
+}
+
+.mobileNavItem {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border-radius: 12px;
+  padding: $spacing-sm 0;
+  font-size: 9px;
+  font-weight: 700;
+  color: #9a9185;
+  text-decoration: none;
+
+  @media (min-width: $bp-sm) {
+    font-size: 10px;
+  }
+}
+
+.mobileNavActive {
+  background: $primary-bg;
+  color: #398c80;
+}
