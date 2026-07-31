@@ -6,6 +6,7 @@
  */
 
 export interface TaskProgress {
+  totalSlots: number;
   totalBooks: number;
   shelvedBooks: number;
   remainingBooks: number;

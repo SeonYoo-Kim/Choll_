@@ -70,11 +70,11 @@
   gap: 12px;
 
   @media (min-width: $bp-sm) {
-  grid-template-columns: repeat(3, minmax(0, 1fr));  // 3
-}
+    grid-template-columns: repeat(3, minmax(0, 1fr)); // 3
+  }
 
   // 데스크톱에서는 항상 6열 — 12개 슬롯이 2줄로 한눈에 들어온다
   @media (min-width: $bp-lg) {
-  grid-template-columns: repeat(6, minmax(0, 1fr));  // 6
-}
+    grid-template-columns: repeat(6, minmax(0, 1fr)); // 6
+  }
 }
