@@ -20,6 +20,7 @@ import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
+import org.springframework.util.StringUtils;
 
 @Configuration
 @EnableIntegration
@@ -33,6 +34,10 @@ public class MqttConfig {
 		options.setServerURIs(new String[]{properties.getBrokerUrl()});
 		options.setAutomaticReconnect(true);
 		options.setCleanSession(true);
+		if (StringUtils.hasText(properties.getUsername())) {
+			options.setUserName(properties.getUsername());
+			options.setPassword(properties.getPassword().toCharArray());
+		}
 
 		DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
 		factory.setConnectionOptions(options);

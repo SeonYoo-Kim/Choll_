@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
+- **결과**: BUILD SUCCESSFUL (18 suites, 48 tests, 0 failures)
+- **변경**: EC2 Mosquitto가 인증 필수가 되어 `mqtt.username`/`mqtt.password` 설정 추가
+  (빈 값이면 기존처럼 익명 접속 — 로컬 개발 영향 없음). CI/CD 파일 신규:
+  `Jenkinsfile`, `backend/Dockerfile`, `frontend/Dockerfile`+`nginx.conf`, `infra/docker-compose.app.yml`
+
 ## 2026-07-31 — ✅ BE 48 tests + TaskProgress에 totalSlots 추가 검증 (Claude)
 
 - **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081) + `GET /api/carts/1/tasks/progress`
