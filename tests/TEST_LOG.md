@@ -15,6 +15,38 @@
 
 ---
 
+## 2026-07-31 11:37 — ✅ BE 48 tests, 슬롯 30→12 축소 반영 후 전체 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21, MySQL(AWS RDS)
+- **브랜치**: `develop` (ed719a8 이후 작업 트리, 커밋 전)
+- **결과**: 18 suites, 48 tests, 0 failures, 0 errors
+- **변경 범위**: 슬롯 개수 30→12 — `cart-slot-seed.sql`(12행 + 13번 이후 DELETE),
+  `Slot.java` 체크 제약 `between 1 and 12`, `SlotService.Response` Swagger `maximum="12"`,
+  `SlotServiceTests` 슬롯 번호 30→12, `CART_SLOT.md`·`bookDB.md` 문서 갱신
+- ⚠️ 운영 DB의 기존 `slots_chk_1 CHECK (1~30)` 제약은 ddl-auto=update로 변경되지 않음 —
+  시드 재실행으로 13~30번 행 삭제는 되지만, 제약 자체를 12로 조이려면 수동 ALTER 필요
+
+<details>
+<summary>gradlew test 원본 출력 (요약부)</summary>
+
+```text
+> Task :compileJava
+> Task :processResources
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 19s
+4 actionable tasks: 4 executed
+
+# build/test-results/test/*.xml 집계
+suites=18 tests=48 failures=0 errors=0
+```
+
+</details>
+
 ## 2026-07-30 17:40 — ✅ BE 48 tests + NAV 명령 하행·Task 진행률 E2E 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081) + REST 호출 + `mosquitto_sub -t "choll/cart/cmd"` + Node WS 리스너
