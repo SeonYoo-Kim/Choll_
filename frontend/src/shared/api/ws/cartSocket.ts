@@ -7,7 +7,7 @@
  * - 재연결 시 REST 재조회로 상태 복구 (BE-WS-03) → onReconnect 콜백에서 query invalidate 수행
  */
 
-import type { Slot } from '@/shared/api/generated/model';
+import type { Slot, TaskProgress } from '@/shared/api/generated/model';
 
 /** API 명세서(노션 WS-FE-01~13)에 정의된 이벤트 타입 13종. */
 export type CartWsEventType =
@@ -86,6 +86,12 @@ export interface CartWsEvent<TPayload = unknown> {
   payload: TPayload;
 }
 
+/**
+ * WS-FE-10 TASK_PROGRESS_UPDATED 페이로드 — REST GET /tasks/progress(TaskProgress)와 동일하다.
+ * BE가 같은 DTO(TaskService.ProgressResponse)를 REST와 WS 양쪽에 쓴다.
+ */
+export type TaskProgressUpdatedPayload = TaskProgress;
+
 type EventHandler = (event: CartWsEvent) => void;
 
 interface CartSocketOptions {
@@ -123,8 +129,7 @@ export class CartSocket {
     // 이미 살아있는 연결이 있으면 그대로 사용 (StrictMode 이중 실행 등 중복 connect 방지)
     if (
       this.socket &&
-      (this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING)
+      (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
     ) {
       return;
     }

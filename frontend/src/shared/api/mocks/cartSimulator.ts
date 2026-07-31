@@ -96,10 +96,13 @@ export function startCartMove(zoneId: number): void {
       broadcastPosition(waypoints[0]);
     }, 30),
     setTimeout(() => broadcastPosition(waypoints[1]), STEP_MS + 30),
-    setTimeout(() => {
-      broadcastZone(null, zoneId); // 목적지 구역 진입
-      broadcastPosition(waypoints[2]);
-    }, STEP_MS * 2 + 30),
+    setTimeout(
+      () => {
+        broadcastZone(null, zoneId); // 목적지 구역 진입
+        broadcastPosition(waypoints[2]);
+      },
+      STEP_MS * 2 + 30,
+    ),
     setTimeout(
       () => {
         currentZoneIndex = destinationIndex;
