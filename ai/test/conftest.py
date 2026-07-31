@@ -55,4 +55,6 @@ for pkg in ("std_msgs", "sensor_msgs", "geometry_msgs", "vision_msgs"):
         Detection2D=type("Detection2D", (), {}),
         Detection2DArray=type("Detection2DArray", (), {}),
         ObjectHypothesisWithPose=type("ObjectHypothesisWithPose", (), {}),
+        PointStamped=type("PointStamped", (), {}),
+        PoseStamped=type("PoseStamped", (), {}),
     )

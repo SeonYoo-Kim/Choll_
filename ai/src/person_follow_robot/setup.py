@@ -29,6 +29,7 @@ setup(
             "person_follow_robot.debug_visualization_node:main",
             "control_node = person_follow_robot.control_node:main",
             "motor_node = person_follow_robot.motor_node:main",
+            "target_position_node = person_follow_robot.target_position_node:main",
         ],
     },
 )
