@@ -78,12 +78,13 @@
                         LiDAR로 측정한 타겟 거리[m], 디버그 오버레이 표시용.
                         타겟은 보이지만 유효 LiDAR 거리가 없으면 NaN)
 
-    /target_position   (PointStamped frame=map, target_position_node → SLAM Nav(EM):
-                        사서의 지도 좌표[m]. 카트 포즈 + 카메라 방위각 + LiDAR 거리 융합.
-                        미관측/거리 실패/포즈 stale 시 미발행)
+    /robot_pose        (geometry_msgs/PoseStamped frame=map, SLAM(EM) → target_position_node:
+                        카트 현재 포즈. position.x/y[m] + orientation 쿼터니언(yaw).
+                        AI가 이름·타입 선정, EM이 이 규격으로 발행하기로 확정 — 2026-07-31)
 
-    cart pose (EM → target_position_node): 토픽명·타입 협의 중
-                        (현재 가정: /robot_pose, geometry_msgs/PoseStamped, frame=map)
+    /target_position   (geometry_msgs/PointStamped frame=map, target_position_node → SLAM Nav(EM):
+                        사서의 지도 좌표[m]. 카트 포즈 + 카메라 방위각 + LiDAR 거리 융합.
+                        미관측/거리 실패/포즈 stale(1s) 시 미발행)
 
 
 

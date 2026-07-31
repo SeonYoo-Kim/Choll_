@@ -36,7 +36,7 @@
 | `/scan` | sensor_msgs/LaserScan | (LiDAR 드라이버) | control |
 | `/target_distance` | std_msgs/Float32 (m, LiDAR 측정. NaN=측정 실패) | control | debug |
 | `/target_position` | geometry_msgs/PointStamped (frame=map, 사서 지도 좌표 m) | target_position | (EM SLAM Nav) |
-| 카트 포즈 (협의 중) | geometry_msgs/PoseStamped 가정, 기본 `/robot_pose` | (EM SLAM) | target_position |
+| `/robot_pose` | geometry_msgs/PoseStamped (frame=map, 카트 포즈. **확정 계약** 2026-07-31) | (EM SLAM) | target_position |
 | `/wheel_speed_cmd` | std_msgs/Int32MultiArray (`[제어종류, left_rpm, right_rpm]`, 0=모터·1=LED) | motor | (STM32, micro-ROS) |
 
 `vision_msgs` BoundingBox2D의 center는 배포판에 따라 `.position.x`(신형) 또는 `.x`(구형) 레이아웃이 다릅니다.
@@ -55,12 +55,13 @@
    - 회전 방향 실기 검증: REP 103(+ω=좌회전) 기준으로 구현됨. 실기에서 반대로 돌면
      STM32 배선/모터 극성 확인 (코드 부호를 임의로 뒤집지 말 것).
 
-2. **SLAM 연동 토픽 계약 미확정** (2026-07-31, target_position_node).
-   - 카트 포즈 입력: `/robot_pose`(PoseStamped, frame=map)로 **가정**하고 구현.
-     EM이 실제로 주는 토픽명·타입(PoseWithCovarianceStamped 가능성)·프레임 확정 시
-     `cart_pose_topic` 파라미터/구독 타입과 이 문서·SYSTEM_ARCHITECTURE를 갱신할 것.
-   - `/target_position` 소비 방식(EM이 직접 goal로 쓰는지, 주기·좌표 단위 m 확인)도 협의 필요.
-   - 확정 전까지 실기에서는 포즈 미수신으로 발행이 보류된다 (경고 로그로 확인 가능).
+2. **SLAM 연동 — 계약은 확정, EM 측 구현·실기 연동은 대기** (2026-07-31).
+   - 계약: EM이 `/robot_pose`(PoseStamped, **frame=map**)로 카트 포즈 발행,
+     AI의 `/target_position`(PointStamped, frame=map, m)을 내비 목표로 소비.
+   - EM SLAM 스택이 PoseWithCovarianceStamped를 내면 **EM 쪽에서 변환**해 발행
+     (pose가 `msg.pose.pose`로 한 겹 깊음). odom 프레임 포즈 금지 — 좌표가 어긋남.
+   - 가짜 포즈(`ros2 topic pub /robot_pose ...`)로 변환 수학은 실기 검증 완료
+     (TEST_LOG 2026-07-31). EM 실포즈 연동 후 재검증할 것.
 
 3. **search_behavior.py는 구현·테스트 완료, control_node 배선은 미완** (2026-07-28).
    사람이 안 보이는 상태에서 로봇을 움직이는 기능이라 실기 없이 켜지 않기로 함.

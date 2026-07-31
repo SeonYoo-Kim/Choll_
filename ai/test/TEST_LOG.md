@@ -13,6 +13,54 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-07-31 15:20 — ✅ Jetson 실기: 가짜 SLAM 포즈로 /target_position 검증 (사용자+Claude)
+
+- **명령**: launch(8노드) + `ros2 topic pub -r 10 /robot_pose ...` (yaw 0°/90° 두 케이스)
+  + `ros2 topic echo /target_position`
+- **환경**: Jetson Orin Nano, ROS2 Humble, 실카메라·LiDAR, SLAM 없음(가짜 포즈)
+- **브랜치**: `ai/feature/target-position-publish`
+- **검증**:
+  - 포즈 미발행 시 발행 보류 (stale 가드 동작)
+  - **동일 위치에서 yaw 전환 직전/직후 쌍** (결정적 증거):
+    yaw=0° (1.6499, -0.0214) ↔ yaw=90° (0.0230, 1.6348).
+    이론값(90° 회전)은 (0.0214, 1.6499) — 오차 거리 1.5cm(LiDAR 노이즈 범위),
+    방위각 0.07°. 쿼터니언→yaw→지도 변환 체인 정합 확인.
+  - 보조 측정(사람 이동 후): yaw=0° (1.651, 0.004), yaw=90° (-0.137, 1.269)
+    — 각각 거리·방위각으로 역산 시 자기일관. 부호 규약(왼쪽=+방위각)도 REP 103대로.
+- **후속**: 토픽 계약 확정 — EM이 `/robot_pose`(PoseStamped, frame=map) 발행하기로
+  (AI 선정 규격 채택). EM 실포즈 연동 후 재검증 필요.
+
+<details>
+<summary>ros2 topic echo 원본</summary>
+
+```
+# ── 동일 위치, yaw 전환 직전/직후 쌍 ──
+# orientation {z: 0.0, w: 1.0} (yaw 0°), stamp 1785460257.76
+point:
+  x: 1.6498616191146769
+  y: -0.02136724348545165
+  z: 0.0
+# orientation {z: 0.7071, w: 0.7071} (yaw 90°), stamp 1785460259.23
+point:
+  x: 0.022982125709143722
+  y: 1.634838460127709
+  z: 0.0
+
+# ── 보조 측정 (사람 이동 후) ──
+# yaw 0°, stamp 1785460255.91
+point:
+  x: 1.6509941418342378
+  y: 0.00440672279725503
+  z: 0.0
+# yaw 90°, stamp 1785460270.53
+point:
+  x: -0.1369525628485981
+  y: 1.2686292026986632
+  z: 0.0
+```
+
+</details>
+
 ## 2026-07-31 09:33 — ✅ 103 passed (+12 신규), ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check target_position_node.py setup.py launch conftest.py test_target_position.py`
