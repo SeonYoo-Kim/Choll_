@@ -10,6 +10,7 @@ import { DEMO_CART_ID } from '@/shared/config/cart';
 import { Toast } from '@/shared/ui/toast/Toast';
 
 import styles from './AppLayout.module.scss';
+import { useTaskProgressEvents } from '@/features/sorting-task/model/useTaskProgressEvents';
 
 const NAV_ITEMS = [
   { to: '/', label: '홈', Icon: Home },
@@ -27,6 +28,8 @@ function CartRealtimeSync() {
   useCartMapEvents(DEMO_CART_ID);
   useCartControlEvents();
   useSlotBoardEvents(DEMO_CART_ID);
+  useTaskProgressEvents(DEMO_CART_ID);
+
   return null;
 }
 
