@@ -18,8 +18,10 @@ import paho.mqtt.client as mqtt
 # ============================================================
 
 
-MQTT_BROKER_HOST = "192.168.0.33"
+MQTT_BROKER_HOST = "your-server.example.com"
 MQTT_BROKER_PORT = 1883
+MQTT_USERNAME = "choll"
+MQTT_PASSWORD = "CHANGE_ME"
 MQTT_TOPIC = f"choll/cart/rfid"
 
 # 하트비트 / 상태(LWT) 설정
@@ -381,6 +383,9 @@ class RFIDMQTTPublisher:
             )
         except Exception:
             self.client = mqtt.Client(client_id=client_id)
+
+        # 브로커 인증 정보 (connect() 호출 이전에 설정해야 함)
+        self.client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
         # LWT: 비정상 종료(전원 차단, 크래시 등) 시
         # 브로커가 대신 offline 상태를 retain으로 발행해준다.
