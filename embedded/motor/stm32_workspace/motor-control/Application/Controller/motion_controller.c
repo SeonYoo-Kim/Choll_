@@ -11,7 +11,7 @@
 #define MOTION_CONTROLLER_MAX_WHEEL_RAD_S 0.0f
 
 /* Orin은 20~30Hz로 SET_WHEEL_VEL을 전송할 예정이므로 300ms면 충분히 여유 있는 기준이다 */
-#define MOTION_CONTROLLER_COMM_TIMEOUT_MS 300u
+#define MOTION_CONTROLLER_COMM_TIMEOUT_MS 5000u
 
 static float target_left_rad_s  = 0.0f;
 static float target_right_rad_s = 0.0f;
@@ -78,6 +78,12 @@ static void MotionController_CheckCommunicationTimeout(void)
     }
 }
 
+void MotionController_ResetTarget(void)
+{
+    target_left_rad_s  = 0.0f;
+    target_right_rad_s = 0.0f;
+}
+
 void MotionController_Process(void)
 {
     MotionController_CheckCommunicationTimeout();
@@ -87,6 +93,12 @@ void MotionController_Process(void)
         Motor_SetTargetWheelVelocity(0.0f, 0.0f);
         return;
     }
+
+    /* PI Speed Controller 활성화. 세 정지 레벨(Operational/Latched/Emergency)이
+     * 모두 해제된 경우에만 도달하는 지점이므로, 여기서 활성화하는 것이 안전하다
+     * (MotionController_RequestWheelVelocity()는 Latched Safe Stop 중에도 호출될
+     * 수 있어 그곳에서는 활성화하지 않는다). 매 tick 호출되지만 멱등하다. */
+    Motor_EnableSpeedControl();
 
     Motor_SetTargetWheelVelocity(target_left_rad_s, target_right_rad_s);
 }

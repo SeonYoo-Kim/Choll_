@@ -1,0 +1,1 @@
+python .\tools\motor_serial_test\motor_test.py --port COM6 --speed 1.0 --rate 20 --log

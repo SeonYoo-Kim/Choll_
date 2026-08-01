@@ -24,4 +24,15 @@ void MotionController_RequestWheelVelocity(float left_rad_s, float right_rad_s);
  * 반영해 Motor에 목표값 전달 */
 void MotionController_Process(void);
 
+/* UART RESET_STALL 처리 전용(communication.c, StopController_ClearStall()
+ * 성공 시에만 이어서 호출됨). 저장된 목표 좌우 바퀴 각속도를 0으로
+ * 초기화한다 - 그렇지 않으면 Stall Fault 해제 직후 StopController_IsStopped()
+ * 가 false가 되는 순간 MotionController_Process()가 Stall 이전의 오래된
+ * target을 그대로 Motor에 전달해 자동으로 재출발할 수 있다. Speed
+ * Controller/Motor 상태는 건드리지 않는다(Motor_ResetSpeedController()가
+ * 이미 정리했음) - 오직 MotionController 자신이 들고 있는 저장값만
+ * 정리한다. 재출발은 이후 별도의 새 SET_WHEEL_VEL(=MotionController_
+ * RequestWheelVelocity() 호출)로만 이뤄진다. */
+void MotionController_ResetTarget(void);
+
 #endif /* MOTION_CONTROLLER_H */
