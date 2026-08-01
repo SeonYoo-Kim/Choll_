@@ -33,8 +33,8 @@ public class TaskService {
 	}
 
 	public ProgressResponse findProgress(Long cartId) {
-		List<Response> occupiedSlots = slotService.findAll(cartId)
-			.stream()
+		List<Response> slots = slotService.findAll(cartId);
+		List<Response> occupiedSlots = slots.stream()
 			.filter(slot -> slot.book() != null)
 			.toList();
 		List<Integer> currentZoneSlotNumbers = occupiedSlots.stream()
@@ -46,6 +46,7 @@ public class TaskService {
 		int remainingBooks = occupiedSlots.size();
 
 		return new ProgressResponse(
+			slots.size(),
 			shelvedBooks + remainingBooks,
 			shelvedBooks,
 			remainingBooks,
@@ -96,6 +97,11 @@ public class TaskService {
 
 	@Schema(name = "TaskProgress")
 	public record ProgressResponse(
+		@Schema(
+			requiredMode = Schema.RequiredMode.REQUIRED,
+			description = "카트의 전체 슬롯 수 — 빈 슬롯 비율 진행률의 분모"
+		)
+		int totalSlots,
 		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)
 		int totalBooks,
 		@Schema(requiredMode = Schema.RequiredMode.REQUIRED)

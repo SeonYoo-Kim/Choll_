@@ -7,6 +7,9 @@ public class MqttProperties {
 
 	private boolean enabled;
 	private String brokerUrl = "tcp://localhost:1883";
+	// 브로커 인증 계정 — 비어 있으면 익명 접속 (로컬 개발용)
+	private String username = "";
+	private String password = "";
 	private String clientId = "chollae-backend";
 	private String positionTopic = "carts/+/telemetry/position";
 	private String statusTopic = "carts/status";
@@ -31,6 +34,22 @@ public class MqttProperties {
 
 	public void setBrokerUrl(String brokerUrl) {
 		this.brokerUrl = brokerUrl;
+	}
+
+	public String getUsername() {
+		return username;
+	}
+
+	public void setUsername(String username) {
+		this.username = username;
+	}
+
+	public String getPassword() {
+		return password;
+	}
+
+	public void setPassword(String password) {
+		this.password = password;
 	}
 
 	public String getClientId() {

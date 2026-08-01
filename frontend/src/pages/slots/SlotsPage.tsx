@@ -4,7 +4,6 @@ import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
 import { zoneLabel } from '@/features/cart-map/model/zones';
 import { SlotDetailModal } from '@/features/slot-board/ui/SlotDetailModal';
 import { SlotTile } from '@/features/slot-board/ui/SlotTile';
-import type { Slot } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
 import { DEMO_CART_ID } from '@/shared/config/cart';
@@ -13,15 +12,17 @@ import styles from './SlotsPage.module.scss';
 
 type SlotFilter = 'all' | 'book' | 'empty' | 'error' | 'currentArea';
 
-/** 슬롯 관리 — 30개 슬롯 보드 + 상태 필터 + 슬롯 상세. */
+/** 슬롯 관리 — 12개 슬롯 보드 + 상태 필터 + 슬롯 상세. */
 export function SlotsPage() {
   const { data: slots } = useListSlots(DEMO_CART_ID);
   const cartZone = useCartMapStore((state) => state.cartZone);
   const [filter, setFilter] = useState<SlotFilter>('all');
-  const [selected, setSelected] = useState<Slot | null>(null);
+  const [selectedSlotNumber, setSelectedSlotNumber] = useState<number | null>(null);
 
   const allSlots = useMemo(() => slots ?? [], [slots]);
   // cartZone null = 통로·출발 지점(어느 구역도 아님). zoneLabel에 그냥 넘기면 "1구역"이 되어 거짓말을 한다
+  // 선택 슬롯은 번호로만 기억하고 내용은 항상 최신 목록에서 찾는다 — WS 갱신이 모달에도 반영되게
+  const selected = allSlots.find((s) => s.slotNumber === selectedSlotNumber) ?? null;
   const currentArea = cartZone === null ? null : zoneLabel(cartZone);
   // 구역을 벗어나면 현재 구역 필터가 성립하지 않으므로 전체로 간주한다
   const effectiveFilter: SlotFilter =
@@ -88,12 +89,12 @@ export function SlotsPage() {
           <SlotTile
             key={slot.slotNumber}
             slot={slot}
-            active={selected?.slotNumber === slot.slotNumber}
-            onClick={() => setSelected(slot)}
+            active={selectedSlotNumber === slot.slotNumber}
+            onSelect={setSelectedSlotNumber}
           />
         ))}
       </div>
-      {selected && <SlotDetailModal slot={selected} onClose={() => setSelected(null)} />}
+      {selected && <SlotDetailModal slot={selected} onClose={() => setSelectedSlotNumber(null)} />}
     </>
   );
 }

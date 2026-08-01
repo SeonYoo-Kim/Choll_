@@ -15,6 +15,56 @@
 
 ---
 
+## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
+- **결과**: BUILD SUCCESSFUL (18 suites, 48 tests, 0 failures)
+- **변경**: EC2 Mosquitto가 인증 필수가 되어 `mqtt.username`/`mqtt.password` 설정 추가
+  (빈 값이면 기존처럼 익명 접속 — 로컬 개발 영향 없음). CI/CD 파일 신규:
+  `Jenkinsfile`, `backend/Dockerfile`, `frontend/Dockerfile`+`nginx.conf`, `infra/docker-compose.app.yml`
+
+## 2026-07-31 — ✅ BE 48 tests + TaskProgress에 totalSlots 추가 검증 (Claude)
+
+- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081) + `GET /api/carts/1/tasks/progress`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
+- **결과**: 18 suites, 48 tests, 0 failures, 0 errors
+- **변경**: 진행률 분모를 슬롯 개수로 쓰기로 한 팀 결정에 따라 `TaskProgress`에 `totalSlots`(카트 슬롯 수, DB 카운트) 추가.
+  FE 계산식: `percent = (totalSlots - remainingBooks) / totalSlots` (빈 카트 100%, 6권 50%)
+- **E2E**: `{"totalSlots":12,"totalBooks":27,"shelvedBooks":27,"remainingBooks":0,...}` — DB 슬롯 12개 반영 확인
+
+## 2026-07-31 11:37 — ✅ BE 48 tests, 슬롯 30→12 축소 반영 후 전체 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21, MySQL(AWS RDS)
+- **브랜치**: `develop` (ed719a8 이후 작업 트리, 커밋 전)
+- **결과**: 18 suites, 48 tests, 0 failures, 0 errors
+- **변경 범위**: 슬롯 개수 30→12 — `cart-slot-seed.sql`(12행 + 13번 이후 DELETE),
+  `Slot.java` 체크 제약 `between 1 and 12`, `SlotService.Response` Swagger `maximum="12"`,
+  `SlotServiceTests` 슬롯 번호 30→12, `CART_SLOT.md`·`bookDB.md` 문서 갱신
+- ⚠️ 운영 DB의 기존 `slots_chk_1 CHECK (1~30)` 제약은 ddl-auto=update로 변경되지 않음 —
+  시드 재실행으로 13~30번 행 삭제는 되지만, 제약 자체를 12로 조이려면 수동 ALTER 필요
+
+<details>
+<summary>gradlew test 원본 출력 (요약부)</summary>
+
+```text
+> Task :compileJava
+> Task :processResources
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 19s
+4 actionable tasks: 4 executed
+
+# build/test-results/test/*.xml 집계
+suites=18 tests=48 failures=0 errors=0
+```
+
+</details>
+
 ## 2026-07-30 17:40 — ✅ BE 48 tests + NAV 명령 하행·Task 진행률 E2E 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081) + REST 호출 + `mosquitto_sub -t "choll/cart/cmd"` + Node WS 리스너

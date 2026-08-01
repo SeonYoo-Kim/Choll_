@@ -10,8 +10,7 @@ import styles from './MapPanel.module.scss';
 
 /** SLAM 지도 패널 — 평면도 위 구역을 눌러 카트 목적지를 지정한다. */
 export function MapPanel() {
-  const { cartZone, cartPosition, cartYaw, isMoving, cartStatus, startMove } =
-    useCartMapStore();
+  const { cartZone, cartPosition, cartYaw, isMoving, cartStatus, startMove } = useCartMapStore();
   const notify = useToastStore((state) => state.show);
 
   const { mutate: startNavigation, isPending } = useStartNavigation({

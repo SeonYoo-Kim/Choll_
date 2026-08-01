@@ -5,6 +5,25 @@
   border-radius: $radius-card;
   background: #fff;
   padding: 20px;
+  // 카드 자체 폭 기준으로 내부 배치를 바꾸기 위한 컨테이너 (아래 @container)
+  container-type: inline-size;
+}
+
+// 아이콘 배지 + 제목 헤더 (디자인 시안: 클립보드 아이콘을 옅은 포인트색 박스에)
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.headerIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: $primary-bg;
+  color: $primary-dark;
 }
 
 .label {
@@ -20,7 +39,7 @@
   justify-items: center;
   align-content: center;
   gap: $spacing-md;
-  min-height: 132px;
+  min-height: 148px;
   text-align: center;
 }
 
@@ -47,62 +66,117 @@
   margin-top: $spacing-md;
   display: flex;
   align-items: center;
-  gap: 40px; // 도넛↔수치 사이 간격 (양끝 여백은 .donut/.stats의 margin이 담당)
+}
+
+// 도넛이 절반 영역의 정중앙에 오도록 감싸는 래퍼 — .stats와 1:1로 폭을 나눈다
+.donutHalf {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 8px 0;
 }
 
 .donut {
   display: grid;
   place-items: center;
-  margin-left: 20px;
-  width: 112px;
-  height: 112px;
+  width: 148px;
+  height: 148px;
   border-radius: 999px;
   flex-shrink: 0;
 }
 
 .donutInner {
-  display: grid;
-  place-items: center;
-  width: 90px;
-  height: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 116px;
+  height: 116px;
   border-radius: 999px;
   background: #fff;
   text-align: center;
 
   strong {
     font-family: $font-display;
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 400;
+    line-height: 1.1;
   }
 }
 
+// 도넛 안 위/아래 캡션 — 위(정리 완료율)는 포인트색, 아래(완료)는 보조색
+.donutCaption {
+  font-size: 11px;
+  font-weight: 700;
+  color: $primary-dark;
+}
+
+.donutCaptionMuted {
+  font-size: 11px;
+  font-weight: 700;
+  color: #999184;
+}
+
+// 도넛과 수치 사이 세로 구분선
+.divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 8px 0;
+  background: $border-soft;
+}
+
 .stats {
-  // 카드의 남은 폭을 채우되, 도넛의 왼쪽 여백(20px)과 대칭으로 오른쪽도 띄운다
+  // 도넛 쪽(.donutHalf)과 1:1로 폭을 나누고 내용은 가운데 정렬
   flex: 1;
   min-width: 0;
-  margin-right: 20px;
-  font-size: 14px;
 
-  // 라벨은 왼쪽, 수치는 오른쪽 끝으로 — 표처럼 정렬
+  // 라벨 위 · 큰 수치 아래 세로 배치 — 남은 권수가 카드의 주인공이 되도록 강조
   p {
     margin: 0;
     display: flex;
-    flex-direction: row-reverse; // DOM은 수치(strong)가 먼저지만 시각적으론 라벨 먼저
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 10px 0;
-
-    & + p {
-      border-top: 1px solid $border-soft;
-    }
+    flex-direction: column-reverse; // DOM은 수치(strong)가 먼저지만 시각적으론 라벨 먼저
+    align-items: center;
+    gap: 8px;
   }
 
   strong {
-    font-size: 20px;
+    font-family: $font-display;
+    font-size: 42px;
+    font-weight: 400;
+    line-height: 1;
+    color: $primary-dark;
   }
 
   span {
     color: #999184;
     font-size: 13px;
+    font-weight: 700;
+  }
+}
+
+// 수치 뒤 단위(권) — 숫자보다 작게, 색은 숫자와 동일
+.unit {
+  font-style: normal;
+  font-size: 24px;
+}
+
+// 카드가 좁으면(도넛 148px가 절반에 안 들어가면) 좌우 분할을 포기하고 세로로 쌓는다
+@container (max-width: 388px) {
+  .body {
+    flex-direction: column;
+  }
+
+  .stats,
+  .donutHalf {
+    width: 100%;
+  }
+
+  .divider {
+    align-self: center;
+    width: 60%;
+    height: 1px;
+    margin: 16px 0;
   }
 }
