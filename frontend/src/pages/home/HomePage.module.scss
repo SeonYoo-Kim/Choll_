@@ -77,10 +77,6 @@
 .grid {
   display: grid;
   gap: 20px;
-
-  @media (min-width: $bp-2xl) {
-    grid-template-columns: minmax(0, 1.4fr) minmax(330px, 0.9fr);
-  }
 }
 
 .column {

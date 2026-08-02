@@ -18,6 +18,17 @@
     transform: translateY(-4px);
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
   }
+
+  // 데스크톱: 높이를 고정하지 않고 그리드 행(.board의 grid-auto-rows: 1fr)에 맞춰 늘어난다.
+  // min-height는 창이 아주 낮을 때 카드가 찌그러지는 것을 막는 하한선.
+  @media (min-width: $bp-lg) {
+    height: auto;
+    min-height: 128px;
+  }
+
+  @media (min-width: $bp-2xl) {
+    padding: 14px;
+  }
 }
 
 .active {
@@ -49,6 +60,15 @@
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
+
+  @media (min-width: $bp-lg) {
+    // 카드가 최소 높이까지 눌려 .title의 margin-top:auto가 0이 되어도 제목과 붙지 않게
+    margin-bottom: 10px;
+  }
+
+  @media (min-width: $bp-2xl) {
+    font-size: 14px;
+  }
 }
 
 .title {
@@ -65,6 +85,20 @@
   // 한글은 어절(띄어쓰기) 단위로만 줄바꿈, 한 어절이 카드보다 길 때만 강제 분리
   word-break: keep-all;
   overflow-wrap: break-word;
+
+  // 카드가 세로로 길어지므로 제목·부제 묶음을 위에 붙이지 않고 남는 공간의 중앙에 둔다
+  // (.subtitle의 margin-bottom: auto와 짝을 이뤄 위아래 여백을 반씩 나눈다)
+  @media (min-width: $bp-lg) {
+    margin-top: auto;
+  }
+
+  // 카드 폭이 충분히 넓어지는 지점에서만 글자를 키우고 3줄까지 허용
+  @media (min-width: $bp-2xl) {
+    -webkit-line-clamp: 3;
+    height: 63px; // 3줄 × line-height 21px
+    font-size: 15px;
+    line-height: 21px;
+  }
 }
 
 .subtitle {
@@ -76,6 +110,16 @@
   font-size: 10px;
   line-height: 16px;
   opacity: 0.7;
+
+  @media (min-width: $bp-lg) {
+    margin-bottom: auto;
+  }
+
+  @media (min-width: $bp-2xl) {
+    height: 20px;
+    font-size: 13px;
+    line-height: 20px;
+  }
 }
 
 .zone {
@@ -87,4 +131,15 @@
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 700;
+
+  // 카드 높이가 가변이 되므로 절대 배치를 풀고 흐름상 맨 아래 오른쪽에 둔다
+  @media (min-width: $bp-lg) {
+    position: static;
+    align-self: flex-end;
+  }
+
+  @media (min-width: $bp-2xl) {
+    padding: 3px 10px;
+    font-size: 14px;
+  }
 }

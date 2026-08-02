@@ -30,7 +30,7 @@
 
   @media (min-width: $bp-md) {
     min-height: calc(100vh - 48px);
-    grid-template-columns: 160px minmax(0, 1fr);
+    grid-template-columns: 165px minmax(0, 1fr);
   }
 }
 
@@ -47,8 +47,11 @@
 }
 
 .logo {
-  // 사이드바 콘텐츠 폭(130px)보다 살짝 크게 — width: 100%로는 컨테이너에 묶여 안 커진다
-  width: 134px;
+  // 사이드바 콘텐츠 폭(165px - 좌우 패딩 30px = 135px)보다 살짝 크게 —
+  // 남는 8px은 오른쪽 패딩(10px)을 파고들 뿐 잘리지는 않는다 —
+  // 145px을 넘기면 사이드바 경계를 벗어나 .frame의 overflow: hidden에 잘린다.
+  // width: 100%로는 컨테이너 패딩에 묶여 원하는 크기가 안 나온다
+  width: 143px;
   max-width: none;
   height: auto;
   object-fit: contain;
