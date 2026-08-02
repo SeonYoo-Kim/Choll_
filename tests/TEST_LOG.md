@@ -28,6 +28,10 @@
   - 트랙 릴레이: MQTT `choll/cart/tracks` → WS `TRACKS_UPDATED` 페이로드 원형 그대로 수신
   - 타겟 선택: `POST /api/carts/1/follow/target {trackId:16}` → 202 `{SENT}` →
     MQTT `choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}` 수신 확인
+- **추가(14:00) 브라우저 시각 검증**: BE 정적 테스트 페이지
+  `http://localhost:8081/target-select-test.html` (FE 참조 구현으로 커밋) +
+  `tests/tools/fake_jetson.py`(result01.mp4→JPEG WS + 가짜 이동 트랙 MQTT 5Hz)로
+  영상 렌더링(271프레임)·박스 실시간 갱신·**박스 클릭→202 SENT→MQTT SELECT_TARGET** 확인
 - **트러블슈팅 2건** (재발 방지 기록):
   - `ServletServerContainerFactoryBean`이 테스트 mock 서블릿 컨텍스트에서 기동 실패
     → 세션별 `setBinaryMessageSizeLimit(1MB)`로 대체
