@@ -60,6 +60,16 @@ def generate_launch_description() -> LaunchDescription:
             default_value="localhost",
             description="MQTT 브로커 호스트 (fe_bridge용).",
         ),
+        DeclareLaunchArgument(
+            "mqtt_username",
+            default_value="",
+            description="MQTT 브로커 계정 (EC2 브로커는 필수, 로컬은 빈 값).",
+        ),
+        DeclareLaunchArgument(
+            "mqtt_password",
+            default_value="",
+            description="MQTT 브로커 비밀번호.",
+        ),
         Node(
             package="person_follow_robot",
             executable="camera_node",
@@ -165,8 +175,8 @@ def generate_launch_description() -> LaunchDescription:
                 "video_ws_url": LaunchConfiguration("be_video_ws_url"),
                 "mqtt_host": LaunchConfiguration("mqtt_host"),
                 "mqtt_port": 1883,
-                "mqtt_username": "",
-                "mqtt_password": "",
+                "mqtt_username": LaunchConfiguration("mqtt_username"),
+                "mqtt_password": LaunchConfiguration("mqtt_password"),
                 "tracks_topic": "choll/cart/tracks",
                 "command_topic": "choll/cart/cmd",
                 "video_fps": 10.0,
