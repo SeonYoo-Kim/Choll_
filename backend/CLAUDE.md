@@ -34,16 +34,24 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 - **REST**: `/api/carts/{cartId}/...`, `/api/maps/{mapId}/...` (CART/SLOT/MAP/TASK/NAV/FOLLOW)
   — NAV-01/02 구현됨: `POST/DELETE /api/carts/{cartId}/navigation` (202/204, 오프라인·중복 시작은 400)
 - **WebSocket**: `/ws/carts/{cartId}`, JSON, BE→FE 이벤트 13종 (WS-FE-01~13)
-  — 실구현 5종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
+  — 실구현 6종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
   `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED —
-  STARTED/ARRIVED/FAILED는 카트 상행 결과 토픽 확정 후), `TASK_PROGRESS_UPDATED`(RFID 이벤트마다)
-- **MQTT** (EM→BE, 현재 확정분):
+  STARTED/ARRIVED/FAILED는 카트 상행 결과 토픽 확정 후), `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
+  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용)
+- **WebSocket 영상**: `/ws/carts/{cartId}/video` (FE 시청, 바이너리 JPEG 1메시지=1프레임)
+  ← `/ws/carts/{cartId}/video/publish` (Jetson 발행, 10fps/품질70 기준 ~4Mbps)
+- **MQTT** (카트→BE, 현재 확정분):
   - `carts/{cartId}/telemetry/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계
   - `choll/cart/rfid` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
   - `carts/status` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
-  - ⚠️ 하트비트·RFID 토픽에 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 EM과 재협의 필요
-- **MQTT** (BE→EM 명령): `choll/cart/cmd` `{"requestId","command":"MOVE|CANCEL","zoneId","x","y"}` (구역 bbox 중심 좌표)
+  - `choll/cart/tracks` (AI→BE, 5~10Hz) — `{"image_width","image_height","tracks":[{"id","x","y","w","h"}]}`
+    (x,y=bbox 좌상단 픽셀) → WS `TRACKS_UPDATED`로 원형 그대로 중계
+  - ⚠️ 하트비트·RFID·tracks 토픽에 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 재협의 필요
+- **MQTT** (BE→카트 명령): `choll/cart/cmd`
+  - `{"requestId","command":"MOVE|CANCEL","zoneId","x","y"}` (구역 bbox 중심 좌표)
+  - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
+    Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환
   ⚠️ EM 미확정 임시 계약 — 추종·LED·RFID 재인식 포함 확정 시 EM·API 명세서와 동시 갱신할 것
 
 ## 참고 문서

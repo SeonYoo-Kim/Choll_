@@ -3,6 +3,7 @@ package com.ssafy.backend.mqtt.config;
 import com.ssafy.backend.mqtt.heartbeat.MqttHeartbeatMessageHandler;
 import com.ssafy.backend.mqtt.position.MqttPositionMessageHandler;
 import com.ssafy.backend.mqtt.rfid.MqttRfidMessageHandler;
+import com.ssafy.backend.mqtt.tracks.MqttTracksMessageHandler;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -61,7 +62,8 @@ public class MqttConfig {
 				mqttClientFactory,
 				properties.getPositionTopic(),
 				properties.getStatusTopic(),
-				properties.getRfidTopic()
+				properties.getRfidTopic(),
+				properties.getTracksTopic()
 			);
 		adapter.setQos(properties.getQos());
 		adapter.setConverter(new DefaultPahoMessageConverter());
@@ -95,11 +97,16 @@ public class MqttConfig {
 		MqttProperties properties,
 		MqttPositionMessageHandler positionHandler,
 		MqttHeartbeatMessageHandler heartbeatHandler,
-		MqttRfidMessageHandler rfidHandler
+		MqttRfidMessageHandler rfidHandler,
+		MqttTracksMessageHandler tracksHandler
 	) {
 		return message -> {
 			String topic = message.getHeaders()
 				.get(MqttHeaders.RECEIVED_TOPIC, String.class);
+			if (properties.getTracksTopic().equals(topic)) {
+				tracksHandler.handle(message);
+				return;
+			}
 			if (properties.getRfidTopic().equals(topic)) {
 				rfidHandler.handle(message);
 				return;

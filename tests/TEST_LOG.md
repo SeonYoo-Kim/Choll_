@@ -15,6 +15,49 @@
 
 ---
 
+## 2026-08-02 13:45 — ✅ BE 55 tests + FE 타겟 선택 릴레이 3종 E2E 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081, **MQTT_BROKER_URL=tcp://localhost:1883 강제**)
+  + 가짜 Jetson(Python: mp4→JPEG WS 발행) + 가짜 FE(Node WS 리스너) + mosquitto_pub/sub + curl
+- **환경**: Windows 11, OpenJDK 21.0.12, MySQL(AWS RDS), Mosquitto 로컬 브로커
+- **브랜치**: `backend/feature/video-select-relay`
+- **결과**: 18→**19 suites, 55 tests**, 0 failures (신규 7: MqttTracksMessageHandlerTest 4, FollowTargetServiceTest 3)
+- **신규 기능 E2E**:
+  - 영상 릴레이: `/ws/carts/1/video/publish`(발행) → `/ws/carts/1/video`(시청).
+    98프레임/10초(9.7fps, ~40KB JPEG) 손실 0, 시청측 저장 JPEG 디코딩 정상(640×480)
+  - 트랙 릴레이: MQTT `choll/cart/tracks` → WS `TRACKS_UPDATED` 페이로드 원형 그대로 수신
+  - 타겟 선택: `POST /api/carts/1/follow/target {trackId:16}` → 202 `{SENT}` →
+    MQTT `choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}` 수신 확인
+- **트러블슈팅 2건** (재발 방지 기록):
+  - `ServletServerContainerFactoryBean`이 테스트 mock 서블릿 컨텍스트에서 기동 실패
+    → 세션별 `setBinaryMessageSizeLimit(1MB)`로 대체
+  - **backend/.env의 MQTT_BROKER_URL이 EC2 브로커**라 로컬 pub/sub과 분리돼 침묵
+    → E2E는 반드시 `MQTT_BROKER_URL=tcp://localhost:1883` 오버라이드로 실행할 것.
+    EC2 브로커에는 실카트 LWT(retained carts/status)가 살아 있음 — 테스트 트래픽 금지
+
+<details>
+<summary>E2E 원본 출력 (가짜 FE 수신 로그·cmd 구독)</summary>
+
+```text
+# fake_jetson.py
+connected: ws://localhost:8081/ws/carts/1/video/publish
+sent 98 frames in 10.1s (~9.7 fps)
+
+# fake_fe.mjs (발췌)
+[video] frame #1 (38560 bytes) saved
+[video] frame #80 (40644 bytes) saved
+[events] {"type":"TRACKS_UPDATED","payload":{"image_width":640,"image_height":480,"tracks":[{"id":16,"x":220,"y":30,"w":180,"h":420},{"id":23,"x":20,"y":180,"w":60,"h":120}]}}
+[video] total frames=98, last=39245 bytes
+
+# mosquitto_sub -t choll/cart/cmd -v
+choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}
+
+# REST 응답
+{"trackId":16,"status":"SENT"}
+```
+
+</details>
+
 ## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test`
