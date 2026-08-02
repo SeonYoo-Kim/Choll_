@@ -58,7 +58,7 @@ ros2 topic echo /person_tracks                                    # track id 확
 ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: 1}"  # 확인한 id로 선택
 ```
 
-> 초심자용 단계별 안내(SSH 접속 포함)는 [README Quick Start](../../../README.md#quick-start-처음-실행하는-사람용)를 참조.
+> 초심자용 단계별 안내(SSH 접속 포함)는 [AI README Quick Start](../../README.md#quick-start-처음-실행하는-사람용)를 참조.
 
 ## 테스트
 
