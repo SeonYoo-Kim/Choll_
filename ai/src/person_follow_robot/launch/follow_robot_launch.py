@@ -9,6 +9,7 @@ Launch the full pipeline: camera → detector → tracker → re-id → control 
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -36,6 +37,38 @@ def generate_launch_description() -> LaunchDescription:
             default_value="0.70",
             description="Re-ID cosine similarity threshold "
             "(reid_node similarity_threshold). 예: threshold:=0.80",
+        ),
+        DeclareLaunchArgument(
+            "fe_bridge",
+            default_value="false",
+            description="FE 타겟 선택 브릿지(영상·트랙 하행, 선택 상행) 실행. "
+            "auto_select:=false와 함께 사용.",
+        ),
+        DeclareLaunchArgument(
+            "auto_select",
+            default_value="true",
+            description="최근접 인물 자동 선택. false면 /select_target "
+            "수동/FE 선택 대기.",
+        ),
+        DeclareLaunchArgument(
+            "be_video_ws_url",
+            default_value="ws://localhost:8080/ws/carts/1/video/publish",
+            description="BE 영상 릴레이 발행 endpoint (fe_bridge용).",
+        ),
+        DeclareLaunchArgument(
+            "mqtt_host",
+            default_value="localhost",
+            description="MQTT 브로커 호스트 (fe_bridge용).",
+        ),
+        DeclareLaunchArgument(
+            "mqtt_username",
+            default_value="",
+            description="MQTT 브로커 계정 (EC2 브로커는 필수, 로컬은 빈 값).",
+        ),
+        DeclareLaunchArgument(
+            "mqtt_password",
+            default_value="",
+            description="MQTT 브로커 비밀번호.",
         ),
         Node(
             package="person_follow_robot",
@@ -85,7 +118,10 @@ def generate_launch_description() -> LaunchDescription:
                     LaunchConfiguration("threshold"), value_type=float
                 ),
                 "osnet_device": "auto",
-                "auto_select_enabled": True,      # 최대 bbox(=최근접) 자동 선택
+                # 최대 bbox(=최근접) 자동 선택. FE 선택 모드는 auto_select:=false
+                "auto_select_enabled": ParameterValue(
+                    LaunchConfiguration("auto_select"), value_type=bool
+                ),
                 "auto_select_stable_frames": 15,  # 30fps 기준 0.5초 연속 최대
                 "auto_select_min_area_px": 5000.0,
                 "feature_sample_interval_sec": 0.3,  # 뱅크 다양성 (매 프레임 추가 금지)
@@ -127,6 +163,25 @@ def generate_launch_description() -> LaunchDescription:
                 "wheel_separation_m": 0.30,   # TODO: 조립 후 실측값으로 교체
                 "max_rpm": 200,               # TODO: 모터 스펙 확정 시 조정
                 "publish_rate_hz": 10.0,
+            }],
+        ),
+        Node(
+            package="person_follow_robot",
+            executable="fe_bridge_node",
+            name="fe_bridge_node",
+            output="screen",
+            condition=IfCondition(LaunchConfiguration("fe_bridge")),
+            parameters=[{
+                "video_ws_url": LaunchConfiguration("be_video_ws_url"),
+                "mqtt_host": LaunchConfiguration("mqtt_host"),
+                "mqtt_port": 1883,
+                "mqtt_username": LaunchConfiguration("mqtt_username"),
+                "mqtt_password": LaunchConfiguration("mqtt_password"),
+                "tracks_topic": "choll/cart/tracks",
+                "command_topic": "choll/cart/cmd",
+                "video_fps": 10.0,
+                "jpeg_quality": 70,
+                "tracks_rate_hz": 5.0,
             }],
         ),
         Node(
