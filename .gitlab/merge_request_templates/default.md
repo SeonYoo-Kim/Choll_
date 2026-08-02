@@ -7,6 +7,7 @@
     - [ ]  BE
     - [ ]  AI
     - [ ]  EM
+    - [ ]  IF
 - [ ] 버그 수정 (Bug fix)
 - [ ] 리팩토링 (Refactoring)
 - [ ] 문서 수정 (Documentation)
