@@ -37,6 +37,9 @@
   font-family: $font-display;
   font-size: 24px;
   font-weight: 400;
+  // 한글 제목이 낱글자로 끊기지 않게 어절 단위로만 줄바꿈한다
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .close {

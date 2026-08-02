@@ -38,6 +38,26 @@
   color: #58ab9f;
 }
 
+// 검색어 지우기 — 입력이 있을 때만 렌더된다
+.clear {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #f0ede6;
+  color: #8a8175;
+  transition:
+    background 0.15s,
+    color 0.15s;
+
+  &:hover {
+    background: #e5dfd4;
+    color: #6b6259;
+  }
+}
+
 .input {
   width: 100%;
   border: none;
@@ -107,6 +127,9 @@
   // 버튼 기본값(13.33px)을 상속하던 것을 명시 — 목록에서 제목이 먼저 읽히게 키운다
   font-size: 18px;
   font-weight: 700;
+  // 좁은 화면에서 제목이 여러 줄로 갈 때 낱글자로 끊기지 않게 (데스크톱은 아래에서 nowrap)
+  word-break: keep-all;
+  overflow-wrap: break-word;
 
   // 제목이 아주 길면 메타를 밀어내지 않고 제목이 줄어든다
   @media (min-width: $bp-lg) {

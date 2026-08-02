@@ -51,6 +51,17 @@
   }
 }
 
+// 목적지로 이동 중 — 지도 페이지의 상태 배지와 같은 주황 톤을 쓴다
+.moving {
+  background: #fff0df;
+  color: #9a6435;
+
+  .dot {
+    background: #fab67a;
+    animation: pulse 1.6s infinite;
+  }
+}
+
 .off {
   background: #f0ede6;
   color: #827b71;
@@ -99,21 +110,16 @@
   }
 }
 
-.heroRing {
-  position: absolute;
-  right: -40px;
-  top: -64px;
-  width: 224px;
-  height: 224px;
-  border: 24px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-}
-
+// 히어로 배경 장식 — 카트 아이콘을 크게, 아주 옅게 깔아 워터마크처럼 쓴다.
+// .hero의 overflow: hidden 덕분에 오른쪽·아래로 흘러나간 부분이 자연스럽게 잘린다
 .heroCart {
+  pointer-events: none;
   position: absolute;
-  bottom: 12px;
-  right: 32px;
-  font-size: 60px;
+  right: -16px;
+  bottom: -20px;
+  width: 240px;
+  height: 240px;
+  color: rgba(255, 255, 255, 0.16);
 }
 
 .heroLabel {

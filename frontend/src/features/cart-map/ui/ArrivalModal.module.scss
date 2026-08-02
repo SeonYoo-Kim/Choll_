@@ -125,11 +125,15 @@
   margin: 12px 0 8px;
   font-size: 14px;
   font-weight: 700;
+  // 한글은 어절(띄어쓰기) 단위로만 줄바꿈 — "정의란 무엇인/가"처럼 낱글자로 끊기지 않게.
+  // 한 어절이 카드보다 길 때만 강제로 분리한다
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
-// 제목 길이와 무관하게 카드 하단에 고정되는 책장 번호 배지
+// 제목 길이와 무관하게 카드 하단 오른쪽에 고정되는 책장 번호 배지
 .slotShelf {
-  align-self: flex-start;
+  align-self: flex-end;
   margin-top: auto;
   padding: 2px 10px;
   border-radius: 999px;
