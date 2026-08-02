@@ -20,4 +20,4 @@
 - **PROJECT_CHARTER.md는 함부로 넓히지 않는다.** 범위(Out of Scope)를 늘리는 변경은 사용자 승인이 필요.
 - 성능 목표(10 FPS, <100 ms, <6 GB)나 AI 스택(YOLOv10s/ByteTrack/OSNet)을 바꾸려면 CHARTER·SPEC·DEVELOPMENT_GUIDE를 함께 갱신한다.
 - 토픽 이름/타입을 바꾸면 SYSTEM_ARCHITECTURE.md와 노드 CLAUDE.md를 동시에 갱신한다.
-- 단계별 진행 상태는 DEVELOPMENT_GUIDE.md의 TODO와 README의 Current Progress 두 곳에 있다 — 한쪽만 고치지 말 것.
+- 단계별 진행 상태는 DEVELOPMENT_GUIDE.md의 TODO와 ai/README.md의 Current Progress 두 곳에 있다 — 한쪽만 고치지 말 것.
