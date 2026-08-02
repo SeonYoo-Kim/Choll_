@@ -13,6 +13,32 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-02 13:47 — ✅ 114 passed (+11 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check fe_bridge_logic.py fe_bridge_node.py launch setup.py test_fe_bridge_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop 이후 작업 트리 (`ai/feature/fe-target-select`, 커밋 전)
+- **맥락**: FE 화면에서 추종 대상을 직접 선택하는 모드 — Jetson 쪽 브릿지.
+  - `fe_bridge_node.py` 신규: /camera/image_raw→JPEG→BE WS(10fps, drop-oldest),
+    /person_tracks→MQTT choll/cart/tracks(5Hz, bbox 좌상단 변환),
+    MQTT choll/cart/cmd SELECT_TARGET→/select_target. 연결 실패 시 재접속(BE보다
+    먼저 떠도 안전). launch `fe_bridge:=true auto_select:=false`로 활성화.
+  - `fe_bridge_logic.py` 순수 모듈: RateLimiter/build_tracks_payload/parse_select_command.
+  - 신규 테스트 11개: 전송률 제한 3, 페이로드 변환 3, 명령 파싱 5
+    (MOVE 등 타 명령 무시, 비정수 trackId 거부 포함).
+  - **BE 상대편은 backend/feature/video-select-relay에서 가짜 Jetson/FE로 E2E 완료**
+    (tests/TEST_LOG.md 2026-08-02 항목). Jetson 실기 스모크는 내일 오전 예정.
+- **주의**: Jetson에 `pip3 install websocket-client paho-mqtt` 선행 필요.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 114 passed in 0.12s =============================
+```
+
+</details>
+
 ## 2026-07-31 15:20 — ✅ Jetson 실기: 가짜 SLAM 포즈로 /target_position 검증 (사용자+Claude)
 
 - **명령**: launch(8노드) + `ros2 topic pub -r 10 /robot_pose ...` (yaw 0°/90° 두 케이스)

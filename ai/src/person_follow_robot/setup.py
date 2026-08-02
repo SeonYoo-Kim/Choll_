@@ -30,6 +30,7 @@ setup(
             "control_node = person_follow_robot.control_node:main",
             "motor_node = person_follow_robot.motor_node:main",
             "target_position_node = person_follow_robot.target_position_node:main",
+            "fe_bridge_node = person_follow_robot.fe_bridge_node:main",
         ],
     },
 )
