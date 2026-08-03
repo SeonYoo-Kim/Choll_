@@ -18,6 +18,8 @@ public class MqttProperties {
 	private String tracksTopic = "status/target";
 	// BE→EM 명령 토픽 — ⚠️ EM 미확정 임시값. 확정 시 EM·API 명세서와 동시 갱신할 것
 	private String commandTopic = "cmd/move/cart";
+	// BE→라즈베리파이 슬롯 LED 점등 토픽 — 현재 구역에서 내려놓을 슬롯 번호 목록
+	private String ledTopic = "cmd/lit/led";
 	// 수신 토픽에 cartId가 없어(EM 계약, 단일 카트 가정) 설정으로 대상 카트를 지정한다
 	private long cartId = 1L;
 	private int qos;
@@ -100,6 +102,14 @@ public class MqttProperties {
 
 	public void setCommandTopic(String commandTopic) {
 		this.commandTopic = commandTopic;
+	}
+
+	public String getLedTopic() {
+		return ledTopic;
+	}
+
+	public void setLedTopic(String ledTopic) {
+		this.ledTopic = ledTopic;
 	}
 
 	public long getCartId() {

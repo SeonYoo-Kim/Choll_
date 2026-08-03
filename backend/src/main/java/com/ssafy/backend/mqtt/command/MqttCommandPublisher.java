@@ -36,16 +36,22 @@ public class MqttCommandPublisher {
 		this.properties = properties;
 	}
 
+	/** 이동·추종 명령을 카트 명령 토픽으로 발행한다. */
 	public void publish(Object payload) {
+		publishTo(properties.getCommandTopic(), payload);
+	}
+
+	/** 슬롯 LED 점등 요청을 라즈베리파이 LED 토픽으로 발행한다. */
+	public void publishLed(Object payload) {
+		publishTo(properties.getLedTopic(), payload);
+	}
+
+	private void publishTo(String topic, Object payload) {
 		String json = objectMapper.writeValueAsString(payload);
 		mqttOutboundChannel.send(MessageBuilder
 			.withPayload(json)
-			.setHeader(MqttHeaders.TOPIC, properties.getCommandTopic())
+			.setHeader(MqttHeaders.TOPIC, topic)
 			.build());
-		log.info(
-			"[MQTT PUBLISH] topic={}, payload={}",
-			properties.getCommandTopic(),
-			json
-		);
+		log.info("[MQTT PUBLISH] topic={}, payload={}", topic, json);
 	}
 }
