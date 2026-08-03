@@ -1,0 +1,35 @@
+# stm_serial_bridge 공통 파라미터.
+#
+# launch 파일이 이 파일을 읽어 노드에 넘긴다:
+#   ros2 launch stm_serial_bridge stm_serial_bridge.launch.py
+#
+# 개별 값만 덮어쓰려면 launch 인자를 쓴다 (파일 수정 불필요):
+#   ros2 launch stm_serial_bridge stm_serial_bridge.launch.py serial_port:=/dev/ttyACM1
+#
+# ⚠️ 노드 이름(`stm_serial_bridge`)이 키와 일치해야 파라미터가 적용된다.
+#    노드 이름·네임스페이스를 바꾸면 이 키도 함께 바꿔야 한다.
+stm_serial_bridge:
+  ros__parameters:
+    # --- Serial 포트 ---
+    # 하드웨어: /dev/ttyACM0 (실기 확인된 값)
+    # mock/PTY: launch 의 mode:=mock 이 이 값을 mock PTY 경로로 덮어쓴다
+    serial_port: /dev/ttyACM0
+    baud_rate: 115200
+
+    # --- 차동구동 기하 ---
+    wheel_radius_m: 0.065
+    # ⚠️ 미실측 플레이스홀더. 실측 후 확정해야 한다 (docs 참고).
+    wheel_separation_m: 0.30
+
+    # --- 송신(TX) ---
+    tx_rate_hz: 20.0
+    cmd_vel_timeout_sec: 0.5
+    # false = 실제 Serial 송신. true 면 로그만 찍고 포트에 쓰지 않는다.
+    dry_run: false
+    # ⚠️ 벤치 테스트용 잠정 상한. 바퀴 최대 RPM 실측 후 확정해야 한다.
+    max_wheel_rad_s: 1.0
+
+    # --- 수신(RX) ---
+    rx_poll_hz: 50.0
+    # STM STATUS 는 10Hz(100ms)로 오므로 0.5초면 5주기 유실까지 허용한다.
+    status_timeout_sec: 0.5

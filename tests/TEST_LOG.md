@@ -15,6 +15,219 @@
 
 ---
 
+## 2026-08-04 — ✅ ROS2: stm_serial_bridge launch/YAML/mock 검증 워크플로우 추가, mock 3시나리오 통과 + 329 tests (Claude)
+
+- **환경**: Ubuntu 22.04, ROS2 Humble, Python 3.10. **하드웨어 없음** — 실제 `/dev/ttyACM*`를
+  전혀 열지 않고 Linux PTY 만 사용
+- **커밋**: 브랜치 `em/feature/motor-control` (HEAD `76dee46`, 미커밋 상태)
+- **추가한 것**: launch 파일, 파라미터 YAML, STM 대역 mock, 토픽 자동 검증 도구, 회귀 스크립트
+  (기존 노드·파서·펌웨어는 **변경 없음**)
+
+### 명령과 결과
+
+```bash
+cd ros2_ws
+colcon build --symlink-install                          # 경고 0
+python3 -m pytest src/stm_serial_bridge/test/ -q        # 329 passed in 1.11s
+bash scripts/verify_bridge_mock.sh                      # 3/3 통과
+```
+
+| 시나리오 | 확인 내용 | 결과 |
+|---|---|---|
+| 1. connect | mock STATUS → `/stm/*` 6개 토픽 발행, 원소 수 2, `connected=true` | ✅ |
+| 2. cmd_vel | `/cmd_vel` → `SET_WHEEL_VEL` → mock → STATUS → `encoder_total` 변화 | ✅ |
+| 3. disconnect | STATUS 중단 → `status_timeout_sec`(0.5s) → `connected=false` | ✅ |
+
+- 시나리오 2 실측: `encoder_total` `[17579, 17579]` → `[41457, 41457]` (1초 간격).
+  즉 **송신·수신 왕복이 실제로 맞물려 돈다.**
+- 시나리오 3 실측: 브리지 로그에 `/stm/connected: true` → `/stm/connected: false`
+  (`마지막 유효 STATUS 이후 0.5s 이상 경과`) 전이가 남았다.
+
+### 단위 테스트
+
+**329 passed** (기존 298 + 신규 31). 기존 298개 **회귀 없음**.
+신규는 `test_mock_stm.py` — 핵심은 **왕복 테스트**로, mock 이 만든 STATUS 줄을 브리지의
+실제 파서(`parse_packet()`)가 읽어 값이 그대로 복원되는지 고정한다. 이게 깨지면 mock 이
+펌웨어 형식을 벗어난 것이다.
+
+<details>
+<summary>검증 스크립트 출력 (요약)</summary>
+
+```
+[1/3] connect — mock STATUS 가 /stm/* 6개 토픽으로 발행되는가
+  OK  /stm/wheel_target_rad_s         1  [0.0, 0.0]
+  OK  /stm/wheel_actual_rad_s         1  [0.0, 0.0]
+  OK  /stm/pwm                        1  [0, 0]
+  OK  /stm/encoder_total              1  [0, 0]
+  OK  /stm/connected                  1  True
+  OK  /stm/fault                      1  NONE
+  결과: ✅ 합격
+  ---> ✅ connect 통과
+
+[2/3] cmd_vel — /cmd_vel 이 mock 까지 갔다가 encoder_total 변화로 돌아오는가
+encoder_total 1차: array('i', [17579, 17579])
+encoder_total 2차: array('i', [41457, 41457])
+  누적 count 가 변화했다 (TX -> mock -> STATUS -> 토픽 왕복 성립)
+  ---> ✅ cmd_vel 통과
+
+[3/3] disconnect — STATUS 중단 후 status_timeout_sec 로 connected=false 가 되는가
+  OK  /stm/connected                  2  False
+  모드: STATUS 중단 → connected=false 확인
+  결과: ✅ 합격
+  ---> ✅ disconnect 통과
+
+ 결과: ✅ 3개 시나리오 전부 통과 (잔존 프로세스 없음)
+```
+
+</details>
+
+### ⚠️ 중간에 발견하고 고친 결함 (검증 신뢰도에 직접 영향)
+
+**첫 실행에서 시나리오 2·3의 결과가 오염됐다.** 스크립트의 `cleanup()`이 `ros2 launch`
+프로세스만 종료하고 그 자식(`mock_stm`, 브리지 노드)은 **고아로 남겼다.** 그래서 시나리오 3
+시점에 **브리지 노드 3개가 같은 토픽에 동시 발행**하고 있었다
+(증상: cmd_vel 을 주지 않은 시나리오 3에서 `encoder_total`이 `[70275, 70275]`로 나옴).
+
+- 원인: 백그라운드 launch 가 스크립트와 **같은 프로세스 그룹**이어서 그룹 단위 종료를 못 했다
+- 수정: `setsid` 로 별도 프로세스 그룹에 띄우고 **그룹 전체**에 SIGINT → 대기 → SIGKILL.
+  그룹 ID가 스크립트 자신의 것과 같으면 그룹 kill 을 하지 않는 안전장치도 넣었다
+  (자기 자신을 죽이는 사고 방지)
+- 재검증: 시나리오 3 의 `encoder_total`이 `[0, 0]`으로 정상 격리됨을 확인했고,
+  스크립트 마지막에 **잔존 프로세스 검사**를 추가해 같은 실수가 조용히 넘어가지 않게 했다
+- ⚠️ **위 표의 결과는 수정 후 재실행한 값이다.** 수정 전 첫 실행 결과는 신뢰할 수 없다.
+
+### 하드웨어 없이 검증하지 못한 것 (성공으로 단정하지 말 것)
+
+- `wheel_actual_rad_s` 의 **수치 정확도** — mock 은 `actual = target` 스텁이므로 스케일을
+  검증할 수 없다. 엔코더 count/rev 12.1% 차이 원인은 **여전히 미확정**
+- 실제 모터 구동·부하·전류, 실제 USB Serial 전기적 특성
+- 실제 Stall 발생 시 **펌웨어의** FAULT 판정 (mock 은 형식만 흉내)
+- USB 강제 분리 시 RX fatal error 처리
+- `wheel_separation_m=0.30` 실측, 실제 바닥 주행
+
+### 알려진 거친 부분 (미수정, 기능 영향 없음)
+
+launch 에 SIGINT 를 주면 브리지 노드가 `destroy_node()` 중 `KeyboardInterrupt` traceback 을
+찍고 exit code -2 로 죽는다(launch 가 ERROR 로 보고). 노드 종료 경로의 문제이고 이번 작업
+범위(launch/검증 워크플로우)를 벗어나므로 **고치지 않았다.**
+
+## 2026-08-04 — ✅ EM 실기: 기어비 51:1 펌웨어 빌드·플래시·전진/후진 동작 확인 / ⚠️ actual_rad_s 수치 정확도는 미검증 (relu 실기 / Claude 문서 반영)
+
+- **대상**: `embedded/motor/stm32_workspace/motor-control/Application/Config/motor_config.h`
+  (2026-08-03에 `MOTOR_GEAR_RATIO` 100.0f → **51.0f**로 정정한 그 변경의 실기 반영)
+- **실행자·환경**: relu. **Windows STM32CubeIDE**에서 빌드·플래시, 실기 동작 확인
+- **커밋**: 브랜치 `em/feature/motor-control` (HEAD `76dee46`). **이번 작업은 문서만 수정, 코드 변경 0줄**
+
+### 결과
+
+| 항목 | 결과 |
+|---|---|
+| STM32CubeIDE 펌웨어 빌드 | ✅ **성공** |
+| 보드 플래시 | ✅ **성공** |
+| 전진 동작 | ✅ **정상** |
+| 후진 동작 | ✅ **정상** |
+| `actual_rad_s` 수치 정확도 | ⚠️ **미검증** |
+| count/rev 12.1% 차이 원인 | ⚠️ **미확정 (그대로 남음)** |
+
+- 이번 변경은 상수 하나(`MOTOR_GEAR_RATIO`)뿐이며, 전진/후진 동작에 **회귀는 없었다.**
+
+### ⚠️ 이번에 검증되지 **않은** 것 (성공으로 단정하지 말 것)
+
+- **`actual_rad_s`의 수치 정확도**: "전진/후진이 동작한다"만 확인했다. 보고되는 rad/s가 실제 회전
+  속도와 얼마나 일치하는지는 **측정하지 않았다.** 정량 데이터가 없다.
+- **count/rev 12.1% 차이의 원인**: 이번 빌드로 해결된 것이 **아니다.** 감속비 기재만 정정했고
+  명목 **77520**(=380×51×4) vs 실측 **68162.5**의 차이는 그대로다.
+  → STATUS의 LA/RA와 `/stm/wheel_actual_rad_s`는 **여전히 실제보다 약 12% 작게 보고된다**는
+  전제로 해석해야 한다.
+- 원인 후보(미구분): CPR 380의 정의 / Quadrature 배율(TI12 = x4 가정) /
+  타이머 입력 필터(`IC1Filter`/`IC2Filter`=8) / 실제 하드웨어 감속비.
+- Stall/`FAULT` 계열 실기 검증, `RESET_STALL` 송신, STATUS 중단 시 연결 상태 전이, USB 강제 분리,
+  `wheel_separation_m=0.30` 실측, 실제 바닥 주행 — 모두 **여전히 미검증**.
+
+### 확인 사항: 엔코더 상태의 ROS2 연동은 **이미 구현되어 있다** (신규 구현 없음)
+
+"STM 엔코더 상태를 ROS2 토픽으로 발행" 요구사항을 코드베이스에서 재분석한 결과, 전 구간이
+이미 구현되어 있고 **2026-08-03 실기 검증까지 완료**된 상태였다. 따라서 **신규 구현을 하지 않았다.**
+
+```
+STM StatusReporter (10Hz)
+  → "STATUS,<LT>,<LA>,<RT>,<RA>,<LPWM>,<RPWM>,<LE>,<RE>\r\n"
+  → SerialLink.read_available() → LineDecoder.feed() → parse_packet()
+  → ROS2 Publish
+```
+
+| 요구 값 | 이미 발행되는 토픽 | 타입 | 단위 |
+|---|---|---|---|
+| 좌/우 누적 encoder count | `/stm/encoder_total` | `Int32MultiArray [left, right]` | count |
+| 좌/우 wheel speed | `/stm/wheel_actual_rad_s` | `Float32MultiArray [left, right]` | **rad/s** |
+
+- 속도 단위는 **rad/s로 통일**되어 있다. RPM은 `motor.c`의 중간 계산 변수로만 존재하고
+  패킷·토픽에는 나가지 않는다. `SET_WHEEL_VEL` 명령 단위와 같아 target/actual을 같은 축에서
+  비교할 수 있고 ROS2 관례에도 맞으므로 **변경하지 않았다.**
+- ⚠️ 와이어 필드 순서는 **좌우 교차**(`LT,LA,RT,RA`)다. `target_L,target_R,actual_L,actual_R`이 아니다.
+
+### count/rev 실측값 68162.5의 정확한 의미 (오해 방지)
+
+2026-08-03 원본 기록(이 로그 아래쪽 항목)을 재확인한 결과:
+
+| 대상 | 구간 | 변화량 | 회전 수 |
+|---|---|---|---|
+| Left | 136320 → 205017 | 68697 | 1회전 |
+| Left | 205071 → 408805 | 203734 | 3회전 |
+| Right | 138 → 68603 | 68465 | 1회전 |
+| Right | 68931 → 273335 | 204404 | 3회전 |
+
+- Left: (68697 + 203734) / **4회전** = **68107.75** count/**1회전**
+- Right: (68465 + 204404) / **4회전** = **68217.25** count/**1회전**
+- 좌우 전체 평균 = **68162.5 count / 바퀴 1회전** (좌우 각 4회전, 합계 8회전 측정의 평균)
+
+⚠️ **68162.5는 "바퀴 1회전당" count다. "출력축 8회전 누적 count"가 아니다.**
+(8회전은 평균을 낸 표본 수이지 68162.5가 대응하는 회전 수가 아니다.)
+
+### 다음 실기 검증 절차 (하드웨어 확보 시)
+
+정확도 검증은 **목표/보고 속도 비교가 아니라 1회전 전후 `encoder_total` 차이 측정**으로 한다.
+
+```bash
+export ROS_LOCALHOST_ONLY=1
+cd /home/relu/geonhee/jolae-git/ros2_ws
+source /opt/ros/humble/setup.bash && source install/setup.bash
+
+# 1) Bridge 실행 (바퀴 공중 상태)
+ros2 run stm_serial_bridge stm_serial_bridge_node --ros-args \
+  -p dry_run:=false -p serial_port:=/dev/ttyACM0 -p baud_rate:=115200 \
+  2>&1 | tee ~/stm_$(date +%Y%m%d_%H%M%S).log
+
+# 2) 기본 상태 확인
+ros2 topic echo /stm/connected --qos-durability transient_local   # true
+ros2 topic hz /stm/wheel_actual_rad_s                             # 약 10Hz
+
+# 3) ★ 스케일 검증 — 모터 미구동(target 0), 손으로 출력축을 정확히 1회전
+ros2 topic echo /stm/encoder_total
+#    회전 직전 값과 직후 값을 기록해 차이를 계산. 좌우 각각 4회 이상 반복해 평균.
+```
+
+**합격 기준**
+
+| 항목 | 기준 |
+|---|---|
+| 1회전당 count 변화량 | 좌우 각각 재현성 있게 측정되고, 좌우 편차가 **1% 이내** |
+| 판정 A | 평균이 **68162.5 근처** → 기존 실측 재확인 (명목 77520이 틀림) |
+| 판정 B | 평균이 **77520 근처** → 명목값이 맞고 2026-08-03 측정에 오차가 있었음 |
+| 판정 C | 둘 다 아님 → 추가 원인 조사 (IC Filter 등. `.ioc` 변경은 사용자 승인 필요) |
+| 좌우 매핑 | 물리 왼쪽만 돌릴 때 `encoder_total[0]`만 변화 (2026-08-03 확정분 재확인) |
+
+⚠️ **합격 기준에서 제외한 것**: "Target 2.0 rad/s를 주면 Actual이 약 1.76 rad/s가 된다" 같은
+목표-실제 속도 비교. Actual은 **모터 부하·마찰·제어 상태에 따라 달라지므로** 스케일 판정 근거로
+쓸 수 없다. (이전 문서에 이런 기대값이 합격 기준처럼 적혀 있었고, 이번에 제거했다.)
+
+### 이 기록의 한계
+
+- 빌드·플래시·전진/후진 결과는 **사용자 구두 보고값**이며, **CubeIDE 빌드 로그 원본은 확보되지
+  않았다.** 이 환경에는 `arm-none-eabi-gcc`가 없어 STM32 펌웨어 빌드를 재현할 수 없다.
+- 전진/후진은 **정성적 동작 확인**이며 속도·거리 정량 측정이 없다.
+- 하드웨어가 SSAFY에 있어 이번 세션에서는 실기 검증이 불가능했다 — 문서 정리만 수행했다.
+
 ## 2026-08-03 21:33 — ✅ BE: MOVE 하행에 SLAM 미터 target 추가 + NAV-01 픽셀 클릭 지원 (Claude)
 
 - **명령**: `backend/gradlew.bat -p backend test --console=plain`

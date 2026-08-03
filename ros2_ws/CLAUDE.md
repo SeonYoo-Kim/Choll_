@@ -109,6 +109,90 @@ source install/setup.bash
   - [x] 8c. RX 타이머 + `/stm/*` 상태 토픽 발행
   - [x] 8e. **실기 수신 검증** — 아래 "실기 검증 현황" 참고
   - [ ] 8d. 수신 끊김 시 추가 안전 정책(STATUS 끊기면 주행 명령을 0으로 강제) — **미착수**
+- [x] 9. **실행·검증 워크플로우 (2026-08-04)** — launch + 파라미터 YAML + mock/PTY 자동 검증.
+      아래 "실행 및 검증 워크플로우" 참고. 하드웨어 미검증(mock 으로만 확인).
+
+## 실행 및 검증 워크플로우
+
+수동 명령을 외우는 대신 **launch 한 번**으로 띄우고, **mock/PTY 로 하드웨어 없이 자동 검증**한다.
+
+| 파일 | 역할 |
+|---|---|
+| `launch/stm_serial_bridge.launch.py` | 통합 실행. `mode:=hardware`(기본) / `mode:=mock` |
+| `config/stm_serial_bridge.yaml` | 공통 파라미터 **정본**(9개). launch 인자로 개별 덮어쓰기 |
+| `stm_serial_bridge/mock_stm.py` | STM32 대역 mock. PTY 를 만들고 STATUS 를 10Hz 로 송신 |
+| `stm_serial_bridge/topic_checker.py` | `/stm/*` 6개 토픽 자동 검증. 종료 코드로 합격/불합격 |
+| `scripts/verify_bridge_mock.sh` | 위를 묶은 3-시나리오 회귀 검증 + 로그 파일 저장 |
+
+### 하드웨어 없이 (mock/PTY) — 반복 검증
+
+```bash
+cd ros2_ws
+colcon build --symlink-install
+
+# 3개 시나리오 자동 검증 (connect / cmd_vel 왕복 / STATUS 중단 → connected=false)
+bash scripts/verify_bridge_mock.sh                       # 로그: log/bridge_verify/<타임스탬프>/
+bash scripts/verify_bridge_mock.sh --log-dir /tmp/stmlog  # 로그 위치 지정
+```
+
+개별로 돌릴 때:
+
+```bash
+export ROS_LOCALHOST_ONLY=1
+source /opt/ros/humble/setup.bash && source install/setup.bash
+
+ros2 launch stm_serial_bridge stm_serial_bridge.launch.py mode:=mock
+ros2 run stm_serial_bridge check_stm_topics --timeout-sec 10          # 별 터미널
+
+# STATUS 중단 → status_timeout_sec 동작 확인
+ros2 launch stm_serial_bridge stm_serial_bridge.launch.py mode:=mock mock_stop_after_sec:=5.0
+ros2 run stm_serial_bridge check_stm_topics --expect-disconnect --timeout-sec 15
+```
+
+⚠️ `mode:=mock` 은 **실제 장치를 절대 열지 않는다.** mock 이 만든 PTY symlink
+(`/tmp/stm_serial_bridge_mock_pty`)로 `serial_port` 를 강제 덮어쓰므로 YAML 의
+`/dev/ttyACM0` 값은 무시된다.
+
+### 실제 하드웨어
+
+**같은 launch 파일을 쓰고 `serial_port` 만 바꾼다.** YAML 기본값이 `/dev/ttyACM0` 이므로
+보통은 인자도 필요 없다.
+
+```bash
+export ROS_LOCALHOST_ONLY=1                 # 다른 머신의 /cmd_vel 차단 (필수)
+source /opt/ros/humble/setup.bash && source install/setup.bash
+
+# 바퀴를 공중에 띄운 상태에서만 실행할 것
+ros2 launch stm_serial_bridge stm_serial_bridge.launch.py \
+  2>&1 | tee ~/stm_$(date +%Y%m%d_%H%M%S).log
+
+# 포트가 다르면 이 인자만 바꾼다
+ros2 launch stm_serial_bridge stm_serial_bridge.launch.py serial_port:=/dev/ttyACM1
+
+# 같은 검증 도구를 실기에도 그대로 쓴다
+ros2 run stm_serial_bridge check_stm_topics --timeout-sec 10
+```
+
+### mock 으로 검증되는 것 / 안 되는 것
+
+**검증됨** (2026-08-04, mock): 6개 토픽 발행과 원소 수, `connected` true 전이,
+`fault` 발행, `/cmd_vel → SET_WHEEL_VEL → mock → STATUS → encoder_total` 왕복,
+STATUS 중단 시 `status_timeout_sec`(0.5s)로 `connected=false` 전이.
+
+**검증 안 됨** — mock 은 STM32 를 **모방**할 뿐이다:
+
+- `wheel_actual_rad_s` 의 **수치 정확도** (엔코더 스케일 12.1% 미확정. 실기 측정만이 판정 가능)
+- 실제 모터 구동·부하·전류, 실제 USB Serial 전기적 특성
+- 실제 Stall 발생 시 **펌웨어의** FAULT 판정 (mock 은 `--fault-after-sec` 로 흉내만 냄)
+- USB 강제 분리 시 RX fatal error 처리
+- mock 은 `actual = target` **스텁**이다. 관성·마찰·PI 제어를 흉내내지 않으므로
+  제어 성능은 판단할 수 없다.
+
+### 알려진 거친 부분
+
+- launch 에 SIGINT(Ctrl+C)를 주면 브리지 노드가 `destroy_node()` 중 `KeyboardInterrupt`
+  traceback을 찍고 exit code -2 로 죽는다(launch 는 이를 ERROR 로 보고). **기능 영향은
+  없으나 로그가 시끄럽다.** 노드 종료 경로의 문제이며 이번 작업 범위에서 고치지 않았다.
 
 ## 실기 검증 현황
 
@@ -165,21 +249,24 @@ source install/setup.bash
 - 실제 Stall 발생 시 `/stm/fault` 전이(`STALL_LEFT`/`RIGHT`/`BOTH`)와 `FAULT_CLEARED` 수신
 - `RESET_STALL` 송신 (미구현)
 - **엔코더 스케일 확정** — 출력축 Count 실측 자체는 완료됐으나(아래) **명목값과의 차이 원인은 미확정**
-- **`actual_rad_s` 재검증** — STM 감속비 정정(100:1 → 51:1)을 반영한 펌웨어로 **재빌드·재플래시 후**
-  다시 확인해야 한다. `/stm/wheel_actual_rad_s` 보고값이 이전보다 약 1.96배 커진다
+- **`actual_rad_s` 수치 정확도** — STM 감속비 정정(100:1 → 51:1) 펌웨어의 빌드·플래시와 전진/후진
+  동작 확인은 **2026-08-04 완료**됐다(보고값이 이전보다 약 1.96배 커진다). 그러나
+  **보고값이 실제 회전 속도와 일치하는지는 아직 측정하지 않았다.** 검증은 목표/보고 속도 비교가
+  아니라 **바퀴 1회전 전후 `/stm/encoder_total` 차이 측정**으로 한다
 - `wheel_separation_m=0.30` 실측 확정 (여전히 플레이스홀더)
 - 실제 바닥 주행
 - STATUS 수신이 끊겼을 때 주행 명령을 강제로 0으로 만드는 추가 안전 정책(8d)
 
 ### 엔코더 스케일: 실측 완료 / 원인 미확정 (2026-08-03)
 
-`/stm/encoder_total`로 출력축 수동 회전 Count를 측정했다(좌우 각 4회전, 총 8회전).
+`/stm/encoder_total`로 출력축 수동 회전 Count를 측정했다(좌우 각 4회전, 합계 8회전).
+아래 값은 모두 **바퀴 1회전당 count**의 평균이다 — **8회전 누적 count가 아니다.**
 
-| 대상 | 평균 count/wheel-rev |
-|---|---|
-| Left | 68107.75 |
-| Right | 68217.25 |
-| **좌우 전체 평균** | **68162.5** |
+| 대상 | 평균 count/wheel-rev | 측정 회전 수 |
+|---|---|---|
+| Left | 68107.75 | 4회전 |
+| Right | 68217.25 | 4회전 |
+| **좌우 전체 평균** | **68162.5** | 8회전 |
 
 - **완료**: 출력축 1회전당 Count 실측, 좌우 일관성 확인(서로 약 0.16% 차이)
 - **완료**: STM 감속비 오기재 발견 → `MOTOR_GEAR_RATIO` 100.0f → **51.0f**(구매 사양)로 정정.
