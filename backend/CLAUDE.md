@@ -23,11 +23,11 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 | 항목 | 값 |
 |------|-----|
 | 언어/프레임워크 | Java 21, Spring Boot 4.1.0 |
-| 데이터 | Spring Data JPA, MySQL 8.4 (AWS RDS) |
-| 보안 | Spring Security + JWT |
+| 데이터 | Spring Data JPA, MySQL 8.4 (EC2 Docker 컨테이너 — RDS 아님) |
+| 보안 | Spring Security + JWT (미구현 — 웹 노출 보호는 nginx 레벨 검토 중) |
 | 빌드/테스트 | Gradle, JUnit 5 / Mockito |
 | API 문서 | Swagger (springdoc-openapi) — FE가 orval로 클라이언트 생성하므로 스키마 정확성 중요 |
-| 인프라 | AWS EC2, Docker, GitHub Actions |
+| 인프라 | AWS EC2 (your-server.example.com), Docker, Jenkins (main 머지 시 자동 배포 — 루트 Jenkinsfile) |
 
 ## API 명세
 
@@ -41,7 +41,10 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 - **WebSocket 영상**: `/ws/carts/{cartId}/video` (FE 시청, 바이너리 JPEG 1메시지=1프레임)
   ← `/ws/carts/{cartId}/video/publish` (Jetson 발행, 10fps/품질70 기준 ~4Mbps)
 - **MQTT** (카트→BE, 현재 확정분):
-  - `carts/{cartId}/telemetry/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계
+  - `carts/{cartId}/telemetry/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계.
+    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 지도 메타(resolution·origin)로
+    이미지 픽셀 변환(세로축 뒤집기 포함). 기본값 pixels(무변환) — EM 발행 시작 시 meters로 전환 +
+    `library_maps`(id=`mqtt.map-id`) 행에 실제 map.yaml 값 입력 필요
   - `choll/cart/rfid` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
   - `carts/status` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
