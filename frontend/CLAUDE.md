@@ -11,7 +11,7 @@
 - 지도: SLAM 지도 위 카트 위치 표시, 사용자 목적지 지정, 현재 구역 진입/도착 알림
 - 정리 작업: 현재 구역에 꽂을 책이 있는 슬롯 표시·카운트, 전체 진행률(남은/완료 책 수)
 - 카트 제어: 호출, 이동 취소(정지), 추종 시작/종료, 카트 상태(정지/운행) 표시
-- 추종 대상 선택: WebRTC 영상 위에 AI가 탐지한 사람 후보를 표시하고 사서를 선택
+- 추종 대상 선택: 카트 카메라 영상 위에 AI가 탐지한 사람 후보를 표시하고 사서를 선택
 - (우선순위 하) 사서 로그인, RFID 재인식 요청, 도서 검색
 
 ## 기술 스택
@@ -29,9 +29,12 @@
 ## BE 통신 계약
 
 - **REST**: `/api/carts/{cartId}/...` — 카트·슬롯·지도·작업·이동·추종 조회/명령. 정본: API 명세서(노션)
-- **WebSocket**: `/ws/carts/{cartId}` — 카트 관리 화면 진입 시 연결, JSON, BE→FE 단방향 이벤트
-  (CART_POSITION_UPDATE, SLOT_UPDATED, FOLLOW_TARGETS_UPDATED 등 13종 — API 명세서 참조)
-- **WebRTC**: 추종 대상 선택 시 카트 카메라 영상 수신 (시그널링은 BE 중계)
+- **WebSocket(이벤트)**: `/ws/carts/{cartId}` — 카트 관리 화면 진입 시 연결, JSON, BE→FE 단방향 이벤트
+  (CART_POSITION_UPDATE, SLOT_UPDATED 등 명세서상 13종 + AI 사람 탐지 박스 `TRACKS_UPDATED`)
+- **WebSocket(영상)**: `/ws/carts/{cartId}/video` — 바이너리 1메시지 = JPEG 1프레임.
+  BE는 Jetson이 `/video/publish`로 올린 프레임을 디코딩 없이 중계만 한다(VideoRelayHandler).
+  영상과 박스가 서로 다른 채널로 오므로 한 프레임쯤 어긋날 수 있다.
+  (초기 계획은 WebRTC였으나 BE 구현은 WS 바이너리로 확정 — 2026-08-03)
 - 재연결 시 REST 재조회로 상태 복구 (BE-WS-03)
 
 ## 참고 문서
@@ -47,13 +50,13 @@
 src/
   app/        # 엔트리 조립: App, router, 전역 프로바이더(QueryClient, antd ConfigProvider)
   pages/      # 라우트 단위 페이지 (features를 조립)
-  features/   # 도메인 기능: slot-board, cart-control, (예정) cart-map, sorting-task, follow-target
+  features/   # 도메인 기능: slot-board, cart-control, cart-map, sorting-task, follow-target, book-search
     <name>/ui/     # 컴포넌트 + *.module.scss + *.stories.tsx + *.test.tsx
     <name>/model/  # zustand 스토어, 로직 + *.test.ts
   shared/
     api/generated/ # orval 생성물 — 직접 수정 금지, openapi.yaml 수정 후 pnpm api:gen
     api/mocks/     # MSW 워커·핸들러 (고정 픽스처는 handlers.ts)
-    api/ws/        # CartSocket (WS 재연결 래퍼)
+    api/ws/        # CartSocket (이벤트 채널 재연결 래퍼) + wsBaseUrl (영상 채널과 공용)
     api/http.ts    # axios 인스턴스 + orval mutator (인증 헤더는 여기)
     styles/        # globals.scss, _variables.scss (디자인 토큰)
   test/       # vitest setup
@@ -64,7 +67,8 @@ e2e/          # Playwright 테스트 (MSW로 BE 없이 동작)
 ## 자주 쓰는 명령
 
 ```bash
-pnpm dev            # 개발 서버 (기본 MSW 모킹, .env.development의 VITE_ENABLE_MSW)
+pnpm dev            # 개발 서버 (.env.development의 VITE_ENABLE_MSW — 현재 기본값 false = 실서버 연동)
+                    # BE 없이 화면만 볼 때는 .env.development.local에 VITE_ENABLE_MSW=true
 pnpm build          # tsc 타입체크 + 프로덕션 빌드
 pnpm lint           # ESLint
 pnpm format         # Prettier
