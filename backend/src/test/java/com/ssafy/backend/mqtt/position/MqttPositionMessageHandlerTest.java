@@ -17,29 +17,33 @@ import tools.jackson.databind.ObjectMapper;
 @ExtendWith(MockitoExtension.class)
 class MqttPositionMessageHandlerTest {
 
+	private static final String TOPIC = "status/position";
+	private static final long CART_ID = 7L;
+
 	@Mock
 	private CartPositionTelemetryService telemetryService;
 
+	private MqttPositionMessageHandler handler() {
+		return new MqttPositionMessageHandler(
+			new ObjectMapper(),
+			telemetryService,
+			TOPIC,
+			CART_ID
+		);
+	}
+
 	@Test
 	void convertsAValidPositionMessageIntoATelemetrySample() {
-		MqttPositionMessageHandler handler = new MqttPositionMessageHandler(
-			new ObjectMapper(),
-			telemetryService
-		);
-
-		handler.handle(MessageBuilder
+		handler().handle(MessageBuilder
 			.withPayload("{\"x\":100.5,\"y\":200.25}")
-			.setHeader(
-				MqttHeaders.RECEIVED_TOPIC,
-				"carts/7/telemetry/position"
-			)
+			.setHeader(MqttHeaders.RECEIVED_TOPIC, TOPIC)
 			.build());
 
 		ArgumentCaptor<PositionSample> captor =
 			ArgumentCaptor.forClass(PositionSample.class);
 		verify(telemetryService).accept(captor.capture());
 		PositionSample sample = captor.getValue();
-		assertThat(sample.cartId()).isEqualTo(7L);
+		assertThat(sample.cartId()).isEqualTo(CART_ID);
 		assertThat(sample.x()).isEqualByComparingTo("100.5");
 		assertThat(sample.y()).isEqualByComparingTo("200.25");
 		assertThat(sample.measuredAt()).isNotNull();
@@ -47,14 +51,9 @@ class MqttPositionMessageHandlerTest {
 
 	@Test
 	void ignoresUnsupportedTopics() {
-		MqttPositionMessageHandler handler = new MqttPositionMessageHandler(
-			new ObjectMapper(),
-			telemetryService
-		);
-
-		handler.handle(MessageBuilder
+		handler().handle(MessageBuilder
 			.withPayload("{\"x\":100,\"y\":200}")
-			.setHeader(MqttHeaders.RECEIVED_TOPIC, "carts/7/status")
+			.setHeader(MqttHeaders.RECEIVED_TOPIC, "status/cart")
 			.build());
 
 		verifyNoInteractions(telemetryService);
@@ -62,17 +61,9 @@ class MqttPositionMessageHandlerTest {
 
 	@Test
 	void ignoresPayloadsWithoutRequiredCoordinates() {
-		MqttPositionMessageHandler handler = new MqttPositionMessageHandler(
-			new ObjectMapper(),
-			telemetryService
-		);
-
-		handler.handle(MessageBuilder
+		handler().handle(MessageBuilder
 			.withPayload("{\"x\":100}")
-			.setHeader(
-				MqttHeaders.RECEIVED_TOPIC,
-				"carts/7/telemetry/position"
-			)
+			.setHeader(MqttHeaders.RECEIVED_TOPIC, TOPIC)
 			.build());
 
 		verify(telemetryService, never()).accept(

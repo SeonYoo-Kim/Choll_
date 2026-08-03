@@ -3,9 +3,9 @@
 fe_bridge_node가 사용하는 순수 함수/클래스 모음 (ROS·cv2·네트워크 무관):
 - RateLimiter: 영상(10fps)·트랙(5Hz) 전송률 제한. 최신 프레임만 보내는
   drop-oldest 정책의 판단부.
-- build_tracks_payload: ROS 트랙 검출 → BE MQTT(choll/cart/tracks) 페이로드.
+- build_tracks_payload: ROS 트랙 검출 → BE MQTT(status/target) 페이로드.
   bbox를 중심 좌표에서 FE가 그리기 쉬운 좌상단 기준으로 변환한다.
-- parse_select_command: BE 명령(choll/cart/cmd)에서 SELECT_TARGET만 골라
+- parse_select_command: BE 명령(cmd/move/cart)에서 SELECT_TARGET만 골라
   track id를 꺼낸다.
 
 pytest: ai/test/test_fe_bridge_logic.py
@@ -45,7 +45,7 @@ def build_tracks_payload(
     image_height: int,
     tracks: Sequence[tuple[int, float, float, float, float]],
 ) -> dict:
-    """트랙 목록을 BE 계약(choll/cart/tracks) 페이로드로 변환한다.
+    """트랙 목록을 BE 계약(status/target) 페이로드로 변환한다.
 
     Args:
         image_width: 원본 프레임 폭 (픽셀).
@@ -76,7 +76,7 @@ def build_tracks_payload(
 def parse_select_command(payload: str) -> int | None:
     """BE 명령 페이로드에서 SELECT_TARGET의 track id를 추출한다.
 
-    choll/cart/cmd 토픽은 MOVE/CANCEL 등 다른 명령도 흐르므로,
+    cmd/move/cart 토픽은 MOVE/CANCEL 등 다른 명령도 흐르므로,
     SELECT_TARGET이 아니거나 trackId가 정수가 아니면 None을 반환한다.
 
     Args:

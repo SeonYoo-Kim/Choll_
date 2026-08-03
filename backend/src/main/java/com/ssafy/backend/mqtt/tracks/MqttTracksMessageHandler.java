@@ -12,7 +12,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * choll/cart/tracks 토픽의 추적 후보 목록을 FE로 중계한다 (TRACKS_UPDATED).
+ * status/target 토픽의 추적 후보 목록을 FE로 중계한다 (TRACKS_UPDATED).
  * AI(Jetson)가 5~10Hz로 발행하며, FE는 영상 위에 bbox를 그려 타겟 선택 UI를 만든다.
  * 페이로드 예:
  * {"image_width":640,"image_height":480,
