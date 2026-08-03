@@ -1,5 +1,3 @@
-import { ClipboardList } from 'lucide-react';
-
 import { useGetTaskProgress } from '@/shared/api/generated/tasks/tasks';
 
 import styles from './TaskProgressCard.module.scss';
@@ -27,9 +25,6 @@ export function TaskProgressCard({ cartId }: TaskProgressCardProps) {
     return (
       <div className={styles.card}>
         <div className={styles.header}>
-          <span className={styles.headerIcon}>
-            <ClipboardList size={16} />
-          </span>
           <p className={styles.label}>카트 정리 현황</p>
         </div>
         <div className={styles.errorBody}>
@@ -45,9 +40,6 @@ export function TaskProgressCard({ cartId }: TaskProgressCardProps) {
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <span className={styles.headerIcon}>
-          <ClipboardList size={16} />
-        </span>
         <p className={styles.label}>카트 정리 현황</p>
       </div>
       <div className={styles.body}>

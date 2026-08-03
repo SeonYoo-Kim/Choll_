@@ -49,7 +49,7 @@ export function MapPage() {
         </div>
         <div className={`${styles.statusBadge} ${cartActive ? styles.moving : styles.idle}`}>
           <span className={styles.dot} />
-          {cartActive ? '카트 이동 중' : '카트 위치 확인'}
+          {cartActive ? '카트 이동 중' : '카트 정지'}
         </div>
       </div>
       <div className={styles.mapArea}>

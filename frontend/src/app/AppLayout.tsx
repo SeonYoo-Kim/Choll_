@@ -1,7 +1,7 @@
 import { Home, MapPin, PackageOpen, Search } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
-import logo from '@/assets/logo.png';
+import logo from '@/assets/logo.svg';
 import { useCartControlEvents } from '@/features/cart-control/model/useCartControlEvents';
 import { useCartMapEvents } from '@/features/cart-map/model/useCartMapEvents';
 import { useSlotBoardEvents } from '@/features/slot-board/model/useSlotBoardEvents';
