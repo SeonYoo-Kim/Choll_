@@ -3,12 +3,11 @@
 카트 현재 위치 발행(`cart_pose_publisher`)과 목표 수신 → Nav2 전달
 (`goal_forwarder`)을 담당하는 ROS2 Humble 패키지.
 
-## 토픽 계약 (두 계약 동시 지원)
+## 토픽 계약 (AI-EM ROS2 명세서 기준 — 대조표: embedded/Lidar/docs/ROS2_API.md)
 
 | 토픽 | 타입 | 방향 | 설명 |
 |---|---|---|---|
-| `/robot_pose` | PoseStamped | 발행 10Hz | AI 확정 계약(2026-07-31). frame=map, RELIABLE |
-| `/cart/pose` | PoseStamped | 발행 10Hz | README/BE 연동 계약. 내용 동일 |
+| `/robot_pose` | PoseStamped | 발행 10Hz | 명세서 ROS2-08 (AI 확정 계약 2026-07-31). frame=map, RELIABLE. 추가 발행 토픽은 `pose_topics` 파라미터로 확장 |
 | `/target_position` | PointStamped | 구독 | AI가 발행하는 목표 지점 (방향 없음 → auto_orient). 스로틀 적용 |
 | `/cart/target_pose` | PoseStamped | 구독 | 수동/BE 목표. **frame_id 필수**, map 외 프레임 TF 자동 변환. **스로틀 없이 항상 선점** |
 | `/cart/cancel` | Empty | 구독 | 주행 취소 |
@@ -20,7 +19,7 @@
 - `auto_orient` (True): 방향 미지정 시 로봇→목표 방향 자동 설정
 - `min_goal_interval_sec` (1.0) / `min_goal_move_dist` (0.3): AI 스트림 goal 스로틀
   (간격은 상태 무관 항상 적용, 이동 거리는 주행 중·성공 직후 적용 — 플래핑 방지)
-- `pose_topics`: 위치 발행 토픽 목록 (빈 문자열로 개별 비활성 가능)
+- `pose_topics`: 위치 발행 토픽 목록 (기본 `["/robot_pose"]`, 배열에 추가 가능)
 
 ## 실행
 

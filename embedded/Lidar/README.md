@@ -8,7 +8,7 @@
 | 패키지 | 역할 |
 |---|---|
 | `src/choll_slam_bringup` | X4Pro 드라이버 설정 + 정적TF + rf2o(임시 오도메트리) + slam_toolbox 런치 |
-| `src/choll_nav` | `/robot_pose`·`/cart/pose` 발행 + 목표 수신→Nav2 전달 + `/cart/nav_status` |
+| `src/choll_nav` | `/robot_pose` 발행(명세 ROS2-08) + 목표 수신→Nav2 전달 + `/cart/nav_status` — API 대조표: [docs/ROS2_API.md](docs/ROS2_API.md) |
 | `src/choll_nav2` | Nav2 파라미터(TB3 각색)·런치·RViz + BackUp(후진) 제거 커스텀 BT |
 | `src/ydlidar_ros2_driver`, `src/rf2o_laser_odometry` | **upstream — 커밋 안 함**, setup 스크립트가 클론 |
 

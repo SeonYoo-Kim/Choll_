@@ -6,7 +6,7 @@
 ## 구성 (자세한 것은 각 패키지 문서)
 
 - `src/choll_slam_bringup` — 라이다+rf2o+slam_toolbox 설정/런치만 있는 패키지 (노드 없음)
-- `src/choll_nav` — `cart_pose_publisher`(TF→`/robot_pose`+`/cart/pose` 10Hz),
+- `src/choll_nav` — `cart_pose_publisher`(TF→`/robot_pose` 10Hz, 명세 ROS2-08),
   `goal_forwarder`(`/target_position`·`/cart/target_pose`→Nav2, `/cart/cancel`,
   `/cart/nav_status` 래치). 순수 로직은 `choll_nav/nav_logic.py` — ROS 없이
   `pytest src/choll_nav/test/test_nav_logic.py` 실행 가능 (31개).

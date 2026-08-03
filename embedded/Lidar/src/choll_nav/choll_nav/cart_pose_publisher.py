@@ -1,10 +1,11 @@
 """카트 현재 위치 발행 노드.
 
-TF map→base_link를 조회해 PoseStamped를 파라미터로 지정한 여러 토픽
-(기본: /robot_pose, /cart/pose)에 동시 발행한다. /robot_pose는 AI 파트
-target_position_node와의 확정 계약(2026-07-31), /cart/pose는 BE 연동용
-README 계약이다. QoS는 RELIABLE — AI 쪽이 기본 QoS로 구독하므로
-BestEffort로 바꾸면 전달되지 않는다.
+TF map→base_link를 조회해 PoseStamped를 /robot_pose로 발행한다
+(AI-EM ROS2 명세서 ROS2-08, AI 파트와 2026-07-31 확정 계약).
+발행 토픽은 pose_topics 파라미터(문자열 배열)로 관리 — BE 브릿지 등
+추가 구독처가 생기면 launch에서 배열에 토픽만 추가하면 된다.
+QoS는 RELIABLE — AI 쪽이 기본 QoS로 구독하므로 BestEffort로 바꾸면
+전달되지 않는다.
 """
 
 import rclpy
@@ -21,7 +22,7 @@ class CartPosePublisher(Node):
     def __init__(self) -> None:
         """파라미터 선언, TF 리스너와 발행자·타이머를 초기화한다."""
         super().__init__("cart_pose_publisher")
-        self.declare_parameter("pose_topics", ["/robot_pose", "/cart/pose"])
+        self.declare_parameter("pose_topics", ["/robot_pose"])
         self.declare_parameter("publish_rate_hz", 10.0)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")

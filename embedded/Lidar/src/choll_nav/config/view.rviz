@@ -94,7 +94,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /cart/pose
+        Value: /robot_pose
       Value: true
   Enabled: true
   Global Options:

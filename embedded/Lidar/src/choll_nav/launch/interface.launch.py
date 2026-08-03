@@ -1,6 +1,6 @@
 """choll_nav 인터페이스 노드 런치 — 파라미터 정본.
 
-cart_pose_publisher(/robot_pose·/cart/pose 발행)와 goal_forwarder
+cart_pose_publisher(/robot_pose 발행)와 goal_forwarder
 (/cart/target_pose·/target_position → Nav2)를 함께 기동한다.
 
 사서 추종 모드:
@@ -29,9 +29,9 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         parameters=[
             {
-                # /robot_pose: AI 확정 계약(2026-07-31),
-                # /cart/pose: BE 연동용 README 계약 — 동시 발행
-                "pose_topics": ["/robot_pose", "/cart/pose"],
+                # AI-EM ROS2 명세서 ROS2-08 (AI 확정 계약 2026-07-31).
+                # BE 등 추가 구독처가 필요하면 이 배열에 토픽만 추가
+                "pose_topics": ["/robot_pose"],
                 "publish_rate_hz": 10.0,
                 "map_frame": "map",
                 "base_frame": "base_link",
