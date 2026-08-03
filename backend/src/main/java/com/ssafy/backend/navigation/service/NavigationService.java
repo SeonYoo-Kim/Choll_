@@ -6,17 +6,22 @@ import com.ssafy.backend.cart.domain.CartOperationStatus;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.InvalidDomainException;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
+import com.ssafy.backend.map.domain.LibraryMap;
+import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.command.MqttCommandPublisher;
+import com.ssafy.backend.mqtt.position.SlamCoordinateConverter;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import com.ssafy.backend.zone.domain.Zone;
 import com.ssafy.backend.zone.repository.ZoneRepository;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -28,18 +33,27 @@ import tools.jackson.databind.ObjectMapper;
  * NAVIGATION_STATUS_UPDATED WebSocket 이벤트로 진행 상태를 FE에 전달한다.
  * 이동 상태는 인메모리(카트당 1건) — 카트의 상행 결과 토픽이 확정되면
  * STARTED/ARRIVED/FAILED 전환을 붙일 자리다.
+ *
+ * 목적지 좌표: FE가 픽셀(x,y)을 주면 그 지점, 없으면 구역 bbox 중심.
+ * mqtt.position-unit=meters면 지도 메타(resolution·origin)로 SLAM 미터 target을
+ * 함께 하행한다 (EM SLAM Nav의 goal 좌표). pixels 모드(메타 미입력)에선 target=null.
  */
 @Service
 public class NavigationService {
 
 	private static final Logger log = LoggerFactory.getLogger(NavigationService.class);
 	private static final String NAVIGATION_EVENT_TYPE = "NAVIGATION_STATUS_UPDATED";
+	private static final String UNIT_METERS = "meters";
 
 	private final CartRepository cartRepository;
 	private final ZoneRepository zoneRepository;
+	private final LibraryMapRepository mapRepository;
+	private final SlamCoordinateConverter coordinateConverter;
 	private final CartEventPublisher eventPublisher;
 	private final ObjectProvider<MqttCommandPublisher> commandPublisher;
 	private final ObjectMapper objectMapper;
+	private final String positionUnit;
+	private final long mapId;
 
 	private final ConcurrentHashMap<Long, ActiveNavigation> activeByCartId =
 		new ConcurrentHashMap<>();
@@ -48,19 +62,32 @@ public class NavigationService {
 	public NavigationService(
 		CartRepository cartRepository,
 		ZoneRepository zoneRepository,
+		LibraryMapRepository mapRepository,
+		SlamCoordinateConverter coordinateConverter,
 		CartEventPublisher eventPublisher,
 		ObjectProvider<MqttCommandPublisher> commandPublisher,
-		ObjectMapper objectMapper
+		ObjectMapper objectMapper,
+		@Value("${mqtt.position-unit:pixels}") String positionUnit,
+		@Value("${mqtt.map-id:2}") long mapId
 	) {
 		this.cartRepository = cartRepository;
 		this.zoneRepository = zoneRepository;
+		this.mapRepository = mapRepository;
+		this.coordinateConverter = coordinateConverter;
 		this.eventPublisher = eventPublisher;
 		this.commandPublisher = commandPublisher;
 		this.objectMapper = objectMapper;
+		this.positionUnit = positionUnit;
+		this.mapId = mapId;
 	}
 
 	@Transactional
 	public Response start(Long cartId, Long zoneId) {
+		return start(cartId, zoneId, null, null);
+	}
+
+	@Transactional
+	public Response start(Long cartId, Long zoneId, Double pixelX, Double pixelY) {
 		Cart cart = cartRepository.findById(cartId)
 			.orElseThrow(() -> new ResourceNotFoundException("카트", cartId));
 		Zone zone = zoneRepository.findById(zoneId)
@@ -73,7 +100,10 @@ public class NavigationService {
 		}
 
 		long navigationId = navigationSequence.incrementAndGet();
-		Destination destination = resolveDestination(zone);
+		Destination destination = pixelX != null && pixelY != null
+			? new Destination(pixelX, pixelY)
+			: resolveDestination(zone);
+		Target target = toSlamTarget(destination);
 		cart.updateStatus(
 			cart.getConnectionStatus(),
 			CartOperationStatus.NAVIGATING,
@@ -81,17 +111,43 @@ public class NavigationService {
 		);
 		activeByCartId.put(cartId, new ActiveNavigation(navigationId, zoneId));
 
-		publishCommand(new MoveCommand(navigationId, "MOVE", zoneId, destination.x(), destination.y()));
+		publishCommand(new MoveCommand(
+			navigationId,
+			"MOVE",
+			zoneId,
+			target,
+			new Pixel(destination.x(), destination.y())
+		));
 		publishNavigationEvent(cartId, navigationId, "ACCEPTED", zoneId, null);
 		log.info(
-			"이동 명령 접수 cartId={}, navigationId={}, zoneId={}, dest=({}, {})",
+			"이동 명령 접수 cartId={}, navigationId={}, zoneId={}, pixel=({}, {}), target={}",
 			cartId,
 			navigationId,
 			zoneId,
 			destination.x(),
-			destination.y()
+			destination.y(),
+			target
 		);
 		return new Response(navigationId, "ACCEPTED", zoneId);
+	}
+
+	/**
+	 * 픽셀 목적지를 SLAM 미터 좌표로 변환한다.
+	 * pixels 모드(지도 메타 미입력 — EM 좌표 연동 전)에서는 null을 반환하고,
+	 * EM 연동 시 mqtt.position-unit=meters + library_maps 실값 입력으로 켠다.
+	 */
+	private Target toSlamTarget(Destination pixelDestination) {
+		if (!UNIT_METERS.equalsIgnoreCase(positionUnit)) {
+			return null;
+		}
+		LibraryMap map = mapRepository.findById(mapId)
+			.orElseThrow(() -> new ResourceNotFoundException("지도", mapId));
+		SlamCoordinateConverter.SlamPosition slam = coordinateConverter.toSlamMeters(
+			BigDecimal.valueOf(pixelDestination.x()),
+			BigDecimal.valueOf(pixelDestination.y()),
+			map
+		);
+		return new Target(slam.x().doubleValue(), slam.y().doubleValue());
 	}
 
 	@Transactional
@@ -172,14 +228,21 @@ public class NavigationService {
 	private record Destination(double x, double y) {
 	}
 
-	// BE→EM 이동 명령 페이로드 — ⚠️ EM 미확정 임시 계약
+	// BE→EM 이동 명령 페이로드 — ⚠️ EM 미확정 임시 계약.
+	// target=SLAM 미터(EM nav goal, pixels 모드에선 null), pixel=지도 이미지 픽셀(참고용)
 	private record MoveCommand(
 		long requestId,
 		String command,
 		Long zoneId,
-		Double x,
-		Double y
+		Target target,
+		Pixel pixel
 	) {
+	}
+
+	private record Target(double x, double y) {
+	}
+
+	private record Pixel(double x, double y) {
 	}
 
 	// WS-FE-06 NAVIGATION_STATUS_UPDATED 페이로드

@@ -2,6 +2,7 @@ package com.ssafy.backend.navigation.controller;
 
 import com.ssafy.backend.navigation.service.NavigationService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
@@ -25,7 +26,7 @@ public class NavigationController {
 
 	@Operation(
 		operationId = "startNavigation",
-		summary = "목적지 이동 시작 (NAV-01)",
+		summary = "목적지 이동 시작 (NAV-01) — x·y(지도 픽셀)를 주면 그 지점, 없으면 구역 중심",
 		tags = "navigation"
 	)
 	@PostMapping
@@ -35,7 +36,7 @@ public class NavigationController {
 	) {
 		return ResponseEntity
 			.status(HttpStatus.ACCEPTED)
-			.body(service.start(cartId, request.zoneId()));
+			.body(service.start(cartId, request.zoneId(), request.x(), request.y()));
 	}
 
 	@Operation(
@@ -51,7 +52,11 @@ public class NavigationController {
 
 	public record Request(
 		@NotNull(message = "목적지 구역 ID는 필수입니다.")
-		Long zoneId
+		Long zoneId,
+		@Schema(description = "클릭 지점 x (지도 이미지 픽셀, 없으면 구역 중심 사용)")
+		Double x,
+		@Schema(description = "클릭 지점 y (지도 이미지 픽셀, 없으면 구역 중심 사용)")
+		Double y
 	) {
 	}
 }

@@ -15,6 +15,44 @@
 
 ---
 
+## 2026-08-03 21:33 — ✅ BE: MOVE 하행에 SLAM 미터 target 추가 + NAV-01 픽셀 클릭 지원 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21. 단위 테스트만 (외부 의존 모킹)
+- **커밋**: 브랜치 `backend/feature/follow-control` (d27affe 위에 추가)
+- **변경**:
+  - `SlamCoordinateConverter.toSlamMeters()` 신규 — 픽셀→미터 역변환 (세로축 뒤집기 포함)
+  - `MoveCommand` 페이로드 개편: `{"requestId","command":"MOVE","zoneId","target":{x,y},"pixel":{x,y}}`
+    — target은 SLAM 미터(EM nav goal). `mqtt.position-unit=meters`일 때만 변환·포함,
+    pixels 모드(지도 메타 미입력)에선 null. pixel은 항상 포함(참고용)
+  - NAV-01 요청에 선택 필드 x·y(지도 픽셀) 추가 — 주면 클릭 지점, 없으면 구역 bbox 중심 (기존 FE 무영향)
+  - FOLLOW_* 명령은 좌표를 싣지 않기로 확정 — 사서 좌표는 로봇 내부에서 AI `/target_position`이
+    데이터 플레인 (BE 경유 왕복은 지연만 추가)
+- **결과**: 23 suites, **81 tests, 0 failures, 0 errors** (신규 4: 픽셀→미터 변환/왕복,
+  meters 모드 target 포함, 클릭 픽셀 우선. 기존 MOVE 테스트는 target=null(pixels 모드) 검증으로 갱신)
+- **미검증**: 실지도 메타 기반 변환 정확도 — EM이 map.yaml 값(`library_maps` id=2) 입력 후
+  실기 좌표로 재검증 필요
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+> Task :compileJava
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 32s
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=23 tests=81 failures=0 errors=0
+```
+
+</details>
+
 ## 2026-08-03 20:22 — ✅ BE: 추종 시작·일시정지·종료(FOLLOW-01/02/04) 단위 테스트 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test --console=plain` (backend/ 에서)
