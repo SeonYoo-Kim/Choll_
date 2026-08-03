@@ -69,7 +69,7 @@ export function useCartMapEvents(cartId: number): void {
   // 좌표(새 지도 기준)와 그림이 어긋나 틀린 위치를 보여주게 된다
   useEffect(() => {
     // mapId를 아직 모르면 조회 자체가 시작되지 않은 것이므로 실패로 보지 않는다
-    applyMapInfo(mapId === null ? undefined : mapInfo?.imageUrl, isMapError);
+    applyMapInfo(mapId === null ? undefined : mapInfo, isMapError);
   }, [mapId, mapInfo, isMapError, applyMapInfo]);
 
   useEffect(() => {

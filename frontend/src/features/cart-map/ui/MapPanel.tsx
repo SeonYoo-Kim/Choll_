@@ -1,8 +1,9 @@
 import { ShoppingCart } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { useStartNavigation } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
+import { clientPointToDisplay } from '../model/mapTransform';
 import { zoneLabel } from '../model/zones';
 import { useZoneStore, zoneIndexOf } from '../model/zoneStore';
 
@@ -12,7 +13,7 @@ import { useToastStore } from '@/shared/ui/toast/toastStore';
 
 import styles from './MapPanel.module.scss';
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 
 /** SLAM 지도 패널 — 평면도 위 구역을 눌러 카트 목적지를 지정한다. */
 export function MapPanel() {
@@ -27,10 +28,13 @@ export function MapPanel() {
   const startMove = useCartMapStore((state) => state.startMove);
   // 서버 구역(MAP-02)을 받기 전에는 데모 구역이 들어 있다 — 어느 쪽이든 그리는 방식은 같다
   const zones = useZoneStore((state) => state.zones);
-  const mapImageUrl = useCartMapStore((state) => state.mapImageUrl);
+  const mapInfo = useCartMapStore((state) => state.mapInfo);
   const mapUnavailable = useCartMapStore((state) => state.mapUnavailable);
+  const mapImageUrl = mapInfo?.imageUrl ?? null;
   // 불러오기에 실패한 주소를 기억한다 (주소가 바뀌면 다시 시도한다)
   const [failedMapUrl, setFailedMapUrl] = useState<string | null>(null);
+  // 누른 지점을 지도 픽셀로 되돌리려면 화면에 그려진 지도 영역의 크기가 필요하다
+  const canvasRef = useRef<HTMLDivElement>(null);
   const runState = useCartControlStore((state) => state.runState);
   const notify = useToastStore((state) => state.show);
 
@@ -61,7 +65,22 @@ export function MapPanel() {
     throw new Error(`지도 이미지를 불러오지 못했습니다 (imageUrl: ${mapImageUrl ?? '없음'})`);
   }
 
-  const handleZoneClick = (zoneIndex: number) => {
+  /**
+   * 누른 지점을 지도 픽셀 좌표로 바꾼다 — 구역 한가운데가 아니라 사서가 찍은 자리로 보내기 위함.
+   * 키보드로 버튼을 누르면 좌표가 없으므로(detail 0) null을 주고, BE가 구역 중심을 쓰게 한다.
+   */
+  const clickedPoint = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0 || canvasRef.current === null || mapInfo === null) {
+      return null;
+    }
+    return clientPointToDisplay(
+      { x: event.clientX, y: event.clientY },
+      canvasRef.current.getBoundingClientRect(),
+      mapInfo,
+    );
+  };
+
+  const handleZoneClick = (zoneIndex: number, event: MouseEvent<HTMLButtonElement>) => {
     if (zoneIndex === cartZone) {
       notify(`${zoneLabel(zoneIndex)}에 이미 카트가 있어요`);
       return;
@@ -70,11 +89,15 @@ export function MapPanel() {
     if (zoneId === undefined) {
       return;
     }
-    startNavigation({ cartId: DEMO_CART_ID, data: { zoneId } });
+    const point = clickedPoint(event);
+    startNavigation({
+      cartId: DEMO_CART_ID,
+      data: point === null ? { zoneId } : { zoneId, x: point.x, y: point.y },
+    });
   };
 
   // 아직 지도 정보를 받는 중 — 카트·구역을 얹을 바탕이 없으니 자리만 잡아 둔다
-  if (mapImageUrl === null) {
+  if (mapInfo === null || mapImageUrl === null) {
     return (
       <div className={styles.panel}>
         <div className={styles.canvas}>
@@ -87,7 +110,12 @@ export function MapPanel() {
   return (
     <div className={styles.panel}>
       {/* 패널 제목은 제거 — MapPage의 h1("도서관 지도")과 중복이라 지도만 남긴다 */}
-      <div className={styles.canvas}>
+      {/* 비율을 서버 지도 크기에 맞춘다 — 어긋나면 cover 크롭 때문에 클릭 지점이 실제와 달라진다 */}
+      <div
+        className={styles.canvas}
+        ref={canvasRef}
+        style={{ aspectRatio: `${mapInfo.imageWidth} / ${mapInfo.imageHeight}` }}
+      >
         {/* 서버가 준 지도만 그린다 — 못 그리면 위에서 에러 화면으로 넘어간다 */}
         <img
           src={mapImageUrl}
@@ -99,7 +127,7 @@ export function MapPanel() {
           <button
             key={zone.id}
             disabled={cartStatus !== 'IDLE' || following || isPending}
-            onClick={() => handleZoneClick(i)}
+            onClick={(event) => handleZoneClick(i, event)}
             aria-label={`${zoneLabel(i)} ${zone.name}로 카트 이동`}
             className={`${styles.zone} ${i === cartZone ? styles.zoneActive : ''}`}
             style={{

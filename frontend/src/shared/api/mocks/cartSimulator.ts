@@ -1,7 +1,7 @@
 import { ws } from 'msw';
 
 import mapImage from '@/assets/map.png';
-import { percentToDisplay } from '@/features/cart-map/model/mapTransform';
+import { displayToPercent, percentToDisplay } from '@/features/cart-map/model/mapTransform';
 import {
   CORRIDOR_Y,
   START_POSITION,
@@ -148,8 +148,13 @@ function broadcastNavigation(status: NavigationStatus, destinationZoneId?: numbe
   });
 }
 
-/** NAV-01 목적지 이동 시작 — 구역 이탈 → 통로 경유 → 목적지 진입 → 도착 순서로 브로드캐스트 */
-export function startCartMove(zoneId: number): void {
+/**
+ * NAV-01 목적지 이동 시작 — 구역 이탈 → 통로 경유 → 목적지 진입 → 도착 순서로 브로드캐스트.
+ *
+ * `point`(지도 이미지 픽셀)를 주면 실제 BE처럼 **구역 중심이 아니라 그 지점**으로 간다.
+ * 안 주면 구역 중심을 쓴다.
+ */
+export function startCartMove(zoneId: number, point?: DisplayPosition): void {
   const destinationIndex = zoneIndexOf(zoneId);
   if (destinationIndex === null || isMoving || destinationIndex === currentZoneIndex) {
     return;
@@ -158,7 +163,10 @@ export function startCartMove(zoneId: number): void {
   navigationCounter += 1;
   const departureZoneId = currentZoneIndex === null ? null : currentZoneIndex + 1;
   const start = currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex];
-  const destination = ZONE_POSITIONS[destinationIndex];
+  const destination =
+    point === undefined
+      ? ZONE_POSITIONS[destinationIndex]
+      : displayToPercent(point, mapInfoFixture);
 
   broadcastNavigation('ACCEPTED', zoneId);
   const waypoints: MapPercent[] = [

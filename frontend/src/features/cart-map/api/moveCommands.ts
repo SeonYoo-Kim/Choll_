@@ -11,12 +11,16 @@ import type { UseMutationOptions } from '@tanstack/react-query';
  * BE Swagger(openapi.yaml 정본)에 아직 없어 orval 생성 클라이언트가 존재하지 않는다.
  * 호출 시그니처는 orval 생성 훅과 동일하게 맞춰 두었다.
  * TODO: BE 구현 후 `pnpm api:gen` 재생성 시 이 파일을 지우고 생성 훅으로 교체할 것.
- * TODO: NAV-01 요청 body 필드명(zoneId)은 BE와 확정 필요.
+ * 필드 이름은 BE `NavigationController.Request`(zoneId·x·y)와 맞춰 두었다.
  */
 
 export interface StartNavigationBody {
   /** 목적지 구역 shelf_zone.id */
   zoneId: number;
+  /** 사서가 누른 지점 x (지도 이미지 픽셀). 없으면 BE가 구역 중심으로 보낸다 */
+  x?: number;
+  /** 사서가 누른 지점 y (지도 이미지 픽셀) */
+  y?: number;
 }
 
 const startNavigation = (cartId: number, data: StartNavigationBody) =>

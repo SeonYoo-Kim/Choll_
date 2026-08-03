@@ -159,7 +159,10 @@ export const handlers = [
   // BE 구현 후 openapi 재생성 시 생성 MockHandler로 교체할 것.
   http.post('*/api/carts/:cartId/navigation', async ({ request }) => {
     const body = (await request.json()) as StartNavigationBody;
-    startCartMove(body.zoneId);
+    // 클릭 지점이 오면 그 자리로, 없으면 구역 중심으로 — 실제 BE와 같은 규칙
+    const point =
+      body.x !== undefined && body.y !== undefined ? { x: body.x, y: body.y } : undefined;
+    startCartMove(body.zoneId, point);
     return new HttpResponse(null, { status: 202 });
   }),
   http.delete('*/api/carts/:cartId/navigation', () => {
