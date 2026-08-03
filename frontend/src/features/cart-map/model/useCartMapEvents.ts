@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { useCartMapStore } from './cartMapStore';
 import { displayToPercent } from './mapTransform';
+import { useShelfZones } from './useShelfZones';
 import { zoneLabel } from './zones';
 
 import { getGetCartQueryKey, useGetCart } from '@/shared/api/generated/carts/carts';
@@ -45,6 +46,8 @@ export function useCartMapEvents(cartId: number): void {
   const { data: mapInfo, isError: isMapError } = useGetMap(mapId ?? 0, {
     query: { enabled: mapId != null, throwOnError: false },
   });
+  // 책장 구역 목록(MAP-02) — 지도 메타가 있어야 픽셀 경계를 %로 바꿀 수 있다
+  useShelfZones(mapId, mapInfo);
 
   // 던지지 않는 대신 조용히 넘어가지도 않게 한 번 알린다
   useEffect(() => {
@@ -60,6 +63,14 @@ export function useCartMapEvents(cartId: number): void {
   }, [mapInfo]);
 
   const syncFromCart = useCartMapStore((state) => state.syncFromCart);
+  const applyMapInfo = useCartMapStore((state) => state.applyMapInfo);
+
+  // 지도 그림도 서버 것을 쓴다 — 실제 SLAM 지도로 바뀌었는데 옛 평면도를 그리면
+  // 좌표(새 지도 기준)와 그림이 어긋나 틀린 위치를 보여주게 된다
+  useEffect(() => {
+    // mapId를 아직 모르면 조회 자체가 시작되지 않은 것이므로 실패로 보지 않는다
+    applyMapInfo(mapId === null ? undefined : mapInfo, isMapError);
+  }, [mapId, mapInfo, isMapError, applyMapInfo]);
 
   useEffect(() => {
     if (!cart) {
@@ -149,6 +160,14 @@ export function useCartMapEvents(cartId: number): void {
       ({ payload }) => {
         useCartMapStore.getState().applyNavigation(payload.status, payload.destinationZoneId);
         feedWatchdog(); // 도착·취소로 isMoving이 꺼졌으면 타이머 해제, 진행 중이면 되감기
+        // 실패는 조용히 대기 상태로 돌아가면 사서가 이유를 알 길이 없다.
+        // BE가 사유를 주면 함께 보여주고, 없으면 실패 사실만 알린다
+        if (payload.status === 'FAILED') {
+          const reason = payload.failReason?.trim();
+          useToastStore
+            .getState()
+            .show(reason ? `카트가 이동하지 못했어요 — ${reason}` : '카트가 이동하지 못했어요');
+        }
       },
     );
 

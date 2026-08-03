@@ -1,16 +1,18 @@
 import { ws } from 'msw';
 
-import { percentToDisplay } from '@/features/cart-map/model/mapTransform';
+import mapImage from '@/assets/map.png';
+import { displayToPercent, percentToDisplay } from '@/features/cart-map/model/mapTransform';
 import {
   CORRIDOR_Y,
   START_POSITION,
   ZONE_POSITIONS,
-  zoneIndexOf,
+  ZONE_RECTS,
 } from '@/features/cart-map/model/zones';
+import { DEMO_ZONES, zoneIndexOf } from '@/features/cart-map/model/zoneStore';
 import { CartDetailStatus } from '@/shared/api/generated/model';
 
-import type { MapPercent } from '@/features/cart-map/model/mapTransform';
-import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
+import type { DisplayPosition, MapPercent } from '@/features/cart-map/model/mapTransform';
+import type { CartDetail, MapInfo, ShelfZone } from '@/shared/api/generated/model';
 import type {
   CartPositionUpdatePayload,
   CartWsEvent,
@@ -31,13 +33,42 @@ import type {
 export const mapInfoFixture: MapInfo = {
   id: 1,
   name: '우리 도서관 1층',
-  imageUrl: '/map.png',
+  // 실제 BE는 서버에 올라간 SLAM 지도 주소를 준다. 모킹에서는 번들된 평면도를 그대로 가리켜
+  // "서버 지도를 그리는" 정상 경로를 개발 중에도 확인할 수 있게 한다
+  imageUrl: mapImage,
   resolution: 0.05,
   originX: 0,
   originY: 0,
   imageWidth: 1174,
   imageHeight: 631,
 };
+
+/**
+ * 책장 구역 픽스처(MAP-02) — 실제 BE와 같은 모양으로 준다.
+ * 경계는 지도 이미지 픽셀 폴리곤의 JSON 문자열이고, 값은 데모 구역(ZONE_RECTS)에서 만든다.
+ * 이렇게 해두면 모킹으로 개발해도 서버 응답을 파싱하는 경로를 그대로 지나간다.
+ */
+export const shelfZonesFixture: ShelfZone[] = ZONE_RECTS.map((rect, index) => {
+  const topLeft = percentToDisplay({ x: rect.left, y: rect.top }, mapInfoFixture);
+  const bottomRight = percentToDisplay(
+    { x: rect.left + rect.width, y: rect.top + rect.height },
+    mapInfoFixture,
+  );
+  // 실제 BE의 시드 데이터가 정수 픽셀이라 반올림해 맞춘다
+  const corner = (point: DisplayPosition) => [Math.round(point.x), Math.round(point.y)];
+  return {
+    id: DEMO_ZONES[index].id,
+    mapId: mapInfoFixture.id,
+    code: DEMO_ZONES[index].code,
+    name: DEMO_ZONES[index].name,
+    boundaryData: JSON.stringify([
+      corner(topLeft),
+      corner({ x: bottomRight.x, y: topLeft.y }),
+      corner(bottomRight),
+      corner({ x: topLeft.x, y: bottomRight.y }),
+    ]),
+  };
+});
 
 // 주의: 'ws://*/...'처럼 호스트가 와일드카드인 절대 URL 패턴은 브라우저의 URL 해석 과정에서
 // 매칭이 깨진다(msw 2.15 기준). '*'로 시작하는 패턴은 해석을 건너뛰므로 안전하다.
@@ -58,6 +89,24 @@ let moveTimers: ReturnType<typeof setTimeout>[] = [];
 
 function broadcast(event: CartWsEvent): void {
   cartWsLink.broadcast(JSON.stringify(event));
+}
+
+/** 카트 연결 상태 (WS-FE-03). 실제 BE는 하트비트로 판정하지만 모킹에서는 수동으로 바꾼다 */
+let isOnline = true;
+
+/**
+ * 카트 연결 끊김/복구를 흉내 낸다 — 실제 BE처럼 **상태가 바뀔 때만** 이벤트를 보낸다.
+ * 개발 중 `window.__setCartOnline(false)`로 팝업을 확인할 수 있다 (browser.ts에서 노출).
+ */
+export function setCartOnline(online: boolean): void {
+  if (isOnline === online) {
+    return;
+  }
+  isOnline = online;
+  broadcast({
+    type: 'CART_CONNECTION_UPDATED',
+    payload: { online, lastSeenAt: new Date().toISOString() },
+  });
 }
 
 /** 직전 브로드캐스트 좌표·방향 — 다음 좌표와의 차이로 진행 방향(yaw)을 만든다 */
@@ -99,8 +148,13 @@ function broadcastNavigation(status: NavigationStatus, destinationZoneId?: numbe
   });
 }
 
-/** NAV-01 목적지 이동 시작 — 구역 이탈 → 통로 경유 → 목적지 진입 → 도착 순서로 브로드캐스트 */
-export function startCartMove(zoneId: number): void {
+/**
+ * NAV-01 목적지 이동 시작 — 구역 이탈 → 통로 경유 → 목적지 진입 → 도착 순서로 브로드캐스트.
+ *
+ * `point`(지도 이미지 픽셀)를 주면 실제 BE처럼 **구역 중심이 아니라 그 지점**으로 간다.
+ * 안 주면 구역 중심을 쓴다.
+ */
+export function startCartMove(zoneId: number, point?: DisplayPosition): void {
   const destinationIndex = zoneIndexOf(zoneId);
   if (destinationIndex === null || isMoving || destinationIndex === currentZoneIndex) {
     return;
@@ -109,7 +163,10 @@ export function startCartMove(zoneId: number): void {
   navigationCounter += 1;
   const departureZoneId = currentZoneIndex === null ? null : currentZoneIndex + 1;
   const start = currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex];
-  const destination = ZONE_POSITIONS[destinationIndex];
+  const destination =
+    point === undefined
+      ? ZONE_POSITIONS[destinationIndex]
+      : displayToPercent(point, mapInfoFixture);
 
   broadcastNavigation('ACCEPTED', zoneId);
   const waypoints: MapPercent[] = [
@@ -240,6 +297,14 @@ export function stopCartMove(): void {
   }
 }
 
+/**
+ * 시뮬레이터 기준 카트의 현재 구역 id — 이동 중이거나 구역 밖이면 null.
+ * 실제 BE가 카트 위치로 구역을 판정하는 것에 대응한다 (슬롯 isTarget 계산에도 쓰인다).
+ */
+export function currentCartZoneId(): number | null {
+  return isMoving || currentZoneIndex === null ? null : currentZoneIndex + 1;
+}
+
 /** 시뮬레이터 상태를 반영한 카트 상세 픽스처 (CART-01 getCart 모킹 응답) */
 export function cartDetailFixture(cartId: number): CartDetail {
   return {
@@ -250,9 +315,9 @@ export function cartDetailFixture(cartId: number): CartDetail {
       : followStatus === 'STARTED'
         ? CartDetailStatus.FOLLOWING
         : CartDetailStatus.IDLE,
-    online: true,
+    online: isOnline,
     mapId: mapInfoFixture.id,
-    currentZoneId: isMoving || currentZoneIndex === null ? null : currentZoneIndex + 1,
+    currentZoneId: currentCartZoneId(),
     currentZoneName: isMoving || currentZoneIndex === null ? null : `${currentZoneIndex + 1}구역`,
     position: percentToDisplay(
       currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex],

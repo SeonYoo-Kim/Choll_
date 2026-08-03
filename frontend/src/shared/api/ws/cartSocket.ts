@@ -43,6 +43,22 @@ export interface CartPositionUpdatePayload {
 }
 
 /**
+ * WS-FE-03 CART_CONNECTION_UPDATED 페이로드.
+ *
+ * BE는 **상태가 바뀌는 순간에만** 보낸다 (하트비트 수신 → ONLINE,
+ * `cart.connection.offline-timeout-seconds`(기본 15초) 무신호 → OFFLINE).
+ * 이미 끊긴 상태로 화면에 들어오면 이벤트가 오지 않으므로, 진입 시점 상태는
+ * REST CART-01(`CartDetail.online`)로 따로 채워야 한다.
+ *
+ * lastSeenAt은 마지막 통신 시각 — BE가 LocalDateTime(Asia/Seoul)을 보내므로
+ * 타임존 표기가 없는 ISO 문자열이다.
+ */
+export interface CartConnectionUpdatedPayload {
+  online: boolean;
+  lastSeenAt: string | null;
+}
+
+/**
  * WS-FE-04 SLOT_UPDATED 페이로드 — REST GET /slots 항목(Slot)과 동일하다.
  * BE가 같은 DTO(SlotService.Response)를 REST와 WS 양쪽에 쓴다 (BE 확인: 2026-07-30).
  */
