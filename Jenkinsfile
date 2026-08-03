@@ -15,6 +15,8 @@ pipeline {
 			steps {
 				withCredentials([file(credentialsId: 'choll-app-env', variable: 'ENV_FILE')]) {
 					sh '''
+						# 시크릿 값이 빌드 로그에 찍히지 않도록 명령 출력(xtrace) 끔
+						set +x
 						# Windows에서 만든 .env 방어: CRLF 줄바꿈·BOM 제거 후 필요한 값만 추출
 						sed -e 's/\\r$//' -e '1s/^\\xef\\xbb\\xbf//' "$ENV_FILE" > env.clean
 						export DB_URL="$(grep -m1 '^DB_URL=' env.clean | cut -d= -f2-)"
