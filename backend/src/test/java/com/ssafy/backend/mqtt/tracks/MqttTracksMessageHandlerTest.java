@@ -34,7 +34,7 @@ class MqttTracksMessageHandlerTest {
 
 	private Message<String> message(String payload) {
 		return MessageBuilder.withPayload(payload)
-			.setHeader(MqttHeaders.RECEIVED_TOPIC, "choll/cart/tracks")
+			.setHeader(MqttHeaders.RECEIVED_TOPIC, "status/target")
 			.build();
 	}
 

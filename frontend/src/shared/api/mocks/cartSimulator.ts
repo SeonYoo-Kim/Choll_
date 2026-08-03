@@ -12,6 +12,7 @@ import { CartDetailStatus } from '@/shared/api/generated/model';
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
 import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
 import type {
+  CartPositionUpdatePayload,
   CartWsEvent,
   FollowStatus,
   NavigationStatus,
@@ -59,12 +60,32 @@ function broadcast(event: CartWsEvent): void {
   cartWsLink.broadcast(JSON.stringify(event));
 }
 
+/** 직전 브로드캐스트 좌표·방향 — 다음 좌표와의 차이로 진행 방향(yaw)을 만든다 */
+let lastBroadcastPercent: MapPercent | null = null;
+let lastBroadcastYaw = 0;
+
 function broadcastPosition(percent: MapPercent): void {
   const { x, y } = percentToDisplay(percent, mapInfoFixture);
-  broadcast({
-    type: 'CART_POSITION_UPDATE',
-    payload: { mapId: mapInfoFixture.id, x, y, valid: true },
-  });
+  if (lastBroadcastPercent !== null) {
+    const dx = percent.x - lastBroadcastPercent.x;
+    const dy = percent.y - lastBroadcastPercent.y;
+    // 제자리면 이전 방향을 유지한다 (atan2(0,0)=0이라 카트가 갑자기 오른쪽을 본다)
+    if (Math.hypot(dx, dy) > 0.01) {
+      // 실제 BE의 yaw는 SLAM 지도 프레임 기준이지만, 모킹에서는 진행 방향으로 대신한다
+      lastBroadcastYaw = Math.atan2(dy, dx);
+    }
+  }
+  lastBroadcastPercent = percent;
+  // 페이로드 타입을 명시해 필드 누락을 컴파일 단계에서 잡는다
+  // (broadcast의 payload가 unknown이라 예전에는 yaw가 빠진 채로 지나갔다)
+  const payload: CartPositionUpdatePayload = {
+    mapId: mapInfoFixture.id,
+    x,
+    y,
+    yaw: lastBroadcastYaw,
+    valid: true,
+  };
+  broadcast({ type: 'CART_POSITION_UPDATE', payload });
 }
 
 function broadcastZone(previousZoneId: number | null, currentZoneId: number | null): void {
@@ -138,20 +159,72 @@ function broadcastFollow(status: FollowStatus): void {
   broadcast({ type: 'FOLLOW_STATUS_UPDATED', payload: { status } });
 }
 
-/** 추종 시작(또는 재개) — 실제 BE처럼 WS FOLLOW_STATUS_UPDATED(WS-FE-07)를 브로드캐스트 */
-export function startCartFollow(): void {
-  broadcastFollow('STARTED');
+/** 추종 중 위치 발행 주기 — 실제 BE의 1Hz에 맞춘다 */
+const FOLLOW_STEP_MS = 1_000;
+/** 한 걸음에 움직이는 거리 (% 좌표) — 사서 걸음 속도 흉내 */
+const FOLLOW_STEP_PERCENT = 5;
+
+let followTimer: ReturnType<typeof setInterval> | null = null;
+let followPosition: MapPercent = START_POSITION;
+let followWaypointIndex = 0;
+
+/** 사서가 통로를 따라 구역을 하나씩 둘러보는 경로 */
+function followRoute(): MapPercent[] {
+  return ZONE_POSITIONS.flatMap((zone) => [
+    { x: zone.x, y: CORRIDOR_Y },
+    zone,
+    { x: zone.x, y: CORRIDOR_Y },
+  ]);
 }
 
-/** 추종 일시정지 — 추종 중일 때만 유효 */
+/** 다음 웨이포인트 쪽으로 한 걸음 옮기고 위치를 발행한다 */
+function walkFollowStep(): void {
+  const route = followRoute();
+  const target = route[followWaypointIndex % route.length];
+  const dx = target.x - followPosition.x;
+  const dy = target.y - followPosition.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (distance <= FOLLOW_STEP_PERCENT) {
+    followPosition = target;
+    followWaypointIndex = (followWaypointIndex + 1) % route.length;
+  } else {
+    followPosition = {
+      x: followPosition.x + (dx / distance) * FOLLOW_STEP_PERCENT,
+      y: followPosition.y + (dy / distance) * FOLLOW_STEP_PERCENT,
+    };
+  }
+  broadcastPosition(followPosition);
+}
+
+function stopFollowWalk(): void {
+  if (followTimer !== null) {
+    clearInterval(followTimer);
+    followTimer = null;
+  }
+}
+
+/**
+ * 추종 시작(또는 재개) — 실제 BE처럼 WS FOLLOW_STATUS_UPDATED(WS-FE-07)를 브로드캐스트하고,
+ * 사서를 따라가는 동안 위치(WS-FE-01)를 계속 발행해 지도가 실시간으로 움직이게 한다.
+ */
+export function startCartFollow(): void {
+  broadcastFollow('STARTED');
+  stopFollowWalk();
+  followTimer = setInterval(walkFollowStep, FOLLOW_STEP_MS);
+}
+
+/** 추종 일시정지 — 추종 중일 때만 유효. 카트가 멈추므로 위치 발행도 멈춘다 */
 export function pauseCartFollow(): void {
   if (followStatus === 'STARTED') {
     broadcastFollow('PAUSED');
+    stopFollowWalk();
   }
 }
 
 /** 추종 종료 */
 export function stopCartFollow(): void {
+  stopFollowWalk();
   if (followStatus !== 'STOPPED') {
     broadcastFollow('STOPPED');
   }

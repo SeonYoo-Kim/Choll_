@@ -15,6 +15,297 @@
 
 ---
 
+## 2026-08-03 16:05 — ✅ main 승격 리허설: 로컬 가상 머지 + Jenkins Test 단계 재현 통과 (Claude)
+
+- **목적**: develop(+슬롯 LED 브랜치)을 main에 머지·배포했을 때 파이프라인이 깨지는지 사전 확인
+- **방법**: 임시 worktree에서 `origin/main`(c9b54d6) ← `backend/feature/slot-led-command`(d7d795f,
+  develop 1fb0dba 포함) 가상 머지 → Jenkinsfile Backend Test 단계와 동일 조건으로 테스트
+  (`MQTT_ENABLED=false`, `WS_POSITION_TEST_ENABLED=false`, DB 자격증명만 주입)
+- **결과**:
+  - 가상 머지: **충돌 없음 (clean merge)**
+  - BE: `gradlew test` BUILD SUCCESSFUL — **22 suites, 66 tests, 0 failures** (contextLoads 포함)
+  - AI: `pytest ai/test/` **114 passed**
+  - FE: main 대비 `frontend/` **변경 0** — 지난 성공 배포와 동일 소스로 이미지 빌드
+  - 이미지 빌드 단계(docker build)는 로컬에 docker가 없어 미검증 — BE는 컴파일 검증됨, FE는 무변경이라 잔여 위험 낮음
+- **⚠️ 파이프라인은 통과해도, 배포 직후 카트 연동이 끊긴다 (코드가 아니라 운영 이슈)**:
+  1. **RPi 실카트가 아직 옛 토픽 발행** (`choll/cart/rfid`, `carts/status`) — 새 BE는 `status/slot`·
+     `status/cart` 구독이라 하트비트 15초 뒤 카트 OFFLINE, RFID 이벤트 유실. **RPi 반영과 동시 배포 필수.**
+  2. **Jenkins 시크릿 `choll-app-env`가 compose `env_file`로 통째 주입됨** — 그 안에
+     `MQTT_POSITION_TOPIC=carts/+/telemetry/position` 같은 옛 값이 남아 있으면 새 코드 기본값을
+     **덮어써서 토픽 개편이 서버에서 무효화**된다 (과거 MQTT_POSITION_TEST.md가 .env에 넣도록 안내했었음).
+     → main 머지 전 시크릿 파일에서 `MQTT_*_TOPIC` 라인 제거 또는 신값 갱신 필수.
+  3. Jetson도 pull + colcon 재빌드 전까지 옛 `choll/cart/tracks` 발행 → TRACKS_UPDATED·타겟 선택 단절.
+- **배포 후 확인 절차**: 405 프로브 + `mosquitto_sub -t 'status/#' -v`(EC2 브로커)로 신토픽 수신 확인
+- **[추기 16:20] 위 운영 리스크 3종 해소 확인** (사용자 확인, 2026-08-03):
+  - ① ③: RPi·Jetson 모두 실기에서 신토픽 코드로 구동 중
+  - ②: 배포용 시크릿 .env 내용 확인 — `MQTT_*_TOPIC` 핀 없음 (DB_*, MQTT_ENABLED/BROKER_URL/계정,
+    WS_POSITION_TEST_ENABLED뿐) → 코드 기본값이 그대로 적용됨. **수정 불필요, main 머지 가능 상태.**
+  - 남은 조건부 1건: EM이 SLAM 미터 좌표 발행을 시작하면 `MQTT_POSITION_UNIT=meters` 추가
+    + `library_maps` id=2에 실제 map.yaml 값 입력 (그 전까지 기본 pixels가 맞음)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `1fb0dba`(develop, MR !58 머지 후) 기준 — 브랜치 `backend/feature/slot-led-command`
+- **신규 기능**: 카트의 **구역이 바뀔 때** 그 구역에서 내려놓을 슬롯 번호를 MQTT `cmd/lit/led`로 발행.
+  페이로드 `{"slot_id":[1,3,5]}` — 그 시점에 켜져 있어야 할 슬롯 전체 (카트 1대 가정, cartId 없음).
+  **BE 범위는 발행까지** — 구독·점등 제어는 라즈베리파이(EM) 몫
+  - `SlotLedService` 신규 — 대상 조회 + 발행. MQTT 비활성이면 경고 후 무시
+  - `SlotService.findTargetSlotNumbers()` 신규 — 기존 `isTarget`(책의 서가 구역 == 카트 현재 구역) 재사용
+  - `CartPositionTelemetryService`에 **구역 전이 감지**(`zoneChanged`) 추가 — 갱신 전
+    `cart.getCurrentZone()`과 비교. 같은 구역 유지면 발행하지 않음
+  - `MqttCommandPublisher.publishLed()` 추가 — 토픽별 발행을 `publishTo(topic, payload)`로 분리
+    (기존 `publish()` 호출처 NavigationService·FollowTargetService는 무영향)
+  - 설정: `mqtt.led-topic`(기본 `cmd/lit/led`)
+- **발행 규칙** (2026-08-03 협의):
+  - 구역 진입/구역 간 이동 → 새 구역의 대상 목록 발행
+  - **구역 이탈 → 빈 목록 `[]` 발행(소등)** — 책을 남기고 나가도 LED가 켜진 채 남지 않도록
+  - 구역 밖 → 대상 없는 구역: 켤 것도 끌 것도 없어 미발행
+  - 책이 빠졌을 때(RFID REMOVED)의 소등은 라즈베리파이 몫 — BE는 재발행하지 않음
+- **결과**: 22 suites, **66 tests, 0 failures, 0 errors** (신규 7: SlotLedServiceTest 4 —
+  점등/이탈 시 빈 목록/미발행/MQTT 비활성, CartPositionTelemetryServiceTest 3 — 진입/동일 구역 유지/이탈)
+- **슬롯 번호 범위**: DB는 1~12번이지만 실물 RFID 리더는 5개만 설치(재정상). RFID 없는 슬롯은
+  책이 인식되지 않아 `isTarget`이 될 수 없으므로 `slot_id`에도 나오지 않는다 — 불일치 아님
+- **미검증**: 브로커 실연동 미실시. 라즈베리파이 구독·점등부는 EM 담당
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=66 failures=0 errors=0 suites=22
+```
+
+</details>
+
+## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
+  (SLAM 미터→픽셀 변환이 먼저 develop에 머지돼 `application.properties`·`backend/CLAUDE.md`·
+  이 로그에서 충돌 → 양쪽 다 살려 해결. `mqtt.position-unit`·`mqtt.map-id`는 그대로 두고
+  토픽 값만 교체)
+- **변경**: MQTT 토픽 전면 개편 (`ai/`·`backend/` 양쪽 동시 적용).
+  네이밍 규칙 = **상행(카트·AI→BE) `status/*`, 하행(BE→카트) `cmd/*`** (선행 슬래시 없음)
+
+  | 구 토픽 | 신 토픽 | 방향 |
+  |---------|---------|------|
+  | `carts/{cartId}/telemetry/position` | `status/position` | 카트→BE |
+  | `carts/status` | `status/cart` | 카트→BE (하트비트) |
+  | `choll/cart/rfid` | `status/slot` | 카트→BE |
+  | `choll/cart/cmd` | `cmd/move/cart` | BE→카트 (MOVE/CANCEL/SELECT_TARGET) |
+  | `choll/cart/tracks` | `status/target` | AI→BE (추종 후보 트랙) |
+
+- **구조 변경(주의)**: 새 위치 토픽에 cartId가 없어, `MqttPositionMessageHandler`가
+  토픽 정규식(`^carts/(\d+)/telemetry/position$`)에서 cartId를 뽑던 방식을 폐기하고
+  하트비트·RFID·tracks와 동일하게 `mqtt.cart-id`(기본 1)로 귀속하도록 변경.
+  토픽 검증은 주입된 `mqtt.position-topic`과 정확 비교. **이제 수신 4종 모두 cartId가
+  토픽에 없으므로 다중 카트 도입 시 EM과 재협의 필요.**
+- **결과**: 21 suites, **59 tests, 0 failures, 0 errors**
+  (내 변경으로 늘어난 테스트는 없음 — 토픽 상수만 갱신. 59는 develop의 SLAM 변환 테스트 4개 포함)
+- **적용 범위**: `ai/`·`backend/`와 공용 E2E 도구(`tests/tools/fake_jetson.py`의 트랙 발행).
+  FE(`frontend/`)·`docs/`에는 MQTT 토픽 문자열이 없어 변경 없음.
+  **EM 파트(`embedded/`)는 이 MR에서 제외** — 실카트 코드는 EM 담당자가 별도 반영 예정.
+  TEST_LOG의 과거 기록은 실행 증거라 옛 토픽명 그대로 보존.
+- **미검증 / ⚠️ 배포 시 주의**: 브로커 실연동 E2E는 돌리지 않음 (단위 테스트만).
+  - **EM 반영 전까지 실카트↔BE 통신 단절** — `embedded/rfid/rfid_mqtt.py`가 아직 옛 토픽
+    (`choll/cart/rfid`, `carts/status`)으로 발행하므로, BE만 먼저 배포하면 슬롯·하트비트를 못 받는다.
+    **BE 배포와 EM 반영은 함께 나가야 한다.**
+  - EC2 브로커에 남은 옛 `carts/status` retained LWT도 새 `status/cart`로 자동 이관되지 않음.
+- **AI 파트 기록**: [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md) 2026-08-03 항목
+
+<details>
+<summary>gradle test 출력 (마지막 부분) + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL in 19s
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=59 failures=0 errors=0 suites=21
+```
+
+</details>
+
+## 2026-08-03 — ✅ EM+ROS2 실기: STM32 STATUS → Serial Bridge → ROS2 수신 확인 + 좌우 매핑 실측 확정 (relu, 실기)
+
+- **대상 커밋**: `d6bbe29` "[feat] STM STATUS 수신 및 ROS2 상태 토픽 발행" (`em/feature/motor-control`)
+- **대상 코드**: `ros2_ws/src/stm_serial_bridge` (STM32 펌웨어는 변경 없음, UART Protocol v1 그대로)
+- **환경**: Ubuntu + ROS2 Humble, 실제 STM32 USB Serial 연결, `serial_port=/dev/ttyACM0`, `baud_rate=115200`
+- **⚠️ 바퀴를 공중에 띄운 상태에서 진행 — 바닥 주행 아님**
+- **`/cmd_vel` 발행 수단**: `ros2 topic pub` (`teleop_twist_keyboard` 미사용 — 키보드 teleop은 여전히 미완료 항목)
+- **Bridge 파라미터**: `dry_run=false`, `rx_poll_hz=50.0`, `status_timeout_sec=0.5`,
+  `max_wheel_rad_s=2.0`, `tx_rate_hz=20.0`, `cmd_vel_timeout_sec=0.5`,
+  `wheel_radius_m=0.065`, `wheel_separation_m=0.30`
+- **실행자**: relu (사람이 직접 실기 수행). 이 항목은 사용자 보고를 받아 Claude가 대신 기록함.
+
+### 결과: 수신 경로(STM32 → Bridge → ROS2) 실기 연동 완료
+
+| # | 확인 항목 | 결과 |
+|---|---|---|
+| 1 | STM STATUS 패킷이 USB Serial로 Bridge에 수신 | ✅ |
+| 2 | Bridge 로그의 `STATUS #N` 번호가 계속 증가 | ✅ |
+| 3 | `STM → SerialLink → LineDecoder → parse_packet() → Publisher` 전 구간 동작 | ✅ |
+| 4 | `/stm/connected` = `true` | ✅ |
+| 5 | connected가 **포트 open이 아니라 유효 STATUS 수신** 기준임을 확인 | ✅ |
+| 6 | `/stm/fault` 초기값 = `NONE` | ✅ |
+| 7 | STATUS 주기 (`ros2 topic hz /stm/wheel_actual_rad_s`) | ✅ **약 9.995~9.999 Hz** |
+| 8 | 펌웨어 STATUS 10Hz 설정과 일치 | ✅ |
+| 9 | `in_waiting` 기반 `read_available()`이 실제 `/dev/ttyACM0`에서 동작 | ✅ |
+| 10 | `/stm/encoder_total`로 양쪽 누적값 수신 | ✅ |
+| 11 | `/stm/wheel_actual_rad_s`로 양쪽 실제 속도 수신 | ✅ |
+| 12 | `ros2 topic pub --once` 후 약 0.5초에 watchdog 자동 정지(`0.000,0.000`) | ✅ |
+| 13 | 송신 경로(ROS2 → STM) 재확인 | ✅ |
+
+7번은 PTY에서만 확인됐던 `in_waiting` 폴링이 실제 USB CDC 드라이버에서도 정상 동작함을
+보여준다 — 이전 기록에서 "실기에서 확인 필요"로 남겨둔 위험이 해소됐다.
+
+### ★ 좌우 매핑 실측 확정
+
+그동안 "코드 주석 기준이며 실측 미확정"으로 남아 있던 항목이 이번에 확정됐다.
+
+```
+물리 왼쪽  바퀴 ↔ STM 논리 Left  ↔ /stm/encoder_total[0] ↔ /stm/wheel_actual_rad_s[0]
+물리 오른쪽 바퀴 ↔ STM 논리 Right ↔ /stm/encoder_total[1] ↔ /stm/wheel_actual_rad_s[1]
+```
+
+| 조작 | 관측 |
+|---|---|
+| 물리 왼쪽 바퀴를 돌림 | `encoder_total[0]`만 변화 |
+| 물리 오른쪽 바퀴를 돌림 | `encoder_total[1]`만 변화 |
+| `SET_WHEEL_VEL,2.000,0.000` (`linear.x=0.065, angular.z=-0.433333`) | 물리 왼쪽만 회전, `encoder_total[0]`만 변화 |
+| `SET_WHEEL_VEL,0.000,2.000` (`linear.x=0.065, angular.z=+0.433333`) | 물리 오른쪽만 회전, `encoder_total[1]`만 변화 |
+| 왼쪽만 전진 | `wheel_actual_rad_s` = `[양수, 0 근처]` |
+| 오른쪽만 전진 | `[0 근처, 양수]` |
+| 왼쪽만 후진 | `[음수, 0 근처]` |
+| 오른쪽만 후진 | `[0 근처, 음수]` |
+
+→ **PWM 출력 채널과 엔코더 입력 채널의 좌우 짝이 정상**이다. 이전에 우려했던
+"엔코더만 교차되어 Left PI가 오른쪽 실측값을 오차 입력으로 쓰는" 상태가 **아님**을 확인했다.
+전진 양수 / 후진 음수 부호도 좌우 모두 정상.
+
+### 실기 중 발견하고 해결한 사항 (하드웨어)
+
+- SSAFY로 장비를 이동하는 과정에서 일부 배선이 빠져 있었다.
+- 초기에는 왼쪽 모터 또는 왼쪽 엔코더가 동작하지 않는 현상이 나타났다.
+- 배선을 재확인·재연결한 뒤 재시험하여 양쪽 모터 구동, 양쪽 엔코더 값, 좌우 매핑 모두 정상 확인.
+- **코드 결함이 아니라 이동 과정의 하드웨어 배선 문제였다.**
+
+### 아직 검증하지 않은 것
+
+1. STATUS 중단 후 `/stm/connected=false` 전환 및 재연결 복귀
+2. USB 강제 분리 시 RX fatal error 처리(종료 코드 1, TX/RX 타이머 취소)
+3. 실제 Stall 발생과 `/stm/fault` 전이(`STALL_LEFT`/`STALL_RIGHT`/`STALL_BOTH`)
+4. `FAULT_CLEARED,STALL` 수신
+5. `RESET_STALL` 송신 (브리지 미구현)
+6. 엔코더 1회전당 정확한 카운트 수 및 `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`(현재 4.0f) 검증
+7. 실제 바닥 주행
+8. `wheel_separation_m=0.30` 실측 확정 (여전히 플레이스홀더)
+9. STATUS 수신이 끊겼을 때 주행 명령을 강제로 0으로 만드는 추가 안전 정책
+
+### ⚠️ 이 기록의 한계
+
+이 저장소 규칙은 원본 출력을 `<details>`로 남겨 검증 가능하게 하는 것인데, 이번 실기도
+**콘솔 원본 출력이 확보되지 않았다.** 위 수치 중 근거가 있는 것은 사용자가 보고한
+STATUS 주기(약 9.995~9.999Hz)뿐이며, 아래는 **관측되지 않았으므로 기록하지 않는다**:
+
+- 각 토픽의 구체적 target/actual/pwm/encoder 수치
+- watchdog 정지까지의 정확한 경과 시간(로그 타임스탬프 차)
+- 손 회전 시 엔코더 카운트 절댓값(→ quadrature 배율 검증에 필요했던 값)
+- 실행 호스트(Jetson / 개발 PC)
+
+다음 실기에서는 노드 콘솔 출력(`STATUS #N ...`, `TX tx#N ...`, `watchdog state: ...`)을
+`tee`로 파일에 남겨 함께 첨부할 것.
+
+### 참고: 같은 커밋의 자동화 테스트 결과 (2026-08-03, Claude, PTY/단위 테스트)
+
+실기와 별개로 하드웨어 없이 돌린 결과다.
+
+- `colcon build --symlink-install` — 경고·에러 0
+- `python3 -m pytest src/stm_serial_bridge/test/ -q` — **298 passed**
+  (차동구동 9 + 프로토콜 10 + SerialLink 53 + watchdog 26 + limiter 28 + 패킷파서 96 +
+  라인디코더 34 + RX 노드 42)
+- PTY 통합: `master → read_available() → feed() → parse_packet() → Publisher` 경로 확인
+- `connected` 경계값(정확히 `status_timeout_sec`)에서 false 전환, 비STATUS 패킷은
+  timeout을 갱신하지 않음, `STALL_RESET,OK` 단독으로 fault가 NONE이 되지 않음 등 확인
+
+## 2026-08-03 — ✅ BE 59 tests, SLAM 미터→이미지 픽셀 변환 추가 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(EC2 Docker)
+- **결과**: BUILD SUCCESSFUL, 59 tests, 0 failures (신규 4: SlamCoordinateConverterTest 3, 텔레메트리 meters 모드 1)
+- **변경**: EM 협의(위치는 SLAM 미터로 발행, BE가 변환)에 따라 `SlamCoordinateConverter` 신설.
+  `픽셀x=(x-originX)/resolution`, `픽셀y=height-(y-originY)/resolution` (ROS 규약 세로축 뒤집기).
+  `mqtt.position-unit`(기본 pixels)·`mqtt.map-id`(기본 2)로 제어 — EM 발행 시작 시 meters 전환
+- **활성화 전제**: `library_maps` id=2 행에 EM의 실제 map.yaml 값(resolution·origin)과
+  FE가 쓰는 지도 이미지 크기가 정확히 들어가야 함
+
+## 2026-08-02 — ✅ EM+ROS2 실기: `/cmd_vel` → Serial Bridge → STM32 → 모터 구동 확인 (relu, 실기)
+
+- **대상 커밋**: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가." (`em/feature/motor-control`)
+- **대상 코드**: `ros2_ws/src/stm_serial_bridge` (STM32 펌웨어는 변경 없음, UART Protocol v1 그대로)
+- **하드웨어**: STM32 NUCLEO-F446RE + BTS7960 + DC 모터 2개(엔코더), USB Serial(USART2/ST-LINK VCP, 115200 8N1)
+- **실행자**: relu (사람이 직접 실기 수행). 이 항목은 사용자 보고를 받아 Claude가 대신 기록함.
+- **`/cmd_vel` 발행 수단**: `ros2 topic pub` (`teleop_twist_keyboard`는 사용하지 않음 — 키보드
+  teleop 실기는 여전히 미완료 항목)
+
+### 결과: 송신 경로(ROS2 → Bridge → STM32 → Motor) 실기 연동 완료
+
+| # | 확인 항목 | 결과 |
+|---|---|---|
+| 1 | ROS2 `/cmd_vel` 토픽 발행 | ✅ |
+| 2 | `stm_serial_bridge` 노드의 `/cmd_vel` 수신 | ✅ |
+| 3 | 차동구동 계산 → 좌우 바퀴 각속도 변환 | ✅ |
+| 4 | `SET_WHEEL_VEL,<left_rad_s>,<right_rad_s>` USB Serial 전달 | ✅ |
+| 5 | STM32가 명령 수신해 양쪽 모터 실제 구동 | ✅ |
+| 6 | 전진 / 후진 | ✅ |
+| 7 | 좌회전 / 우회전 | ✅ |
+| 8 | `/cmd_vel` 중단 시 watchdog 자동 정지 (약 0.5초) | ✅ |
+| 9 | ROS2 → Bridge → STM32 → Motor 전체 송신 경로 | ✅ |
+
+8번은 Bridge의 `command_watchdog`이 `timed_out`으로 전환해 `SET_WHEEL_VEL,0.000,0.000`을
+계속 내보내는 동작이다. STM32 자체의 Communication Timeout(`MOTION_CONTROLLER_COMM_TIMEOUT_MS`)과는
+별개의 상위 안전장치이며, 이번 실기에서는 상위(Bridge) 쪽이 먼저 동작한 것으로 확인됐다.
+
+### 아직 검증되지 않은 것 (STM → ROS2 수신 경로 전체)
+
+1. STM32가 보내는 `STATUS` 패킷을 Bridge가 수신 — **미구현** (`serial_link.py`에 `read()` 없음)
+2. `STATUS` 문자열 파싱 — 미구현
+3. actual wheel velocity / PWM / encoder total의 ROS2 토픽 발행 — 미구현
+4. 잘못된 패킷·수신 끊김 처리 — 미구현
+5. STATUS 수신 경로 실기 테스트 — 미수행
+
+### ⚠️ 이 기록의 한계 (검증 가능성 관련)
+
+이 저장소의 기록 규칙은 "원본 출력을 `<details>`로 남겨 사람이 검증 가능하게" 하는 것인데,
+이번 실기는 **콘솔 원본 출력이 확보되지 않았다.** 아래 항목도 미기록이다:
+
+- 실행 호스트 (Jetson Orin Nano / 개발 PC 중 어디였는지)
+- 실제 `serial_port` 값, `max_wheel_rad_s` 사용값, `tx_rate_hz`·`cmd_vel_timeout_sec` 값
+- 바퀴 공중 상태였는지 지면 주행이었는지
+- 좌우 회전 방향이 명령과 일치했는지에 대한 정량 근거
+  (엔코더 좌우 매핑 `TIM2`=Left / `TIM8`=Right는 여전히 코드 주석 기준이며 실측 미확정)
+
+따라서 이 항목은 **"동작을 확인했다"는 사람의 관찰 기록**이며, 재현 가능한 로그 근거는 없다.
+다음 실기에서는 노드 콘솔 출력(`TX tx#N state=... command='...'`)과 사용 파라미터를 함께 남길 것.
+
+### 참고: 같은 커밋의 자동화 테스트 결과 (2026-08-02, Claude, PTY/단위 테스트)
+
+실기와 별개로 하드웨어 없이 돌린 결과다.
+
+- `colcon build --symlink-install` — 경고·에러 0
+- `python3 -m pytest src/stm_serial_bridge/test/ -q` — **112 passed**
+  (차동구동 9 + 프로토콜 10 + SerialLink 39 + watchdog 26 + limiter 28)
+- PTY(`pty.openpty()`) 통합: 54~57 프레임 전부 ASCII·CRLF 종단, 깨진/빈 프레임 0, 평균 20.00 Hz,
+  `waiting(0,0)` → `active` → `timed_out(0,0)` 전이 확인
+- `max_wheel_rad_s=2.0`에서 원본 `1.923/4.231` → `0.909/2.000` 비례 축소, 제한 전 프레임 PTY 송신 0건
+- write 실패(PTY master close → `[Errno 5]`) 시 `Serial TX failed` 1회 + 0.22초 내 자동 종료, 종료 코드 1
+
 ## 2026-08-02 13:45 — ✅ BE 55 tests + FE 타겟 선택 릴레이 3종 E2E 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081, **MQTT_BROKER_URL=tcp://localhost:1883 강제**)
@@ -61,6 +352,7 @@ choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}
 ```
 
 </details>
+
 
 ## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
 

@@ -13,6 +13,40 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-03 14:11 — ✅ MQTT 토픽 개편 후 114 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/ -q` + `ruff check fe_bridge_logic.py fe_bridge_node.py follow_robot_launch.py test_fe_bridge_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12 (miniforge base), ruff 0.16.0
+- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
+- **변경**: MQTT 토픽 개편에 따른 fe_bridge 파라미터 기본값 교체
+  - `tracks_topic`: `choll/cart/tracks` → `status/target` (launch + `declare_parameter` 양쪽)
+  - `command_topic`: `choll/cart/cmd` → `cmd/move/cart` (launch + `declare_parameter` 양쪽)
+  - 나머지는 docstring·주석의 토픽명 갱신. **로직 변경 없음 → 테스트 개수 변화 없음(114).**
+- **미검증**: Jetson 실기 스모크(새 토픽으로 BE와 실제 송수신)는 미실시.
+  BE 단위 테스트 결과는 [tests/TEST_LOG.md](../../tests/TEST_LOG.md) 2026-08-03 항목 참조.
+- **참고**: 저장소 전체 `ruff check .`는 **219건으로 변화 없음** — 이번 변경과 무관한 기존 지적
+  (docstring 누락 등). AI 변경 파일만 검사하면 0건. 함께 손댄 `tests/tools/fake_jetson.py`는
+  토픽 문자열만 바뀌어 기존 1건(D103)이 그대로 유지된다.
+
+<details>
+<summary>pytest / ruff 원본 출력</summary>
+
+```
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.14s
+```
+
+```
+warning: The following rules have been removed and ignoring them has no effect:
+    - ANN101
+    - ANN102
+
+All checks passed!
+```
+
+</details>
+
 ## 2026-08-02 13:47 — ✅ 114 passed (+11 신규), ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest ai/test/` + `ruff check fe_bridge_logic.py fe_bridge_node.py launch setup.py test_fe_bridge_logic.py`

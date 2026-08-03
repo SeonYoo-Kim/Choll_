@@ -53,7 +53,7 @@ class TestParseSelectCommand:
         assert parse_select_command(payload) == 16
 
     def test_other_commands_ignored(self):
-        # choll/cart/cmd에는 MOVE/CANCEL도 흐른다 — 브릿지는 SELECT_TARGET만 처리
+        # cmd/move/cart에는 MOVE/CANCEL도 흐른다 — 브릿지는 SELECT_TARGET만 처리
         payload = '{"requestId":1,"command":"MOVE","zoneId":8,"x":775.0,"y":505.0}'
         assert parse_select_command(payload) is None
 

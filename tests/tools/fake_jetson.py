@@ -66,7 +66,7 @@ def main() -> None:
                         {"id": 23, "x": 30, "y": 200, "w": 70, "h": 150},
                     ],
                 }
-                mq.publish("choll/cart/tracks", json.dumps(payload))
+                mq.publish("status/target", json.dumps(payload))
             time.sleep(1.0 / FPS)
     finally:
         cap.release()

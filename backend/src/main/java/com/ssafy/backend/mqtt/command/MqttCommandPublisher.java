@@ -13,7 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * BE→EM 명령 MQTT 발행기.
- * ⚠️ 토픽(choll/cart/cmd)·페이로드는 EM 미확정 임시 계약 — 확정 시 동시 갱신할 것.
+ * ⚠️ 토픽(cmd/move/cart)·페이로드는 EM 미확정 임시 계약 — 확정 시 동시 갱신할 것.
  * mqtt.enabled=false면 빈이 생성되지 않으며, 호출측은 ObjectProvider로 부재를 허용한다.
  */
 @Component
@@ -36,16 +36,22 @@ public class MqttCommandPublisher {
 		this.properties = properties;
 	}
 
+	/** 이동·추종 명령을 카트 명령 토픽으로 발행한다. */
 	public void publish(Object payload) {
+		publishTo(properties.getCommandTopic(), payload);
+	}
+
+	/** 슬롯 LED 점등 요청을 라즈베리파이 LED 토픽으로 발행한다. */
+	public void publishLed(Object payload) {
+		publishTo(properties.getLedTopic(), payload);
+	}
+
+	private void publishTo(String topic, Object payload) {
 		String json = objectMapper.writeValueAsString(payload);
 		mqttOutboundChannel.send(MessageBuilder
 			.withPayload(json)
-			.setHeader(MqttHeaders.TOPIC, properties.getCommandTopic())
+			.setHeader(MqttHeaders.TOPIC, topic)
 			.build());
-		log.info(
-			"[MQTT PUBLISH] topic={}, payload={}",
-			properties.getCommandTopic(),
-			json
-		);
+		log.info("[MQTT PUBLISH] topic={}, payload={}", topic, json);
 	}
 }

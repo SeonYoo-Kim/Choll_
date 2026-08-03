@@ -92,5 +92,9 @@
     flex: 1;
     min-height: 0;
     grid-auto-rows: 1fr;
+    // 화면 위쪽 여백(AppLayout .content의 padding-top 44px)과 아래를 맞춘다.
+    // .content의 padding-bottom이 20px이라 나머지 24px을 여기서 채우면,
+    // 두 줄이 그만큼 낮아지면서 보드 위아래 여백이 같아진다
+    margin-bottom: 24px;
   }
 }
