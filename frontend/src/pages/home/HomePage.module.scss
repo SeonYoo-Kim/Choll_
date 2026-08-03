@@ -1,7 +1,7 @@
 @use '@/shared/styles/variables' as *;
 
 .pageHeader {
-  margin-bottom: 28px;
+  margin-bottom: 20px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -93,7 +93,9 @@
 .column {
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  // 히어로와 아래 카드 줄 사이 간격 — 카드끼리의 간격(20px)보다 조금 넓게 둬서
+  // 두 영역이 구분돼 보이게 한다
+  gap: 30px;
 }
 
 .hero {
@@ -106,7 +108,9 @@
   box-shadow: 0 10px 0 $primary-dark;
 
   @media (min-width: $bp-md) {
-    padding: 50px 32px 40px;
+    // 위아래 패딩에서 24px씩 덜어 .heroDesc 위 간격으로 넘긴다 —
+    // 라벨·제목은 위로, 설명·버튼은 아래로 벌어지고 카드 총 높이(278px)는 그대로다
+    padding: 32px 32px 32px;
   }
 }
 
@@ -159,7 +163,7 @@
 }
 
 .heroDesc {
-  margin: 42px 0 0; // 제목과의 간격 확대 (카드 총 높이는 hero 아래 패딩 축소로 상쇄)
+  margin: 18px 0 0;
   max-width: 384px;
   font-size: 14px;
   line-height: 1.7;
@@ -167,6 +171,13 @@
 
   strong {
     color: $accent;
+  }
+
+  // 제목 묶음과 설명·버튼 묶음을 갈라 놓는 간격.
+  // 카드 높이가 커지지 않도록 .hero의 세로 패딩을 같은 양만큼 줄여 상쇄했다.
+  // 모바일은 카드가 세로로 길어지므로 좁은 간격(18px)을 그대로 쓴다
+  @media (min-width: $bp-md) {
+    margin-top: 66px;
   }
 }
 

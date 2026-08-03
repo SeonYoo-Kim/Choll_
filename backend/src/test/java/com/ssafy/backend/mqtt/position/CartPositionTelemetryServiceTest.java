@@ -2,11 +2,13 @@ package com.ssafy.backend.mqtt.position;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.ssafy.backend.cart.domain.Cart;
 import com.ssafy.backend.cart.repository.CartRepository;
+import com.ssafy.backend.led.service.SlotLedService;
 import com.ssafy.backend.map.domain.LibraryMap;
 import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
@@ -44,6 +46,9 @@ class CartPositionTelemetryServiceTest {
 	private LibraryMapRepository mapRepository;
 
 	@Mock
+	private SlotLedService slotLedService;
+
+	@Mock
 	private Cart cart;
 
 	@Mock
@@ -64,6 +69,7 @@ class CartPositionTelemetryServiceTest {
 			connectionService,
 			mapRepository,
 			new SlamCoordinateConverter(),
+			slotLedService,
 			unit,
 			2L
 		);
@@ -152,6 +158,73 @@ class CartPositionTelemetryServiceTest {
 			.contains("mapId=2")
 			.contains("x=200")
 			.contains("y=400");
+	}
+
+	@Test
+	void requestsSlotLightingWhenEnteringANewZone() {
+		PositionSample sample = new PositionSample(
+			1L,
+			new BigDecimal("10"),
+			new BigDecimal("20"),
+			Instant.parse("2026-08-03T05:00:00Z")
+		);
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneLocator.locate(sample.x(), sample.y())).thenReturn(Optional.of(zone));
+		when(zone.getId()).thenReturn(5L);
+		when(zoneTracker.observe(1L, 5L))
+			.thenReturn(new StableZoneTracker.Decision(true));
+		when(cart.getCurrentZone()).thenReturn(null);
+		when(zone.getMap()).thenReturn(map);
+		when(map.getId()).thenReturn(2L);
+
+		service.accept(sample);
+
+		verify(slotLedService).syncZoneLighting(1L, false);
+	}
+
+	@Test
+	void doesNotRequestSlotLightingWhileStayingInTheSameZone() {
+		PositionSample sample = new PositionSample(
+			1L,
+			new BigDecimal("11"),
+			new BigDecimal("21"),
+			Instant.parse("2026-08-03T05:00:01Z")
+		);
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneLocator.locate(sample.x(), sample.y())).thenReturn(Optional.of(zone));
+		when(zone.getId()).thenReturn(5L);
+		when(zoneTracker.observe(1L, 5L))
+			.thenReturn(new StableZoneTracker.Decision(true));
+		when(cart.getCurrentZone()).thenReturn(zone);
+		when(zone.getMap()).thenReturn(map);
+		when(map.getId()).thenReturn(2L);
+
+		service.accept(sample);
+
+		verify(slotLedService, never()).syncZoneLighting(
+			org.mockito.ArgumentMatchers.any(),
+			org.mockito.ArgumentMatchers.anyBoolean()
+		);
+	}
+
+	@Test
+	void syncsLightingWithPreviousZoneFlagWhenLeavingAZone() {
+		PositionSample sample = new PositionSample(
+			1L,
+			new BigDecimal("999"),
+			new BigDecimal("999"),
+			Instant.parse("2026-08-03T05:00:02Z")
+		);
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneLocator.locate(sample.x(), sample.y())).thenReturn(Optional.empty());
+		when(zoneTracker.observe(1L, null))
+			.thenReturn(new StableZoneTracker.Decision(true));
+		when(cart.getCurrentZone()).thenReturn(zone);
+
+		service.accept(sample);
+
+		// 직전에 구역 안이었으므로 leftLitZone=true — 서비스가 빈 목록으로 소등시킨다
+		verify(slotLedService).syncZoneLighting(1L, true);
 	}
 
 	@Test
