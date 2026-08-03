@@ -1,0 +1,57 @@
+# =============================================================
+# YDLIDAR X4 Pro 파라미터 — ydlidar_ros2_driver 용
+# 파라미터 키 이름은 공식 repo(params/ydlidar.yaml, humble 브랜치)에서 검증함.
+# 값의 근거는 X4PRO Datasheet / User Manual / Development Manual:
+#   - Baud 128000 bps, 8N1                     (Datasheet Chart 4)
+#   - 측정범위 0.12 ~ 10 m (실내 80% 반사율)     (Datasheet Chart 1)
+#   - 스캔주파수 6~12 Hz, 샘플링 5 kHz           (Datasheet Chart 1)
+#   - 통신은 Tx 단방향(장비→호스트)              (User Manual 2.4)
+#     → 싱글채널 라이다: isSingleChannel: true
+#   - 삼각측량(Triangle) 방식                    (Datasheet 1 Overview)
+#   - 모터 드라이브/despin 내장, 전원 인가 시 자동 회전 (Dev Manual 1)
+# =============================================================
+ydlidar_ros2_driver_node:
+  ros__parameters:
+    # ---- 연결 ----
+    # TODO(확인 필요): Jetson에서 `ls -l /dev/ttyUSB*`로 실제 포트 확인.
+    # 드라이버 repo의 startup/initenv.sh 적용 시 고정 별칭 /dev/ydlidar 사용 가능.
+    port: /dev/ttyUSB0
+    frame_id: laser_frame
+    baudrate: 128000          # X4Pro 고정값. 다른 값이면 데이터 파싱 불가
+    lidar_type: 1             # 1 = TYPE_TRIANGLE (삼각측량)
+    device_type: 0            # 0 = 시리얼(UART/USB어댑터) 연결
+    auto_reconnect: true
+
+    # ---- X4Pro 채널/모터 특성 ----
+    isSingleChannel: true     # Tx 단방향 → 싱글채널 (User Manual 2.4)
+    support_motor_dtr: false  # 모터드라이브 내장이라 기본 false.
+                              # 만약 모터가 회전하지 않으면 true로 바꿔 재시도 (어댑터보드 DTR despin 제어)
+    intensity: false
+    intensity_bit: 0
+
+    # ---- 샘플링/해상도 ----
+    sample_rate: 5            # 5 kHz (Datasheet: Ranging frequency 5000 Hz)
+    fixed_resolution: true
+    frequency: 10.0           # 참고: 싱글채널이라 시리얼로 회전속도 제어 불가.
+                              # 실제 회전수는 라이다 자체(M_CTR)로 결정됨 (6~12Hz)
+    abnormal_check_count: 4
+
+    # ---- 좌표/방향 ----
+    # 지도가 좌우 반전이면 inverted, 전/후가 뒤집혀 보이면 reversion을 토글해서 실측 확인
+    reversion: false
+    inverted: false
+
+    # ---- 범위 (Datasheet Chart 1) ----
+    angle_max: 180.0
+    angle_min: -180.0
+    range_max: 10.0
+    range_min: 0.12
+
+    # ---- 시야 마스킹 ----
+    # 프레임 기둥(2020 프로파일)이 라이다 시야에 걸리면 해당 각도 구간을 제외.
+    # 형식: "시작각1,끝각1,시작각2,끝각2" (도 단위). 예: "40,60,-60,-40"
+    # TODO(골조 완성 후): 실물 장착 후 기둥 각도를 재서 채우기
+    ignore_array: ""
+
+    invalid_range_is_inf: false
+    debug: false

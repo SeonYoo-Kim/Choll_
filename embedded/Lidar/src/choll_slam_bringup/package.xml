@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>choll_slam_bringup</name>
+  <version>0.1.0</version>
+  <description>
+    쫄래쫄래(C101) 북카트: YDLIDAR X4Pro + rf2o 레이저 오도메트리(임시) + slam_toolbox 매핑 브링업.
+    STM32 휠 오도메트리가 준비되면 rf2o를 교체/융합하는 전제의 구성.
+  </description>
+  <maintainer email="c101@ssafy.local">C101 Embedded</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 실행 시 필요한 패키지들 (소스 클론 or apt) -->
+  <exec_depend>ydlidar_ros2_driver</exec_depend>
+  <exec_depend>rf2o_laser_odometry</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

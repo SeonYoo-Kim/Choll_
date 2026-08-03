@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>choll_nav2</name>
+  <version>0.1.0</version>
+  <description>
+    쫄래쫄래 카트 Nav2 브링업: TB3(turtlebot3_navigation2) 파라미터를
+    카트(차동구동, 폭 ~0.64m, X4 Pro + rf2o)용으로 각색한 설정/런치
+  </description>
+  <maintainer email="c101@ssafy.local">c101</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
