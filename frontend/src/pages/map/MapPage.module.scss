@@ -1,5 +1,10 @@
 @use '@/shared/styles/variables' as *;
 
+// 오른쪽 상태 카드 3개(현재 위치·이동 안내·이동 중지)의 공통 높이.
+// 세 칸이 내용 길이에 따라 들쭉날쭉해지지 않게 한 값으로 묶는다.
+// 128px = 패딩 32 + 테두리 2 + 라벨 17 + 라벨-값 간격 14 + 값 2줄(21px x 2줄 = 60) + 여유 3
+$stat-row-height: 128px;
+
 .pageHeader {
   margin-bottom: 28px;
   display: flex;
@@ -83,10 +88,14 @@
   // 데스크톱: 지도 왼쪽 + 상태 카드 오른쪽 세로 스택
   @media (min-width: $bp-lg) {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 240px;
+    // 232px — 카드에 들어가는 가장 긴 값("3구역 사회과학·자연과학" 189px)에
+    // 패딩 32px과 구역명 앞 여백(0.6em)을 더한 최소치. 남는 폭은 전부 지도가 받는다
+    grid-template-columns: minmax(0, 1fr) 232px;
     gap: $spacing-lg;
     align-items: start;
-    max-width: 1044px; // 지도 780px + 간격 24px + 카드 240px
+    // 폭 상한을 두면 가운데 정렬되어 상단 페이지 헤더와 좌우 시작·끝이 어긋난다.
+    // 콘텐츠 폭을 그대로 써서 헤더와 정렬을 맞춘다
+    max-width: none;
   }
 }
 
@@ -107,6 +116,12 @@
 }
 
 .statCard {
+  // 라벨은 위, 값은 아래 — 값이 1줄("도착 완료")이든 2줄("3구역 / 사회과학·자연과학")이든
+  // 바닥에 붙어서 두 카드의 값이 같은 높이에서 끝난다
+  display: flex;
+  min-height: $stat-row-height;
+  flex-direction: column;
+  justify-content: space-between;
   border: 1px solid $border-soft;
   border-radius: $radius-tile;
   background: #fff;
@@ -119,9 +134,15 @@
   }
 
   strong {
-    margin-top: 4px;
+    // 라벨과의 간격 — 카드 높이가 90px로 늘어난 만큼 값을 아래로 내려 균형을 맞춘다
+    margin-top: 14px;
     display: block;
-    font-size: 18px;
+    // 라벨은 왼쪽 위, 값은 오른쪽 아래 — 값을 강조하는 통계 카드 배치.
+    // keep-all: 한글이 음절 단위로 아무 데서나 끊기는 것을 막는다.
+    // 덕분에 줄바꿈은 .zoneName(inline-block) 앞에서만 일어난다
+    text-align: right;
+    font-size: 21px;
+    word-break: keep-all;
   }
 }
 
@@ -135,7 +156,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 82px; // 위 statCard(패딩 16 + 라벨 + 값)의 렌더링 높이와 맞춤
+  min-height: $stat-row-height;
   border-radius: $radius-tile;
   background: $danger-bg;
   padding: $spacing-md;
@@ -149,7 +170,10 @@
   }
 }
 
-// 구역 라벨과 구역 이름 사이 간격 — 이름 안의 '·'(철학·종교)와 헷갈리지 않게 넓게 띄운다
+// 구역 라벨("3구역")과 구역 이름 사이 간격 — 이름 안의 '·'(철학·종교)와 헷갈리지 않게 띄운다.
+// inline-block이라 줄바꿈 지점이 이름 앞에만 생긴다 — 폭이 부족할 때만 이름 전체가
+// 다음 줄로 내려가고(사회과학·자연과학), 짧은 이름은 라벨과 한 줄에 남는다
 .zoneName {
+  display: inline-block;
   margin-left: 0.6em;
 }

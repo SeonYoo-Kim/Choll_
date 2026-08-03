@@ -55,7 +55,7 @@ RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [최근접(최대 bbox) 자�
 # Jetson 실기: cd ~/Choll/ai
 cd ai && colcon build --symlink-install && source install/setup.bash
 
-# 실행 (SSH 접속 + 터미널 3개. 상세 단계는 README Quick Start 참조)
+# 실행 (SSH 접속 + 터미널 3개. 상세 단계는 ai/README.md Quick Start 참조)
 # 반드시 저장소 루트에서 실행 (모델을 models/*.engine 상대경로로 찾음)
 ros2 launch person_follow_robot follow_robot_launch.py
 

@@ -1,3 +1,4 @@
+import { ShoppingCart } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
@@ -10,6 +11,16 @@ import { DEMO_CART_ID } from '@/shared/config/cart';
 
 import styles from './HomePage.module.scss';
 
+/**
+ * 상단 배지의 문구·톤. 추종이 이동보다 우선한다 —
+ * 사서를 따라가는 중이면 좌표가 움직이는지와 무관하게 추종으로 표시한다.
+ */
+const CART_BADGE = {
+  following: { label: '카트가 따라오는 중', tone: styles.on },
+  moving: { label: '카트가 이동 중이에요', tone: styles.moving },
+  idle: { label: '카트가 잠시 멈췄어요', tone: styles.off },
+} as const;
+
 /** 홈 — 카트 현재 위치, 정리 현황, 제어를 한눈에 보는 대시보드. */
 export function HomePage() {
   const navigate = useNavigate();
@@ -20,6 +31,7 @@ export function HomePage() {
   const following = runState === 'FOLLOWING';
   // 이동 명령 세션(isMoving) 또는 위치 변화로 감지한 움직임(cartStatus)
   const cartActive = isMoving || cartStatus === 'MOVING';
+  const badge = CART_BADGE[following ? 'following' : cartActive ? 'moving' : 'idle'];
   // 이동 중(구역 밖)이면 null — 구역 표시 대신 이동 중 문구를 쓴다
   const currentArea = cartZone === null ? null : zoneLabel(cartZone);
   const areaBookCount =
@@ -34,16 +46,16 @@ export function HomePage() {
           <p className={styles.overline}>CART COMMAND CENTER</p>
           <h1 className={styles.pageTitle}>카트와 함께, 쫄래쫄래</h1>
         </div>
-        <div className={`${styles.followBadge} ${following ? styles.on : styles.off}`}>
+        <div className={`${styles.followBadge} ${badge.tone}`}>
           <span className={styles.dot} />
-          {following ? '카트가 따라오는 중' : '카트가 잠시 멈췄어요'}
+          {badge.label}
         </div>
       </div>
       <div className={styles.grid}>
         <div className={styles.column}>
           <div className={styles.hero}>
-            <div className={styles.heroRing} />
-            <div className={styles.heroCart}>🛒</div>
+            {/* 배경 장식 — 읽는 내용이 아니므로 스크린리더에서 숨긴다 */}
+            <ShoppingCart className={styles.heroCart} strokeWidth={1.5} aria-hidden="true" />
             <p className={styles.heroLabel}>지금 가까운 곳</p>
             <div className={styles.heroTitleRow}>
               <h2 className={styles.heroTitle}>

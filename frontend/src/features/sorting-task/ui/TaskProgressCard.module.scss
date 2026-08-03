@@ -9,21 +9,9 @@
   container-type: inline-size;
 }
 
-// 아이콘 배지 + 제목 헤더 (디자인 시안: 클립보드 아이콘을 옅은 포인트색 박스에)
 .header {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.headerIcon {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: $primary-bg;
-  color: $primary-dark;
 }
 
 .label {

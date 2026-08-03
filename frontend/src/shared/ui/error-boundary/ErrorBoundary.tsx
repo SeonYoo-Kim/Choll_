@@ -43,7 +43,6 @@ export class ErrorBoundary extends Component<Props, State> {
         <button className={styles.button} onClick={() => window.location.reload()}>
           새로고침
         </button>
-        {import.meta.env.DEV && <pre className={styles.detail}>{error.message}</pre>}
       </div>
     );
   }

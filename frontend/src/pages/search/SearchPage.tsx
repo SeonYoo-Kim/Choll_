@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
-import { BookOpen, Search } from 'lucide-react';
+import { BookOpen, Search, X } from 'lucide-react';
 
+import { useBookSearchStore } from '@/features/book-search/model/bookSearchStore';
 import { SlotDetailModal } from '@/features/slot-board/ui/SlotDetailModal';
 import type { Slot } from '@/shared/api/generated/model';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
@@ -13,8 +14,12 @@ import styles from './SearchPage.module.scss';
 /** 도서 검색 — 카트에 실린 책을 제목/도서 ID로 찾는다. */
 export function SearchPage() {
   const { data: slots } = useListSlots(DEMO_CART_ID);
-  const [query, setQuery] = useState('');
+  // 검색어는 전역 스토어에 둔다 — 탭 이동·뒤로가기로 이 페이지가 언마운트돼도 유지된다
+  const query = useBookSearchStore((state) => state.query);
+  const setQuery = useBookSearchStore((state) => state.setQuery);
+  const clearQuery = useBookSearchStore((state) => state.clearQuery);
   const [selected, setSelected] = useState<Slot | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const results = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -41,11 +46,26 @@ export function SearchPage() {
       <div className={styles.searchBox}>
         <Search size={20} className={styles.searchIcon} />
         <input
+          ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="예: 불편한 편의점, 813.7"
           className={styles.input}
         />
+        {/* 입력이 있을 때만 노출 — 빈 검색창에 지우기 버튼이 떠 있으면 혼란스럽다 */}
+        {query !== '' && (
+          <button
+            type="button"
+            className={styles.clear}
+            aria-label="검색어 지우기"
+            onClick={() => {
+              clearQuery();
+              inputRef.current?.focus(); // 지운 뒤 바로 다시 입력할 수 있게
+            }}
+          >
+            <X size={16} />
+          </button>
+        )}
       </div>
       <div className={styles.results}>
         {results.length > 0 ? (

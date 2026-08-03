@@ -7,6 +7,8 @@
 #define COMMAND_TOKEN_SET_WHEEL_VEL "SET_WHEEL_VEL"
 #define COMMAND_TOKEN_STOP          "STOP"
 #define COMMAND_TOKEN_ESTOP         "ESTOP"
+#define COMMAND_TOKEN_SET_PI_GAINS  "SET_PI_GAINS"
+#define COMMAND_TOKEN_RESET_STALL   "RESET_STALL"
 
 /**
  * @brief line이 token으로 정확히 시작하고 그 다음이 delimiter인지 확인
@@ -88,6 +90,35 @@ static uint8_t CommandParser_ParseSetWheelVel(const char *rest, Command_t *out_c
     return 1;
 }
 
+/**
+ * @brief SET_PI_GAINS,<kp>,<ki> 본문을 파싱한다. 토큰 매칭 후에는 항상 호출되며
+ * 본문 형식이 잘못돼도 out_command는 채운다(command_parser.h 주석 참고) — 그래야
+ * Communication이 ERROR,SET_PI_GAINS,INVALID_FORMAT을 응답할 수 있다. Kp/Ki의
+ * 허용 범위(motor_config.h) 검증은 여기서 하지 않는다.
+ */
+static void CommandParser_ParseSetPiGains(const char *rest, Command_t *out_command)
+{
+    float kp = 0.0f;
+    float ki = 0.0f;
+    const char *after_kp = NULL;
+    const char *after_ki = NULL;
+    uint8_t format_valid = 0;
+
+    if (CommandParser_ParseFloat(rest, ',', &kp, &after_kp))
+    {
+        /* 두 번째 값(ki) 뒤에는 반드시 문자열 끝(NUL)이 와야 한다 (여분 토큰 거부) */
+        if (CommandParser_ParseFloat(after_kp, '\0', &ki, &after_ki))
+        {
+            format_valid = 1;
+        }
+    }
+
+    out_command->type = COMMAND_TYPE_SET_PI_GAINS;
+    out_command->data.pi_gains.kp = format_valid ? kp : 0.0f;
+    out_command->data.pi_gains.ki = format_valid ? ki : 0.0f;
+    out_command->data.pi_gains.format_valid = format_valid;
+}
+
 uint8_t CommandParser_Parse(const char *line, Command_t *out_command)
 {
     const char *rest = NULL;
@@ -112,6 +143,18 @@ uint8_t CommandParser_Parse(const char *line, Command_t *out_command)
     {
         out_command->type = COMMAND_TYPE_ESTOP;
         return 1;
+    }
+
+    if (strcmp(line, COMMAND_TOKEN_RESET_STALL) == 0)
+    {
+        out_command->type = COMMAND_TYPE_RESET_STALL;
+        return 1;
+    }
+
+    if (CommandParser_MatchToken(line, COMMAND_TOKEN_SET_PI_GAINS, ',', &rest))
+    {
+        CommandParser_ParseSetPiGains(rest, out_command);
+        return 1; /* 본문 형식이 틀려도 1을 반환 (format_valid로 구분, 위 주석 참고) */
     }
 
     return 0;

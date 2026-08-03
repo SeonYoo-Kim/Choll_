@@ -35,10 +35,7 @@ export function MapPanel() {
 
   return (
     <div className={styles.panel}>
-      <div className={styles.header}>
-        <p className={styles.overline}>LIBRARY MAP</p>
-        <h3 className={styles.title}>우리 도서관 지도</h3>
-      </div>
+      {/* 패널 제목은 제거 — MapPage의 h1("도서관 지도")과 중복이라 지도만 남긴다 */}
       <div className={styles.canvas}>
         <img src={mapImage} alt="" className={styles.mapImage} />
         {ZONE_RECTS.map((rect, i) => (

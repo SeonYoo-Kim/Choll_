@@ -4,6 +4,7 @@
 #include "stop_controller.h"
 #include "motion_controller.h"
 #include "communication.h"
+#include "status_reporter.h"
 
 /* =========================================================
  * App Mode
@@ -233,6 +234,7 @@ void App_Init(void)
     StopController_Init();
     MotionController_Init();
     Communication_Init();
+    StatusReporter_Init();
 }
 
 void App_Run(void)
@@ -243,6 +245,7 @@ void App_Run(void)
     StopController_Process();
     MotionController_Process();
     Motor_Process();
+    StatusReporter_Process();
 
     AppTest_Process();
 }

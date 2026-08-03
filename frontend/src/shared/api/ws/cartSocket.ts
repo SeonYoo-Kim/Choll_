@@ -7,6 +7,8 @@
  * - 재연결 시 REST 재조회로 상태 복구 (BE-WS-03) → onReconnect 콜백에서 query invalidate 수행
  */
 
+import { wsBaseUrl } from './wsBaseUrl';
+
 import type { Slot, TaskProgress } from '@/shared/api/generated/model';
 
 /** API 명세서(노션 WS-FE-01~13)에 정의된 이벤트 타입 13종. */
@@ -23,7 +25,8 @@ export type CartWsEventType =
   | 'TASK_PROGRESS_UPDATED' // WS-FE-10 정리 진행률 변경
   | 'RFID_RESCAN_COMPLETED' // WS-FE-11 RFID 재인식 결과
   | 'ALERT_OCCURRED' // WS-FE-12 실시간 경고 발생
-  | 'ALERT_RESOLVED'; // WS-FE-13 실시간 경고 해제
+  | 'ALERT_RESOLVED' // WS-FE-13 실시간 경고 해제
+  | 'TRACKS_UPDATED'; // AI 사람 탐지 박스 갱신 — 명세의 WS-FE-08 자리를 BE가 이 이름으로 구현했다
 
 /**
  * WS-FE-01 CART_POSITION_UPDATE 페이로드.
@@ -81,6 +84,30 @@ export interface FollowStatusUpdatedPayload {
   status: FollowStatus;
 }
 
+/**
+ * AI가 탐지한 사람 하나. x·y는 bbox 좌상단, w·h는 크기이며
+ * 모두 원본 영상 해상도(TracksUpdatedPayload.image_*) 기준 픽셀이다.
+ */
+export interface Track {
+  /** ByteTrack이 부여한 track id — 추종 대상 선택 시 이 값을 BE로 보낸다 */
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * TRACKS_UPDATED 페이로드 — 영상 프레임 위에 그릴 사람 박스 목록.
+ * snake_case인 이유: AI(Python) → BE를 거쳐 그대로 내려오는 필드명이다.
+ * 화면 크기와 무관하게 항상 image_width·image_height 기준으로 비례 변환해서 써야 한다.
+ */
+export interface TracksUpdatedPayload {
+  image_width: number;
+  image_height: number;
+  tracks: Track[];
+}
+
 export interface CartWsEvent<TPayload = unknown> {
   type: CartWsEventType;
   payload: TPayload;
@@ -133,10 +160,7 @@ export class CartSocket {
     ) {
       return;
     }
-    const base =
-      this.options.baseUrl ||
-      import.meta.env.VITE_WS_URL ||
-      `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+    const base = wsBaseUrl(this.options.baseUrl);
     const socket = new WebSocket(`${base}/ws/carts/${this.cartId}`);
     this.socket = socket;
 

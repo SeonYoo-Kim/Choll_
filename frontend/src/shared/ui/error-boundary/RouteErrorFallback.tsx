@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 
 import styles from './RouteErrorFallback.module.scss';
@@ -28,6 +29,14 @@ export function RouteErrorFallback({
   const error = useRouteError();
   const navigate = useNavigate();
 
+  // 화면에는 에러 원문을 노출하지 않으므로 원인 추적은 콘솔로만 남긴다.
+  // (ErrorBoundary의 componentDidCatch와 같은 역할 — 사용자에게는 보이지 않는다)
+  useEffect(() => {
+    if (error) {
+      console.error('[RouteError]', error);
+    }
+  }, [error]);
+
   // 라우터가 던진 응답 — 없는 주소(404)나 loader의 throw new Response
   const response = isRouteErrorResponse(error) ? error : null;
   const notFound = notFoundProp || response?.status === 404;
@@ -51,8 +60,6 @@ export function RouteErrorFallback({
         onAction: () => window.location.reload(),
       };
 
-  const detail = error instanceof Error ? error.message : null;
-
   return (
     <div className={styles.wrap}>
       <p className={styles.emoji}>{view.emoji}</p>
@@ -61,7 +68,6 @@ export function RouteErrorFallback({
       <button className={styles.button} onClick={view.onAction}>
         {view.actionLabel}
       </button>
-      {import.meta.env.DEV && detail && <pre className={styles.detail}>{detail}</pre>}
     </div>
   );
 }
