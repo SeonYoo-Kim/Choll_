@@ -35,6 +35,18 @@ public class SlotService {
 			.toList();
 	}
 
+	/**
+	 * 카트의 현재 구역에서 내려놓아야 할 슬롯 번호 목록 (LED 점등 대상).
+	 * isTarget = 슬롯에 책이 있고 그 책의 서가 구역이 카트의 현재 구역과 같음.
+	 * 구역 밖이거나 해당 구역 책이 없으면 빈 목록.
+	 */
+	public List<Integer> findTargetSlotNumbers(Long cartId) {
+		return findAll(cartId).stream()
+			.filter(Response::isTarget)
+			.map(Response::slotNumber)
+			.toList();
+	}
+
 	public Response findByNumber(Long cartId, int slotNumber) {
 		Long currentZoneId = currentZoneId(cartService.getCart(cartId));
 		Slot slot = repository.findByCartIdAndSlotNumber(cartId, slotNumber)

@@ -12,7 +12,8 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 1. **카트 관리**: 상태 조회/갱신, MQTT Heartbeat 기반 연결 상태 판정
 2. **슬롯·RFID**: 슬롯 상태 갱신, RFID ID↔도서 매칭, 재인식 요청 중계
 3. **지도·구역**: SLAM 지도 제공, FE 좌표↔SLAM 좌표 상호 변환, 카트 위치의 현재 구역 판정
-4. **정리 작업**: 도서 인식 시 작업 생성, 책 제거 시 완료 처리, 진행률 계산, 구역별 슬롯 LED 대상 결정
+4. **정리 작업**: 도서 인식 시 작업 생성, 책 제거 시 완료 처리, 진행률 계산,
+   구역별 슬롯 LED 대상 결정(구현됨 — `cmd/lit/led` 발행)
 5. **이동·추종**: FE 요청을 MQTT 명령으로 변환(requestId로 요청-결과 연결), 상태를 WS 이벤트로 FE에 전달
 6. **WebRTC 시그널링**: FE↔카트 카메라 간 Offer/Answer/ICE 중계 (우선순위 2)
 
@@ -58,7 +59,18 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   - `{"requestId","command":"MOVE|CANCEL","zoneId","x","y"}` (구역 bbox 중심 좌표)
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환
-  ⚠️ EM 미확정 임시 계약 — 추종·LED·RFID 재인식 포함 확정 시 EM·API 명세서와 동시 갱신할 것
+  ⚠️ EM 미확정 임시 계약 — 추종·RFID 재인식 포함 확정 시 EM·API 명세서와 동시 갱신할 것
+- **MQTT** (BE→라즈베리파이 슬롯 LED): `cmd/lit/led` — `{"slot_id":[1,3,5]}`
+  - **카트의 구역이 바뀌는 순간에만** 발행 (`SlotLedService`). 같은 구역에 머무는 동안은 발행하지 않는다.
+  - `slot_id` = **그 시점에 켜져 있어야 할 슬롯 전체** = `isTarget`(슬롯의 책이 꽂힐 서가 구역 ==
+    카트 현재 구역)인 슬롯 번호 (키 이름은 `status/slot` RFID 페이로드와 통일).
+    라즈베리파이는 이 목록으로 점등 상태를 통째로 맞추면 된다.
+  - **구역 이탈 시 빈 목록 `[]` 발행** — 책을 남기고 나가도 LED가 켜진 채 남지 않게. 구역 간 이동이면
+    새 구역의 목록이 그대로 이전 상태를 대체한다.
+  - 예외: 구역 밖에서 대상 없는 구역으로 들어갈 때는 켤 것도 끌 것도 없어 발행하지 않는다.
+  - 슬롯에서 책이 빠졌을 때(RFID REMOVED)의 소등은 라즈베리파이가 자체 처리 — BE는 재발행하지 않는다.
+  - DB 슬롯은 1~12번이지만 실물 RFID 리더는 5개만 설치(재정상). RFID가 없는 6~12번은 책이 인식되지
+    않아 `isTarget`이 될 수 없으므로 `slot_id`에도 나오지 않는다.
 
 ## 참고 문서
 

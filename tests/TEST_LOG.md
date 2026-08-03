@@ -15,6 +15,46 @@
 
 ---
 
+## 2026-08-03 15:45 — ✅ 구역별 슬롯 LED 발행 추가, BE 66 tests 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `1fb0dba`(develop, MR !58 머지 후) 기준 — 브랜치 `backend/feature/slot-led-command`
+- **신규 기능**: 카트의 **구역이 바뀔 때** 그 구역에서 내려놓을 슬롯 번호를 MQTT `cmd/lit/led`로 발행.
+  페이로드 `{"slot_id":[1,3,5]}` — 그 시점에 켜져 있어야 할 슬롯 전체 (카트 1대 가정, cartId 없음).
+  **BE 범위는 발행까지** — 구독·점등 제어는 라즈베리파이(EM) 몫
+  - `SlotLedService` 신규 — 대상 조회 + 발행. MQTT 비활성이면 경고 후 무시
+  - `SlotService.findTargetSlotNumbers()` 신규 — 기존 `isTarget`(책의 서가 구역 == 카트 현재 구역) 재사용
+  - `CartPositionTelemetryService`에 **구역 전이 감지**(`zoneChanged`) 추가 — 갱신 전
+    `cart.getCurrentZone()`과 비교. 같은 구역 유지면 발행하지 않음
+  - `MqttCommandPublisher.publishLed()` 추가 — 토픽별 발행을 `publishTo(topic, payload)`로 분리
+    (기존 `publish()` 호출처 NavigationService·FollowTargetService는 무영향)
+  - 설정: `mqtt.led-topic`(기본 `cmd/lit/led`)
+- **발행 규칙** (2026-08-03 협의):
+  - 구역 진입/구역 간 이동 → 새 구역의 대상 목록 발행
+  - **구역 이탈 → 빈 목록 `[]` 발행(소등)** — 책을 남기고 나가도 LED가 켜진 채 남지 않도록
+  - 구역 밖 → 대상 없는 구역: 켤 것도 끌 것도 없어 미발행
+  - 책이 빠졌을 때(RFID REMOVED)의 소등은 라즈베리파이 몫 — BE는 재발행하지 않음
+- **결과**: 22 suites, **66 tests, 0 failures, 0 errors** (신규 7: SlotLedServiceTest 4 —
+  점등/이탈 시 빈 목록/미발행/MQTT 비활성, CartPositionTelemetryServiceTest 3 — 진입/동일 구역 유지/이탈)
+- **슬롯 번호 범위**: DB는 1~12번이지만 실물 RFID 리더는 5개만 설치(재정상). RFID 없는 슬롯은
+  책이 인식되지 않아 `isTarget`이 될 수 없으므로 `slot_id`에도 나오지 않는다 — 불일치 아님
+- **미검증**: 브로커 실연동 미실시. 라즈베리파이 구독·점등부는 EM 담당
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=66 failures=0 errors=0 suites=22
+```
+
+</details>
+
 ## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat -p backend test --console=plain`
