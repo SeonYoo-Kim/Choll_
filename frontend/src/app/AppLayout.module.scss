@@ -29,6 +29,10 @@
   }
 
   @media (min-width: $bp-md) {
+    // min-height가 아니라 height — 내용이 길어도 프레임이 화면 밖으로 자라지 않게 한다.
+    // 이래야 넘치는 분량을 .content가 자기 안에서 스크롤하고, 사이드바는 제자리에 남는다
+    // (min-height면 문서 전체가 스크롤돼 사이드바까지 같이 밀려 올라간다)
+    height: calc(100vh - 48px);
     min-height: calc(100vh - 48px);
     grid-template-columns: 239px minmax(0, 1fr);
   }
@@ -89,11 +93,16 @@
 .main {
   display: flex;
   min-width: 0;
+  // grid/flex 아이템의 기본 min-height는 auto라 내용보다 작아지지 못한다.
+  // 0으로 풀어주지 않으면 프레임이 고정 높이여도 .content가 그대로 넘쳐서,
+  // 프레임의 overflow: hidden에 잘려 스크롤로도 닿을 수 없는 영역이 생긴다
+  min-height: 0;
   flex-direction: column;
 }
 
 .content {
   flex: 1;
+  min-height: 0; // 위와 같은 이유 — 이게 있어야 아래 overflow-y가 실제로 동작한다
   overflow-y: auto;
   padding: $spacing-md $spacing-md 96px;
 
@@ -102,8 +111,11 @@
   }
 
   @media (min-width: $bp-md) {
-    // 콘텐츠가 프레임 테두리에 붙어 답답해 보여서 사방 23px씩 넓혔다 (32 -> 55px)
-    padding: 55px;
+    // 좌우는 넉넉히(55px) 두되 위아래는 줄인다 — 세로 여백이 홈 화면을 한 화면 밖으로
+    // 밀어내는 가장 큰 요인이라, 답답해 보이지 않는 선까지만 남긴다
+    // 위·좌우를 같은 값으로 맞춘다 — 제목이 프레임 위쪽에만 붙어 보이던 것을 해소.
+    // 아래는 카드가 프레임 끝까지 내려가도 어색하지 않아 좁게 둔다
+    padding: 44px 44px 20px;
   }
 }
 
