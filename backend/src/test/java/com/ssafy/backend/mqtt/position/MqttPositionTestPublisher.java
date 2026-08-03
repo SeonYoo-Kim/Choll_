@@ -25,8 +25,8 @@ public final class MqttPositionTestPublisher {
 
 	public static void main(String[] args) throws Exception {
 		String brokerUrl = value("MQTT_BROKER_URL", "tcp://localhost:1883");
-		String cartId = value("MQTT_TEST_CART_ID", "1");
-		String topic = "carts/%s/telemetry/position".formatted(cartId);
+		// 토픽에 cartId가 없다 — 수신 측(BE)의 mqtt.cart-id가 귀속 카트를 정한다
+		String topic = value("MQTT_POSITION_TOPIC", "status/position");
 		MqttClient client = new MqttClient(
 			brokerUrl,
 			"chollae-position-test-" + UUID.randomUUID(),

@@ -5,8 +5,8 @@
 
 ## 동작 방식
 
-- 구독 토픽: `carts/+/telemetry/position`
-- 실제 메시지 예시 토픽: `carts/1/telemetry/position`
+- 구독 토픽: `status/position`
+- 토픽에 카트 ID가 없어 `mqtt.cart-id`(기본 1) 설정값으로 귀속합니다.
 - 카트별 최근 위치 20개를 메모리에 유지합니다.
 - 좌표가 구역 다각형 안에 있는지 계산합니다. 경계선 위의 좌표도 해당 구역으로
   판단합니다.
@@ -26,7 +26,7 @@
 ```
 
 `x`와 `y`는 필수이며 `timestamp`를 생략하면 백엔드 수신 시각을 사용합니다.
-토픽의 카트 ID는 DB의 `carts.id`에 실제로 존재해야 합니다.
+`mqtt.cart-id`가 가리키는 카트는 DB의 `carts.id`에 실제로 존재해야 합니다.
 
 ## 로컬 실행
 
@@ -39,7 +39,7 @@ Mosquitto를 사용할 수 있습니다.
 MQTT_ENABLED=true
 MQTT_BROKER_URL=tcp://localhost:1883
 MQTT_CLIENT_ID=chollae-backend
-MQTT_POSITION_TOPIC=carts/+/telemetry/position
+MQTT_POSITION_TOPIC=status/position
 MQTT_QOS=0
 ```
 
@@ -57,19 +57,20 @@ cd backend
 .\gradlew.bat mqttTestPublish
 ```
 
-다른 카트 ID를 테스트하려면 해당 카트가 DB에 존재하는지 확인한 뒤 다음처럼
-지정합니다.
+다른 카트 ID를 테스트하려면 해당 카트가 DB에 존재하는지 확인한 뒤 백엔드 쪽
+`MQTT_CART_ID`를 바꿔서 재기동합니다 (토픽에 카트 ID가 없으므로 발행기가 아니라
+수신 측 설정이 귀속 카트를 정합니다).
 
 ```powershell
-$env:MQTT_TEST_CART_ID="2"
-.\gradlew.bat mqttTestPublish
+$env:MQTT_CART_ID="2"
+.\gradlew.bat bootRun
 ```
 
 테스트 발행기는 `(100,100)`부터 `(180,140)`까지 총 5개의 좌표를 0.5초 간격으로
 보냅니다. 정상 수신되면 백엔드 로그에 원본 메시지가 다음처럼 표시됩니다.
 
 ```text
-[MQTT RECEIVE] topic=carts/1/telemetry/position, payload={"x":100.000000,...}
+[MQTT RECEIVE] topic=status/position, payload={"x":100.000000,...}
 ```
 
 이어지는 처리 로그에서는 카트 ID, 좌표, 감지 구역, 안정화 여부, 현재 버퍼 크기를

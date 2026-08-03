@@ -17,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 @ExtendWith(MockitoExtension.class)
 class MqttRfidMessageHandlerTest {
 
-	private static final String TOPIC = "choll/cart/rfid";
+	private static final String TOPIC = "status/slot";
 
 	@Mock
 	private SlotRfidEventService slotRfidEventService;

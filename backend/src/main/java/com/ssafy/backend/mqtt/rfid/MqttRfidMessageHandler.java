@@ -13,7 +13,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * choll/cart/rfid 토픽의 RFID 태깅 메시지를 파싱해 슬롯 이벤트로 변환한다.
+ * status/slot 토픽의 RFID 태깅 메시지를 파싱해 슬롯 이벤트로 변환한다.
  * 페이로드 예: {"slot_id": 1, "uid": "0437F306", "event": "DETECTED",
  * "timestamp": "2026-07-29T13:32:27.680+09:00"}
  */

@@ -40,18 +40,21 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용)
 - **WebSocket 영상**: `/ws/carts/{cartId}/video` (FE 시청, 바이너리 JPEG 1메시지=1프레임)
   ← `/ws/carts/{cartId}/video/publish` (Jetson 발행, 10fps/품질70 기준 ~4Mbps)
+- **MQTT 토픽 네이밍 규칙**: 카트·AI→BE **상행은 `status/*`**, BE→카트 **하행은 `cmd/*`**.
+  새 토픽을 만들 때 방향과 프리픽스가 어긋나지 않게 할 것.
+  **선행 슬래시를 붙이지 않는다** — `/status/…`는 빈 최상위 레벨을 만든다 (ROS 토픽과 혼동 주의).
 - **MQTT** (카트→BE, 현재 확정분):
-  - `carts/{cartId}/telemetry/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계.
+  - `status/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계.
     좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 지도 메타(resolution·origin)로
     이미지 픽셀 변환(세로축 뒤집기 포함). 기본값 pixels(무변환) — EM 발행 시작 시 meters로 전환 +
     `library_maps`(id=`mqtt.map-id`) 행에 실제 map.yaml 값 입력 필요
-  - `choll/cart/rfid` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
-  - `carts/status` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
+  - `status/slot` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
+  - `status/cart` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
-  - `choll/cart/tracks` (AI→BE, 5~10Hz) — `{"image_width","image_height","tracks":[{"id","x","y","w","h"}]}`
+  - `status/target` (AI→BE, 5~10Hz) — `{"image_width","image_height","tracks":[{"id","x","y","w","h"}]}`
     (x,y=bbox 좌상단 픽셀) → WS `TRACKS_UPDATED`로 원형 그대로 중계
-  - ⚠️ 하트비트·RFID·tracks 토픽에 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 재협의 필요
-- **MQTT** (BE→카트 명령): `choll/cart/cmd`
+  - ⚠️ 수신 토픽 4종 모두 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 재협의 필요
+- **MQTT** (BE→카트 명령): `cmd/move/cart`
   - `{"requestId","command":"MOVE|CANCEL","zoneId","x","y"}` (구역 bbox 중심 좌표)
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환

@@ -12,7 +12,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * carts/status 하트비트 메시지를 파싱해 연결 상태 갱신으로 넘긴다.
+ * status/cart 하트비트 메시지를 파싱해 연결 상태 갱신으로 넘긴다.
  * 토픽에 cartId가 없어(단일 카트 가정) mqtt.cart-id 설정값으로 귀속한다.
  * EM 페이로드 명세가 미확정이라 timestamp 외 필드는 무시하고,
  * 파싱 불가 페이로드도 생존 신호(수신 시각 기준)로 취급한다.

@@ -15,6 +15,57 @@
 
 ---
 
+## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
+  (SLAM 미터→픽셀 변환이 먼저 develop에 머지돼 `application.properties`·`backend/CLAUDE.md`·
+  이 로그에서 충돌 → 양쪽 다 살려 해결. `mqtt.position-unit`·`mqtt.map-id`는 그대로 두고
+  토픽 값만 교체)
+- **변경**: MQTT 토픽 전면 개편 (`ai/`·`backend/` 양쪽 동시 적용).
+  네이밍 규칙 = **상행(카트·AI→BE) `status/*`, 하행(BE→카트) `cmd/*`** (선행 슬래시 없음)
+
+  | 구 토픽 | 신 토픽 | 방향 |
+  |---------|---------|------|
+  | `carts/{cartId}/telemetry/position` | `status/position` | 카트→BE |
+  | `carts/status` | `status/cart` | 카트→BE (하트비트) |
+  | `choll/cart/rfid` | `status/slot` | 카트→BE |
+  | `choll/cart/cmd` | `cmd/move/cart` | BE→카트 (MOVE/CANCEL/SELECT_TARGET) |
+  | `choll/cart/tracks` | `status/target` | AI→BE (추종 후보 트랙) |
+
+- **구조 변경(주의)**: 새 위치 토픽에 cartId가 없어, `MqttPositionMessageHandler`가
+  토픽 정규식(`^carts/(\d+)/telemetry/position$`)에서 cartId를 뽑던 방식을 폐기하고
+  하트비트·RFID·tracks와 동일하게 `mqtt.cart-id`(기본 1)로 귀속하도록 변경.
+  토픽 검증은 주입된 `mqtt.position-topic`과 정확 비교. **이제 수신 4종 모두 cartId가
+  토픽에 없으므로 다중 카트 도입 시 EM과 재협의 필요.**
+- **결과**: 21 suites, **59 tests, 0 failures, 0 errors**
+  (내 변경으로 늘어난 테스트는 없음 — 토픽 상수만 갱신. 59는 develop의 SLAM 변환 테스트 4개 포함)
+- **적용 범위**: `ai/`·`backend/`와 공용 E2E 도구(`tests/tools/fake_jetson.py`의 트랙 발행).
+  FE(`frontend/`)·`docs/`에는 MQTT 토픽 문자열이 없어 변경 없음.
+  **EM 파트(`embedded/`)는 이 MR에서 제외** — 실카트 코드는 EM 담당자가 별도 반영 예정.
+  TEST_LOG의 과거 기록은 실행 증거라 옛 토픽명 그대로 보존.
+- **미검증 / ⚠️ 배포 시 주의**: 브로커 실연동 E2E는 돌리지 않음 (단위 테스트만).
+  - **EM 반영 전까지 실카트↔BE 통신 단절** — `embedded/rfid/rfid_mqtt.py`가 아직 옛 토픽
+    (`choll/cart/rfid`, `carts/status`)으로 발행하므로, BE만 먼저 배포하면 슬롯·하트비트를 못 받는다.
+    **BE 배포와 EM 반영은 함께 나가야 한다.**
+  - EC2 브로커에 남은 옛 `carts/status` retained LWT도 새 `status/cart`로 자동 이관되지 않음.
+- **AI 파트 기록**: [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md) 2026-08-03 항목
+
+<details>
+<summary>gradle test 출력 (마지막 부분) + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL in 19s
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=59 failures=0 errors=0 suites=21
+```
+
+</details>
+
 ## 2026-08-03 — ✅ BE 59 tests, SLAM 미터→이미지 픽셀 변환 추가 (Claude)
 
 - **명령**: `backend/gradlew.bat test`

@@ -13,7 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * BE→EM 명령 MQTT 발행기.
- * ⚠️ 토픽(choll/cart/cmd)·페이로드는 EM 미확정 임시 계약 — 확정 시 동시 갱신할 것.
+ * ⚠️ 토픽(cmd/move/cart)·페이로드는 EM 미확정 임시 계약 — 확정 시 동시 갱신할 것.
  * mqtt.enabled=false면 빈이 생성되지 않으며, 호출측은 ObjectProvider로 부재를 허용한다.
  */
 @Component
