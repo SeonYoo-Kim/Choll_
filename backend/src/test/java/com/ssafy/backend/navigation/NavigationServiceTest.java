@@ -13,11 +13,15 @@ import com.ssafy.backend.cart.domain.CartConnectionStatus;
 import com.ssafy.backend.cart.domain.CartOperationStatus;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.InvalidDomainException;
+import com.ssafy.backend.map.domain.LibraryMap;
+import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.command.MqttCommandPublisher;
+import com.ssafy.backend.mqtt.position.SlamCoordinateConverter;
 import com.ssafy.backend.navigation.service.NavigationService;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import com.ssafy.backend.zone.domain.Zone;
 import com.ssafy.backend.zone.repository.ZoneRepository;
+import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +42,9 @@ class NavigationServiceTest {
 	private ZoneRepository zoneRepository;
 
 	@Mock
+	private LibraryMapRepository mapRepository;
+
+	@Mock
 	private CartEventPublisher eventPublisher;
 
 	@Mock
@@ -52,16 +59,27 @@ class NavigationServiceTest {
 	@Mock
 	private Zone zone;
 
+	@Mock
+	private LibraryMap map;
+
 	private NavigationService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new NavigationService(
+		service = newService("pixels");
+	}
+
+	private NavigationService newService(String positionUnit) {
+		return new NavigationService(
 			cartRepository,
 			zoneRepository,
+			mapRepository,
+			new SlamCoordinateConverter(),
 			eventPublisher,
 			commandPublisherProvider,
-			new ObjectMapper()
+			new ObjectMapper(),
+			positionUnit,
+			2L
 		);
 	}
 
@@ -88,8 +106,8 @@ class NavigationServiceTest {
 		assertThat(command.getValue().toString())
 			.contains("command=MOVE")
 			.contains("zoneId=7")
-			.contains("x=775.0")
-			.contains("y=505.0");
+			.contains("pixel=Pixel[x=775.0, y=505.0]")
+			.contains("target=null");
 		ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
 		verify(eventPublisher).publish(
 			eq(1L),
@@ -97,6 +115,47 @@ class NavigationServiceTest {
 			event.capture()
 		);
 		assertThat(event.getValue().toString()).contains("status=ACCEPTED");
+	}
+
+	@Test
+	void metersModeIncludesSlamTargetConvertedFromPixels() {
+		service = newService("meters");
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson())
+			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+		// resolution 0.05 m/px, origin (-10, -10), 이미지 높이 600px
+		when(map.getResolution()).thenReturn(new BigDecimal("0.05"));
+		when(map.getOriginX()).thenReturn(new BigDecimal("-10"));
+		when(map.getOriginY()).thenReturn(new BigDecimal("-10"));
+		when(map.getHeight()).thenReturn(600);
+		when(mapRepository.findById(2L)).thenReturn(Optional.of(map));
+
+		service.start(1L, 7L);
+
+		// 픽셀 (775, 505) → SLAM (-10+775*0.05, -10+(600-505)*0.05) = (28.75, -5.25)
+		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
+		verify(commandPublisher).publish(command.capture());
+		assertThat(command.getValue().toString())
+			.contains("target=Target[x=28.75, y=-5.25]")
+			.contains("pixel=Pixel[x=775.0, y=505.0]");
+	}
+
+	@Test
+	void usesClickedPixelInsteadOfZoneCenterWhenProvided() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+
+		service.start(1L, 7L, 612.0, 431.0);
+
+		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
+		verify(commandPublisher).publish(command.capture());
+		assertThat(command.getValue().toString())
+			.contains("pixel=Pixel[x=612.0, y=431.0]");
 	}
 
 	@Test
