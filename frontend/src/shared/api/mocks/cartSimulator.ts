@@ -12,6 +12,7 @@ import { CartDetailStatus } from '@/shared/api/generated/model';
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
 import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
 import type {
+  CartPositionUpdatePayload,
   CartWsEvent,
   FollowStatus,
   NavigationStatus,
@@ -59,12 +60,32 @@ function broadcast(event: CartWsEvent): void {
   cartWsLink.broadcast(JSON.stringify(event));
 }
 
+/** 직전 브로드캐스트 좌표·방향 — 다음 좌표와의 차이로 진행 방향(yaw)을 만든다 */
+let lastBroadcastPercent: MapPercent | null = null;
+let lastBroadcastYaw = 0;
+
 function broadcastPosition(percent: MapPercent): void {
   const { x, y } = percentToDisplay(percent, mapInfoFixture);
-  broadcast({
-    type: 'CART_POSITION_UPDATE',
-    payload: { mapId: mapInfoFixture.id, x, y, valid: true },
-  });
+  if (lastBroadcastPercent !== null) {
+    const dx = percent.x - lastBroadcastPercent.x;
+    const dy = percent.y - lastBroadcastPercent.y;
+    // 제자리면 이전 방향을 유지한다 (atan2(0,0)=0이라 카트가 갑자기 오른쪽을 본다)
+    if (Math.hypot(dx, dy) > 0.01) {
+      // 실제 BE의 yaw는 SLAM 지도 프레임 기준이지만, 모킹에서는 진행 방향으로 대신한다
+      lastBroadcastYaw = Math.atan2(dy, dx);
+    }
+  }
+  lastBroadcastPercent = percent;
+  // 페이로드 타입을 명시해 필드 누락을 컴파일 단계에서 잡는다
+  // (broadcast의 payload가 unknown이라 예전에는 yaw가 빠진 채로 지나갔다)
+  const payload: CartPositionUpdatePayload = {
+    mapId: mapInfoFixture.id,
+    x,
+    y,
+    yaw: lastBroadcastYaw,
+    valid: true,
+  };
+  broadcast({ type: 'CART_POSITION_UPDATE', payload });
 }
 
 function broadcastZone(previousZoneId: number | null, currentZoneId: number | null): void {

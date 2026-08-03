@@ -63,12 +63,20 @@
   background: $text-main;
   font-size: 16px;
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-  transition:
-    left 0.3s ease-in-out,
-    top 0.3s ease-in-out,
-    transform 0.3s ease-in-out;
+  // 지속시간은 MapPanel이 위치 이벤트 간격에 맞춰 --cart-move-duration으로 덮어쓴다.
+  // 구간마다 가감속(ease)하면 좌표가 올 때마다 서고 다시 출발하는 것처럼 보이므로,
+  // 좌표를 이어 붙여 일정한 속도로 흐르게 linear를 쓴다.
+  transition-property: left, top, transform;
+  transition-duration: var(--cart-move-duration, 1s);
+  transition-timing-function: linear;
 }
 
 .cartMoving {
   outline: 4px solid rgba(105, 194, 182, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cart {
+    transition-duration: 0s;
+  }
 }

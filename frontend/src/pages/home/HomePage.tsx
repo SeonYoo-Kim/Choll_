@@ -25,7 +25,10 @@ const CART_BADGE = {
 export function HomePage() {
   const navigate = useNavigate();
   const runState = useCartControlStore((state) => state.runState);
-  const { cartZone, isMoving, cartStatus } = useCartMapStore();
+  // 지도 좌표는 홈에서 쓰지 않으므로, 좌표 갱신이 홈 전체 리렌더로 번지지 않게 필요한 값만 고른다
+  const cartZone = useCartMapStore((state) => state.cartZone);
+  const isMoving = useCartMapStore((state) => state.isMoving);
+  const cartStatus = useCartMapStore((state) => state.cartStatus);
   const { data: slots } = useListSlots(DEMO_CART_ID);
 
   const following = runState === 'FOLLOWING';

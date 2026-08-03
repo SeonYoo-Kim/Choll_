@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { unwrapAngle } from './angle';
 import { ZONE_POSITIONS, zoneIndexOf, zoneIndexOfPoint } from './zones';
 
 import type { MapPercent } from './mapTransform';
@@ -11,6 +12,29 @@ const MOVING_STATUSES: readonly NavigationStatus[] = ['ACCEPTED', 'STARTED'];
 
 /** 연속 위치 이벤트를 "움직임"으로 판정할 최소 이동 거리 (% 좌표 기준) */
 const MOVE_EPSILON_PERCENT = 0.2;
+
+/**
+ * 위치 이벤트 간격 추정치 — 지도에서 카트를 다음 좌표까지 몇 ms에 걸쳐 옮길지에 쓴다.
+ * 고정값으로 두면 발행 주기와 어긋나 "잠깐 미끄러지고 멈추기"를 반복하므로 실제 간격을 따라간다.
+ */
+const DEFAULT_POSITION_INTERVAL_MS = 1_000;
+const MIN_POSITION_INTERVAL_MS = 150;
+const MAX_POSITION_INTERVAL_MS = 2_000;
+/** 간격 평활 계수 — 한 번 늦게 온 이벤트가 애니메이션 속도를 크게 흔들지 않게 한다 */
+const INTERVAL_SMOOTHING = 0.3;
+/** 간격을 이 단위로 반올림한다 — 매번 미세하게 달라져 불필요한 리렌더가 나는 것을 막는다 */
+const INTERVAL_STEP_MS = 50;
+
+function smoothInterval(previousMs: number, gapMs: number): number {
+  // 한참 멈춰 있다가 다시 출발한 경우 — 그 공백까지 주기로 치면 다음 구간이
+  // 몇 초에 걸쳐 느릿하게 움직인다. 이런 값은 섞지 않고 기존 추정치를 유지한다.
+  if (gapMs > MAX_POSITION_INTERVAL_MS) {
+    return previousMs;
+  }
+  const blended = previousMs * (1 - INTERVAL_SMOOTHING) + gapMs * INTERVAL_SMOOTHING;
+  const clamped = Math.min(Math.max(blended, MIN_POSITION_INTERVAL_MS), MAX_POSITION_INTERVAL_MS);
+  return Math.round(clamped / INTERVAL_STEP_MS) * INTERVAL_STEP_MS;
+}
 
 /** applyPosition이 위치에서 파생해 알려주는 결과 (진입 알림·정지 감지용) */
 export interface PositionApplied {
@@ -25,8 +49,15 @@ interface CartMapState {
   cartZone: number | null;
   /** 지도 위 카트 좌표 (%) */
   cartPosition: MapPercent;
-  /** 지도 이미지 기준 카트 방향각 (라디안) */
+  /**
+   * 지도 이미지 기준 카트 방향각 (라디안).
+   * BE가 주는 -π..π 값을 그대로 담지 않고 짧은 쪽으로 누적한 연속값이다(angle.ts 참조).
+   */
   cartYaw: number;
+  /** 위치 이벤트 간격 추정치 (ms) — 지도에서 카트를 옮기는 애니메이션 길이로 쓴다 */
+  positionIntervalMs: number;
+  /** 마지막 위치 이벤트 수신 시각 (ms) — 간격 추정용 내부 값 */
+  lastPositionAt: number | null;
   /** 카트 동작 상태 (CART-01 응답 CartStatus: IDLE·MOVING·FOLLOWING·ERROR) */
   cartStatus: CartDetailStatus;
   /** 마지막으로 수신한 목적지 이동 상태 (WS-FE-06, 이동 명령 전이면 null) */
@@ -69,6 +100,8 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   cartZone: null,
   cartPosition: ZONE_POSITIONS[2],
   cartYaw: 0,
+  positionIntervalMs: DEFAULT_POSITION_INTERVAL_MS,
+  lastPositionAt: null,
   cartStatus: 'IDLE',
   navStatus: null,
   isMoving: false,
@@ -76,15 +109,38 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   startMove: () => set({ isMoving: true, cartStatus: 'MOVING', navStatus: 'ACCEPTED' }),
   applyPosition: (position, yaw) => {
     const state = get();
+    const now = Date.now();
+    const positionIntervalMs =
+      state.lastPositionAt === null
+        ? state.positionIntervalMs
+        : smoothInterval(state.positionIntervalMs, now - state.lastPositionAt);
+
+    // yaw가 없거나 NaN이면(모킹·구버전 BE) 이전 방향을 유지한다 —
+    // 그대로 넣으면 rotate(NaNrad)가 되어 회전이 통째로 무시된다
+    const cartYaw = Number.isFinite(yaw) ? unwrapAngle(state.cartYaw, yaw) : state.cartYaw;
+    const zone = zoneIndexOfPoint(position);
+
+    // 카트가 멈춰 있으면 같은 좌표가 주기마다 계속 온다 — 바뀐 게 없으면 화면을 다시 그리지 않는다
+    const unchanged =
+      position.x === state.cartPosition.x &&
+      position.y === state.cartPosition.y &&
+      cartYaw === state.cartYaw &&
+      zone === state.cartZone;
+    if (unchanged) {
+      set({ lastPositionAt: now, positionIntervalMs });
+      return { moved: false, enteredZone: null };
+    }
+
     const moved =
       Math.hypot(position.x - state.cartPosition.x, position.y - state.cartPosition.y) >
       MOVE_EPSILON_PERCENT;
-    const zone = zoneIndexOfPoint(position);
     const enteredZone = zone !== null && zone !== state.cartZone ? zone : null;
     set({
       cartPosition: position,
-      cartYaw: yaw,
+      cartYaw,
       cartZone: zone,
+      lastPositionAt: now,
+      positionIntervalMs,
       // 추종(FOLLOWING) 등 다른 상태는 유지하고, 대기 중일 때만 이동 중으로 올린다
       ...(moved && !state.isMoving && state.cartStatus === 'IDLE' && { cartStatus: 'MOVING' }),
     });

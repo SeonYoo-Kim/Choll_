@@ -25,7 +25,11 @@ const NAV_STATUS_LABELS: Record<NavigationStatus, string> = {
 
 /** 지도 — SLAM 지도 위 카트 위치 확인과 목적지 지정. */
 export function MapPage() {
-  const { cartZone, isMoving, cartStatus, navStatus } = useCartMapStore();
+  // 위치 좌표는 이 화면이 직접 쓰지 않는다 — 통째로 구독하면 좌표가 올 때마다 페이지 전체가 다시 그려진다
+  const cartZone = useCartMapStore((state) => state.cartZone);
+  const isMoving = useCartMapStore((state) => state.isMoving);
+  const cartStatus = useCartMapStore((state) => state.cartStatus);
+  const navStatus = useCartMapStore((state) => state.navStatus);
   const { data: slots } = useListSlots(DEMO_CART_ID);
   const notify = useToastStore((state) => state.show);
   // 이동 명령 세션(isMoving) 또는 위치 변화로 감지한 움직임(cartStatus)
