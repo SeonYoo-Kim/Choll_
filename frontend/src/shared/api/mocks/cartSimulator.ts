@@ -11,7 +11,12 @@ import { CartDetailStatus } from '@/shared/api/generated/model';
 
 import type { MapPercent } from '@/features/cart-map/model/mapTransform';
 import type { CartDetail, MapInfo } from '@/shared/api/generated/model';
-import type { CartWsEvent, FollowStatus, NavigationStatus } from '@/shared/api/ws/cartSocket';
+import type {
+  CartWsEvent,
+  FollowStatus,
+  NavigationStatus,
+  TracksUpdatedPayload,
+} from '@/shared/api/ws/cartSocket';
 
 /**
  * 개발용 카트 이동 시뮬레이터 (가짜 BE).
@@ -35,7 +40,9 @@ export const mapInfoFixture: MapInfo = {
 
 // 주의: 'ws://*/...'처럼 호스트가 와일드카드인 절대 URL 패턴은 브라우저의 URL 해석 과정에서
 // 매칭이 깨진다(msw 2.15 기준). '*'로 시작하는 패턴은 해석을 건너뛰므로 안전하다.
-const cartWsLink = ws.link('*/ws/carts/*');
+// 끝을 '*'가 아니라 ':cartId'로 둔 이유: '*'는 뒤 경로까지 삼켜서 영상 채널
+// (/ws/carts/1/video)까지 이 핸들러가 가로채고, JSON 이벤트가 영상 소켓으로 흘러간다.
+const cartWsLink = ws.link('*/ws/carts/:cartId');
 
 /** WS 연결 인터셉트 핸들러 — 등록만 해도 실서버 연결 시도(무한 재시도)를 막는다 */
 export const cartWsHandler = cartWsLink.addEventListener('connection', () => {});
@@ -113,6 +120,14 @@ export function startCartMove(zoneId: number): void {
       STEP_MS * 3 + 60,
     ),
   );
+}
+
+/**
+ * AI 사람 탐지 박스 브로드캐스트 — 영상 시뮬레이터(videoSimulator)가 프레임을 그릴 때마다
+ * 같은 좌표로 호출한다. 박스는 영상 채널이 아니라 이 이벤트 채널로 내려간다(BE 계약).
+ */
+export function broadcastTracks(payload: TracksUpdatedPayload): void {
+  broadcast({ type: 'TRACKS_UPDATED', payload });
 }
 
 /** 추종 상태 (추종 명령 모킹용) */
