@@ -21,6 +21,7 @@ Jetson ↔ STM32 인터페이스는 [docs/JETSON_TO_STM.md](../docs/JETSON_TO_ST
 | `motor/` | STM32 기반 모터 제어 |
 | `rfid/` | RFID 인식 |
 | `led/` | LED 제어 |
+| `Lidar/` | SLAM/NAV colcon 워크스페이스 (X4Pro + slam_toolbox + Nav2, `/robot_pose`·`/target_position` 계약 구현) |
 
 ## 인터페이스 계약
 

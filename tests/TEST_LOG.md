@@ -15,6 +15,36 @@
 
 ---
 
+## 2026-08-03 — ✅ EM Lidar SLAM/NAV 패키지 이관: ruff 통과 + pytest 31 통과 (Claude)
+
+- **명령**: `ruff check --config pyproject.toml choll_slam_bringup choll_nav choll_nav2` (v0.6.9,
+  repo pre-commit 고정 버전), `python3 -m pytest src/choll_nav/test/test_nav_logic.py -q`
+- **환경**: 노트북 Ubuntu 22.04 + ROS2 Humble, 워크스페이스 `~/choll/embeded` → `embedded/Lidar`로 이관
+- **브랜치**: `em/feature/Lidar`
+- **결과**: ruff All checks passed (커밋 전 13건 수정: D403 8, ANN201 4, E501 1),
+  pytest 31 passed (nav_logic 순수 로직 — ROS 소싱 불필요), `colcon build` 6패키지 통과
+- **실기 검증(노트북 + X4 Pro 실물)**: `/scan` 11.4Hz · TF 트리(map→odom→base_link→laser_frame)
+  실측 확인 · SLAM 매핑 + 지도 저장(4파일) · Nav2 goal→NAVIGATING→리커버리(Spin/Wait,
+  **BackUp 없음 = 커스텀 BT 적용 확인**)→ABORTED · `/cart/cancel`·`NAV2_UNAVAILABLE` 경로 정상.
+  좁은 공간에서 0.64m footprint 플래닝 실패는 정상 동작 — 오링카+Jetson에서 재매핑 예정
+
+<details>
+<summary>원본 출력</summary>
+
+```
+$ ruff check --config /home/ssafy/choll/S15P11C101/pyproject.toml choll_slam_bringup choll_nav choll_nav2
+All checks passed!
+
+$ python3 -m pytest src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.04s
+
+$ colcon build --symlink-install (전체 6패키지)
+Summary: 6 packages finished [18.1s]
+```
+
+</details>
+
 ## 2026-08-03 — ✅ BE 59 tests, SLAM 미터→이미지 픽셀 변환 추가 (Claude)
 
 - **명령**: `backend/gradlew.bat test`
