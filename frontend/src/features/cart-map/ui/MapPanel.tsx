@@ -1,10 +1,11 @@
 import { ShoppingCart } from 'lucide-react';
+import { useState } from 'react';
 
 import { useStartNavigation } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
-import { ZONE_NAMES, ZONE_RECTS, zoneIdOf, zoneLabel } from '../model/zones';
+import { zoneLabel } from '../model/zones';
+import { useZoneStore, zoneIndexOf } from '../model/zoneStore';
 
-import mapImage from '@/assets/map.png';
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { DEMO_CART_ID } from '@/shared/config/cart';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
@@ -24,6 +25,12 @@ export function MapPanel() {
   const isMoving = useCartMapStore((state) => state.isMoving);
   const cartStatus = useCartMapStore((state) => state.cartStatus);
   const startMove = useCartMapStore((state) => state.startMove);
+  // 서버 구역(MAP-02)을 받기 전에는 데모 구역이 들어 있다 — 어느 쪽이든 그리는 방식은 같다
+  const zones = useZoneStore((state) => state.zones);
+  const mapImageUrl = useCartMapStore((state) => state.mapImageUrl);
+  const mapUnavailable = useCartMapStore((state) => state.mapUnavailable);
+  // 불러오기에 실패한 주소를 기억한다 (주소가 바뀌면 다시 시도한다)
+  const [failedMapUrl, setFailedMapUrl] = useState<string | null>(null);
   const runState = useCartControlStore((state) => state.runState);
   const notify = useToastStore((state) => state.show);
 
@@ -35,7 +42,11 @@ export function MapPanel() {
     mutation: {
       onSuccess: (_, { data }) => {
         startMove();
-        notify(`${data.zoneId}구역으로 카트가 이동을 시작해요`);
+        // 서버 zoneId는 구역 번호가 아니므로(DB id) 화면 순서로 되돌려 표시한다
+        const zoneIndex = zoneIndexOf(data.zoneId);
+        notify(
+          `${zoneIndex === null ? '해당 구역' : zoneLabel(zoneIndex)}으로 카트가 이동을 시작해요`,
+        );
       },
       onError: () => {
         notify('이동 명령을 보내지 못했어요. 잠시 후 다시 시도해주세요');
@@ -43,31 +54,59 @@ export function MapPanel() {
     },
   });
 
+  // 지도를 못 그리면 예시 평면도로 때우지 않고 에러 화면으로 넘긴다.
+  // 잘못된 그림 위에 카트 위치와 구역을 얹으면 사서가 틀린 위치를 사실로 믿게 된다.
+  // (라우트 errorElement가 "지도를 불러오지 못했어요"를 띄운다 — 사이드바는 남는다)
+  if (mapUnavailable || (mapImageUrl !== null && mapImageUrl === failedMapUrl)) {
+    throw new Error(`지도 이미지를 불러오지 못했습니다 (imageUrl: ${mapImageUrl ?? '없음'})`);
+  }
+
   const handleZoneClick = (zoneIndex: number) => {
     if (zoneIndex === cartZone) {
       notify(`${zoneLabel(zoneIndex)}에 이미 카트가 있어요`);
       return;
     }
-    startNavigation({ cartId: DEMO_CART_ID, data: { zoneId: zoneIdOf(zoneIndex) } });
+    const zoneId = zones[zoneIndex]?.id;
+    if (zoneId === undefined) {
+      return;
+    }
+    startNavigation({ cartId: DEMO_CART_ID, data: { zoneId } });
   };
+
+  // 아직 지도 정보를 받는 중 — 카트·구역을 얹을 바탕이 없으니 자리만 잡아 둔다
+  if (mapImageUrl === null) {
+    return (
+      <div className={styles.panel}>
+        <div className={styles.canvas}>
+          <p className={styles.loading}>지도를 불러오는 중이에요…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.panel}>
       {/* 패널 제목은 제거 — MapPage의 h1("도서관 지도")과 중복이라 지도만 남긴다 */}
       <div className={styles.canvas}>
-        <img src={mapImage} alt="" className={styles.mapImage} />
-        {ZONE_RECTS.map((rect, i) => (
+        {/* 서버가 준 지도만 그린다 — 못 그리면 위에서 에러 화면으로 넘어간다 */}
+        <img
+          src={mapImageUrl}
+          onError={() => setFailedMapUrl(mapImageUrl)}
+          alt=""
+          className={styles.mapImage}
+        />
+        {zones.map((zone, i) => (
           <button
-            key={ZONE_NAMES[i]}
+            key={zone.id}
             disabled={cartStatus !== 'IDLE' || following || isPending}
             onClick={() => handleZoneClick(i)}
-            aria-label={`${zoneLabel(i)} ${ZONE_NAMES[i]}로 카트 이동`}
+            aria-label={`${zoneLabel(i)} ${zone.name}로 카트 이동`}
             className={`${styles.zone} ${i === cartZone ? styles.zoneActive : ''}`}
             style={{
-              left: `${rect.left}%`,
-              top: `${rect.top}%`,
-              width: `${rect.width}%`,
-              height: `${rect.height}%`,
+              left: `${zone.rect.left}%`,
+              top: `${zone.rect.top}%`,
+              width: `${zone.rect.width}%`,
+              height: `${zone.rect.height}%`,
             }}
           />
         ))}

@@ -23,6 +23,28 @@ export interface SelectFollowTargetResponse {
   status: string;
 }
 
+/**
+ * 명령이 카트로 나갔다고 볼 상태값.
+ * BE와 값 이름이 확정되지 않아 목록으로 둔다 (추종 상태 화이트리스트와 같은 방식).
+ * TODO: BE 확정 시 값 목록을 맞출 것.
+ */
+const SENT_STATUSES: readonly string[] = ['SENT'];
+
+/**
+ * 서버가 대상 선택을 받아들였는지 판정한다.
+ *
+ * 본문이 없으면(204 등) 판단할 근거가 없으므로 성공으로 본다 —
+ * **명시적으로 다른 상태값을 준 경우에만** 실패로 처리한다.
+ * 이 검사가 없으면 서버가 거절해도 화면은 곧바로 추종 시작까지 진행해 버린다.
+ */
+export function isTargetCommandSent(response: SelectFollowTargetResponse | undefined): boolean {
+  const status = response?.status;
+  if (status === undefined || status === null || status === '') {
+    return true;
+  }
+  return SENT_STATUSES.includes(status.toUpperCase());
+}
+
 const selectFollowTarget = (cartId: number, data: SelectFollowTargetBody) =>
   http<SelectFollowTargetResponse>({
     url: `/api/carts/${cartId}/follow/target`,

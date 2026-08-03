@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 
 import { unwrapAngle } from './angle';
-import { ZONE_POSITIONS, zoneIndexOf, zoneIndexOfPoint } from './zones';
+import { ZONE_POSITIONS } from './zones';
+import { zoneIndexOf, zoneIndexOfPoint } from './zoneStore';
 
 import type { MapPercent } from './mapTransform';
 import type { CartDetailStatus } from '@/shared/api/generated/model';
@@ -66,6 +67,17 @@ interface CartMapState {
   isMoving: boolean;
   /** 도착 알림 모달에 표시할 구역 인덱스 (null이면 닫힘) */
   arrivalZone: number | null;
+  /**
+   * 서버가 알려준 지도 이미지 주소 (MAP-01 `imageUrl`). 아직 못 받았으면 null.
+   *
+   * 이 그림을 못 그리면 대체 이미지를 쓰지 않는다 — 번들된 `assets/map.png`는 예시 평면도라,
+   * 그 위에 실제 카트 좌표와 구역을 얹으면 **틀린 위치를 사실처럼 보여주게 된다.**
+   */
+  mapImageUrl: string | null;
+  /** 지도를 쓸 수 없는 상태 (MAP-01 조회 실패, 또는 응답에 이미지 주소가 없음) */
+  mapUnavailable: boolean;
+  /** MAP-01 조회 결과 반영 — mapInfo가 undefined이고 isError도 false면 아직 불러오는 중이다 */
+  applyMapInfo: (imageUrl: string | null | undefined, isError: boolean) => void;
   /** 이동 명령(NAV-01) 접수 성공 시 낙관적 표시 — WS 이벤트 도착 전 버튼 잠금용 */
   startMove: () => void;
   /**
@@ -106,6 +118,15 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   navStatus: null,
   isMoving: false,
   arrivalZone: null,
+  mapImageUrl: null,
+  mapUnavailable: false,
+  applyMapInfo: (imageUrl, isError) =>
+    set({
+      mapImageUrl: imageUrl ?? null,
+      // 조회가 실패했거나, 응답은 왔는데 이미지 주소가 비어 있으면 그릴 지도가 없는 것이다.
+      // imageUrl이 undefined면 아직 응답 전이므로 실패로 보지 않는다
+      mapUnavailable: isError || imageUrl === null || imageUrl === '',
+    }),
   startMove: () => set({ isMoving: true, cartStatus: 'MOVING', navStatus: 'ACCEPTED' }),
   applyPosition: (position, yaw) => {
     const state = get();

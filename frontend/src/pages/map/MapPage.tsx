@@ -3,7 +3,8 @@ import { CircleStop } from 'lucide-react';
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { useStopCart } from '@/features/cart-control/model/useStopCart';
 import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
-import { ZONE_NAMES, zoneLabel } from '@/features/cart-map/model/zones';
+import { zoneLabel } from '@/features/cart-map/model/zones';
+import { useZoneName } from '@/features/cart-map/model/zoneStore';
 import { ArrivalModal } from '@/features/cart-map/ui/ArrivalModal';
 import { MapPanel } from '@/features/cart-map/ui/MapPanel';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
@@ -27,6 +28,7 @@ const NAV_STATUS_LABELS: Record<NavigationStatus, string> = {
 export function MapPage() {
   // 위치 좌표는 이 화면이 직접 쓰지 않는다 — 통째로 구독하면 좌표가 올 때마다 페이지 전체가 다시 그려진다
   const cartZone = useCartMapStore((state) => state.cartZone);
+  const zoneName = useZoneName(cartZone);
   const isMoving = useCartMapStore((state) => state.isMoving);
   const cartStatus = useCartMapStore((state) => state.cartStatus);
   const navStatus = useCartMapStore((state) => state.navStatus);
@@ -85,7 +87,7 @@ export function MapPage() {
               ) : (
                 <>
                   {zoneLabel(cartZone)}
-                  <span className={styles.zoneName}>{ZONE_NAMES[cartZone]}</span>
+                  <span className={styles.zoneName}>{zoneName}</span>
                 </>
               )}
             </strong>
