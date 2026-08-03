@@ -1,8 +1,8 @@
-"""SerialLink의 포트 열기/닫기/송신 단위 테스트.
+"""SerialLink의 포트 열기/닫기/송신/수신 단위 테스트.
 
 실제 하드웨어(`/dev/ttyACM*`) 없이 Linux 표준 라이브러리 `pty`로 검증한다.
-수신(read/readline)은 5c-1 범위가 아니므로 테스트하지 않는다 — PTY master에서
-직접 읽어 보낸 바이트만 확인한다.
+파일 끝에는 `PTY master -> SerialLink.read_available() -> LineDecoder.feed()`
+통합 테스트도 포함한다(8b).
 
 실행::
 
@@ -13,11 +13,13 @@
 
 import os
 import pty
+import time
 from collections.abc import Iterator
 
 import pytest
 import serial
 
+from stm_serial_bridge.line_decoder import LineDecoder
 from stm_serial_bridge.serial_link import SerialLink, SerialLinkError
 
 BAUD_RATE = 115200
@@ -373,3 +375,263 @@ def test_write_does_not_append_or_modify_the_payload(pty_pair: tuple[str, int]) 
         assert _read_all(master_fd) == b"PING"
     finally:
         link.close()
+
+
+# ---------------------------------------------------------------------------
+# read_available() — 8b-1에서 추가
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_bytes(link: SerialLink, expected_length: int) -> bytes:
+    """Poll read_available() until enough bytes arrive (or attempts run out).
+
+    PTY는 즉시 전달되는 편이지만 스케줄링에 따라 한 번의 호출로 다 안 읽힐 수 있다.
+    부분 read는 오류가 아니므로 여러 번 호출해 모으는 것이 정상 사용법이다.
+
+    Args:
+        link: 열려 있는 링크.
+        expected_length: 기대하는 총 바이트 수.
+
+    Returns:
+        모인 바이트(모자랄 수도 있다 — 호출자가 단정한다).
+    """
+    received = bytearray()
+    for _ in range(200):
+        received.extend(link.read_available())
+        if len(received) >= expected_length:
+            break
+        time.sleep(0.005)
+    return bytes(received)
+
+
+def test_read_available_returns_empty_when_no_data(pty_pair: tuple[str, int]) -> None:
+    """대기 중 데이터가 없으면 b""를 반환한다(오류가 아니다)."""
+    slave_path, _master_fd = pty_pair
+    link = SerialLink(slave_path, BAUD_RATE)
+    link.open()
+    try:
+        assert link.read_available() == b""
+        assert link.read_available() == b""  # 반복 호출도 안전
+    finally:
+        link.close()
+
+
+def test_read_available_returns_exact_bytes(pty_pair: tuple[str, int]) -> None:
+    """master가 보낸 bytes를 정확히 그대로 반환한다."""
+    slave_path, master_fd = pty_pair
+    payload = b"STATUS,2.00,1.95,2.00,1.97,36,37,15231,15188\r\n"
+    link = SerialLink(slave_path, BAUD_RATE)
+    link.open()
+    try:
+        os.write(master_fd, payload)
+        assert _wait_for_bytes(link, len(payload)) == payload
+    finally:
+        link.close()
+
+
+def test_read_available_accumulates_across_chunks(pty_pair: tuple[str, int]) -> None:
+    """여러 번 나뉘어 도착한 bytes를 여러 호출로 모을 수 있다(부분 read 정상)."""
+    slave_path, master_fd = pty_pair
+    link = SerialLink(slave_path, BAUD_RATE)
+    link.open()
+    try:
+        received = bytearray()
+        for chunk in (b"STATUS,2.00,", b"1.95,2.00,1.97,", b"36,37,15231,15188\r\n"):
+            os.write(master_fd, chunk)
+            received.extend(_wait_for_bytes(link, 1))
+        assert bytes(received) == b"STATUS,2.00,1.95,2.00,1.97,36,37,15231,15188\r\n"
+    finally:
+        link.close()
+
+
+def test_read_available_does_not_decode_or_assemble(pty_pair: tuple[str, int]) -> None:
+    """★ 디코딩·줄 조립을 하지 않는다 — raw bytes만 돌려준다.
+
+    두 줄을 한 번에 보내도 줄 단위로 쪼개지 않고, CRLF도 벗기지 않으며, 반환형은
+    항상 bytes다. 줄 조립은 LineDecoder의 책임이다.
+    """
+    slave_path, master_fd = pty_pair
+    payload = b"FAULT,STALL,LEFT\r\nSTALL_RESET,OK\r\n"
+    link = SerialLink(slave_path, BAUD_RATE)
+    link.open()
+    try:
+        os.write(master_fd, payload)
+        received = _wait_for_bytes(link, len(payload))
+
+        assert isinstance(received, bytes)
+        assert received == payload  # 두 줄이 한 덩어리로, CRLF 포함
+        assert b"\r\n" in received
+    finally:
+        link.close()
+
+
+def test_read_available_before_open_raises_serial_link_error(
+    pty_slave_path: str,
+) -> None:
+    """한 번도 열지 않은 링크에서 읽으면 SerialLinkError다."""
+    link = SerialLink(pty_slave_path, BAUD_RATE)
+
+    with pytest.raises(SerialLinkError, match="port is not open"):
+        link.read_available()
+
+
+def test_read_available_after_close_raises_serial_link_error(
+    pty_slave_path: str,
+) -> None:
+    """열었다 닫은 뒤 읽으면 SerialLinkError다."""
+    link = SerialLink(pty_slave_path, BAUD_RATE)
+    link.open()
+    link.close()
+
+    with pytest.raises(SerialLinkError, match="port is not open"):
+        link.read_available()
+
+
+class _FakeReadSerial:
+    """읽기 실패 경로 주입용 fake. `in_waiting` 또는 `read()`에서 예외를 낸다."""
+
+    def __init__(
+        self,
+        *,
+        in_waiting_error: Exception | None = None,
+        read_error: Exception | None = None,
+        pending: int = 8,
+        read_result: object = b"",
+    ) -> None:
+        self.is_open = True
+        self._in_waiting_error = in_waiting_error
+        self._read_error = read_error
+        self._pending = pending
+        self._read_result = read_result
+
+    @property
+    def in_waiting(self) -> int:
+        """Raise the configured error, or report the pending byte count."""
+        if self._in_waiting_error is not None:
+            raise self._in_waiting_error
+        return self._pending
+
+    def read(self, size: int) -> object:  # noqa: ARG002 - fake는 size를 쓰지 않는다
+        """Raise the configured error, or return the configured value."""
+        if self._read_error is not None:
+            raise self._read_error
+        return self._read_result
+
+    def close(self) -> None:
+        """Mark the fake port closed."""
+        self.is_open = False
+
+
+@pytest.mark.parametrize(
+    "error",
+    [serial.SerialException("device disconnected"), OSError(5, "Input/output error")],
+)
+def test_in_waiting_error_becomes_serial_link_error(
+    pty_slave_path: str, error: Exception
+) -> None:
+    """`in_waiting` 조회 예외가 SerialLinkError로 변환되고 진단 정보가 담긴다."""
+    link = SerialLink(pty_slave_path, BAUD_RATE)
+    link._serial = _FakeReadSerial(in_waiting_error=error)  # noqa: SLF001
+
+    with pytest.raises(SerialLinkError) as error_info:
+        link.read_available()
+
+    message = str(error_info.value)
+    assert "Serial read failed" in message
+    assert pty_slave_path in message
+    assert str(BAUD_RATE) in message
+    assert "reason=" in message
+
+
+@pytest.mark.parametrize(
+    "error",
+    [serial.SerialException("read failed"), OSError(5, "Input/output error")],
+)
+def test_read_error_becomes_serial_link_error(
+    pty_slave_path: str, error: Exception
+) -> None:
+    """`read()` 예외가 SerialLinkError로 변환된다."""
+    link = SerialLink(pty_slave_path, BAUD_RATE)
+    link._serial = _FakeReadSerial(read_error=error)  # noqa: SLF001
+
+    with pytest.raises(SerialLinkError, match="Serial read failed"):
+        link.read_available()
+
+
+def test_read_available_treats_none_result_as_empty(pty_slave_path: str) -> None:
+    """pyserial이 None을 돌려주는 구현에서도 b""로 정규화한다(오류 아님)."""
+    link = SerialLink(pty_slave_path, BAUD_RATE)
+    link._serial = _FakeReadSerial(read_result=None)  # noqa: SLF001
+
+    assert link.read_available() == b""
+
+
+def test_read_available_returns_partial_read_without_error(
+    pty_slave_path: str,
+) -> None:
+    """`in_waiting`보다 적게 읽혀도 오류가 아니다 — 읽힌 만큼만 반환한다."""
+    link = SerialLink(pty_slave_path, BAUD_RATE)
+    link._serial = _FakeReadSerial(pending=100, read_result=b"ABC")  # noqa: SLF001
+
+    assert link.read_available() == b"ABC"
+
+
+# ---------------------------------------------------------------------------
+# 통합: PTY master -> SerialLink.read_available() -> LineDecoder.feed()
+# ---------------------------------------------------------------------------
+
+
+def test_pty_to_serial_link_to_line_decoder_restores_lines(
+    pty_pair: tuple[str, int],
+) -> None:
+    """★ 실제 PTY를 거쳐 STATUS/FAULT 줄이 정확히 복원된다.
+
+    SerialLink는 raw bytes만, LineDecoder는 줄 조립만 담당하는 구성이 실제로
+    맞물려 동작하는지 확인한다.
+    """
+    slave_path, master_fd = pty_pair
+    status_line = "STATUS,2.00,1.95,2.00,1.97,36,37,15231,15188"
+    fault_line = "FAULT,STALL,BOTH"
+
+    link = SerialLink(slave_path, BAUD_RATE)
+    decoder = LineDecoder()
+    link.open()
+    try:
+        os.write(master_fd, f"{status_line}\r\n{fault_line}\r\n".encode())
+
+        lines: list[str] = []
+        for _ in range(200):
+            lines.extend(decoder.feed(link.read_available()))
+            if len(lines) >= 2:
+                break
+            time.sleep(0.005)
+    finally:
+        link.close()
+
+    assert lines == [status_line, fault_line]
+    assert decoder.pending_bytes == 0
+
+
+def test_pty_split_writes_are_reassembled_by_decoder(
+    pty_pair: tuple[str, int],
+) -> None:
+    """한 줄을 조각내어 쓰면 LineDecoder가 다시 하나로 조립한다."""
+    slave_path, master_fd = pty_pair
+    status_line = "STATUS,-2.00,-1.95,-2.00,-1.97,-36,-37,-15231,-15188"
+
+    link = SerialLink(slave_path, BAUD_RATE)
+    decoder = LineDecoder()
+    link.open()
+    try:
+        lines: list[str] = []
+        for chunk in (b"STATUS,-2.00,-1.95,", b"-2.00,-1.97,-36,", b"-37,-15231,-15188\r\n"):
+            os.write(master_fd, chunk)
+            for _ in range(50):
+                lines.extend(decoder.feed(link.read_available()))
+                if lines:
+                    break
+                time.sleep(0.005)
+    finally:
+        link.close()
+
+    assert lines == [status_line]

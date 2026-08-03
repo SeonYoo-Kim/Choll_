@@ -1,11 +1,16 @@
-"""USB Serial 연결 담당 모듈 — 포트 열기/닫기만 책임진다.
+"""USB Serial 담당 모듈 — 포트 열기/닫기와 raw bytes 송수신만 책임진다.
 
 pyserial을 import하는 유일한 모듈이다. `rclpy`·ROS 메시지·ROS 파라미터에 의존하지
 않으므로, 하드웨어 없이 Linux PTY(`pty.openpty()`)만으로 단위 테스트할 수 있다.
 
-구현 단계 5c-1 범위: **연결(open/close) + 송신(write)까지.** `read()`/`readline()`과
-수신 스레드·별도 write 스레드는 아직 만들지 않는다. 즉 이 모듈은 보낼 수는 있지만
-받지는 못한다.
+구현 단계 8b 범위: **연결(open/close) + 송신(write) + 수신(read_available)까지.**
+수신은 **raw bytes만** 다룬다 — 줄 조립은 `line_decoder.LineDecoder`, 한 줄의 의미
+해석은 `packet_parser.parse_packet()`이 담당한다. 수신 스레드나 별도 write 스레드는
+만들지 않는다(호출자가 ROS2 타이머에서 폴링한다).
+
+    SerialLink        : 포트 I/O, raw bytes read/write
+    LineDecoder       : 부분 수신 bytes 누적 → 완성된 줄
+    parse_packet()    : 완성된 str 한 줄 → 의미
 
 STM 통신 프로토콜 정본: embedded/motor/docs/serial_protocol.md
 """
@@ -173,6 +178,60 @@ class SerialLink:
                 f"baud_rate={self._baud_rate}, "
                 f"reason=partial write ({written} of {len(payload)} bytes)"
             )
+
+    def read_available(self) -> bytes:
+        """Read whatever bytes are already waiting on the port. Non-blocking.
+
+        **raw bytes만 다룬다.** 디코딩·줄 조립·패킷 해석을 하지 않는다 — 줄 조립은
+        `line_decoder.LineDecoder`, 의미 해석은 `packet_parser.parse_packet()`의 책임이다.
+        이 계층을 섞으면 부분 수신 처리와 포트 오류 처리가 한 덩어리가 되어 테스트가
+        어려워진다.
+
+        대기 중인 데이터가 없으면 `b""`를 반환한다(오류가 아니다). 20Hz 타이머 콜백에서
+        호출되므로 절대 블로킹하지 않아야 하며, 포트를 `timeout=0.0`으로 열어 이를 보장한다.
+
+        **부분 read는 오류가 아니다.** `in_waiting`이 알려준 만큼 다 읽히지 않아도 읽힌
+        바이트만 그대로 반환하고, 나머지는 다음 호출에서 읽는다. STM은 27~73byte 줄을
+        10Hz로 보내므로 한 줄이 여러 호출에 걸쳐 도착하는 것이 정상이다.
+
+        Returns:
+            지금 읽어낸 바이트. 대기 중 데이터가 없으면 `b""`.
+
+        Raises:
+            SerialLinkError: 포트가 열려 있지 않을 때, 또는 `in_waiting` 조회나
+                `read()`가 실패했을 때. 메시지에 port·baud_rate와 원래 이유를 담는다.
+        """
+        # 포트 상태 확인을 pyserial 호출 전에 한다 — write()와 같은 이유다.
+        if not self.is_open:
+            raise SerialLinkError(
+                f"Serial read failed: port={self._port}, "
+                f"baud_rate={self._baud_rate}, reason=port is not open"
+            )
+
+        try:
+            pending = self._serial.in_waiting
+        except (serial.SerialException, OSError) as error:
+            raise SerialLinkError(
+                f"Serial read failed: port={self._port}, "
+                f"baud_rate={self._baud_rate}, reason={error}"
+            ) from error
+
+        if not pending:
+            return b""
+
+        try:
+            received = self._serial.read(pending)
+        except (serial.SerialException, OSError) as error:
+            raise SerialLinkError(
+                f"Serial read failed: port={self._port}, "
+                f"baud_rate={self._baud_rate}, reason={error}"
+            ) from error
+
+        # pyserial은 bytes를 반환하지만, timeout=0.0에서 아무것도 못 읽으면 None을
+        # 돌려주는 구현도 있어 방어한다. 부분 read와 마찬가지로 오류로 보지 않는다.
+        if received is None:
+            return b""
+        return bytes(received)
 
     def close(self) -> None:
         """Close the serial port if it is open.

@@ -1,12 +1,15 @@
 """stm_serial_bridge_node — /cmd_vel을 STM32 모터 제어 보드로 중계하는 브리지 노드.
 
-구현 단계 5c-1 (현재): `/cmd_vel` 구독 → 최신 좌우 목표값과 수신 시각만 **저장** →
+**송신 경로(TX)**: `/cmd_vel` 구독 → 최신 좌우 목표값과 수신 시각만 **저장** →
 독립적인 `tx_rate_hz`(기본 20Hz) 타이머가 cmd_vel timeout을 검사해 보낼 목표를
 고르고 → `SET_WHEEL_VEL` 명령 문자열 생성 → **송신 단일 출구 `_send_command()`** 가
-`dry_run=false`일 때 **실제 Serial write를 수행**한다.
+`dry_run=false`일 때 실제 Serial write를 수행한다.
+→ **2026-08-02 실기 검증 완료** (실제 STM32 + 모터로 전진/후진/좌우회전 및 watchdog 정지 확인).
 
-⚠️ 5c-1 검증은 Linux PTY(`/dev/pts/*`)로만 했다. 실제 `/dev/ttyACM*`(STM32) 연결과
-모터 구동은 아직 하지 않았다.
+**수신 경로(RX, 구현 단계 8c — 현재 작업)**: `rx_poll_hz`(기본 50Hz) 전용 타이머 →
+`SerialLink.read_available()` → `LineDecoder.feed()` → `parse_packet()` → 종류별 처리 →
+`/stm/*` 상태 토픽 발행.
+⚠️ **수신 경로는 아직 실기 미검증이다.** PTY로만 확인했다.
 
 콜백과 송신을 분리한 이유: STM32는 유효한 `SET_WHEEL_VEL`을 주기적으로 받아야 하고,
 `/cmd_vel`이 끊겼을 때 마지막 속도를 계속 반복하면 위험하다. 명령 생성 주기를
@@ -23,21 +26,23 @@ Watchdog 상태(`command_watchdog.select_wheel_command()`):
 
 `dry_run` 정책:
 - `dry_run=true`(기본): `SerialLink`를 **생성하지도 않는다.** 포트를 열지 않으므로
-  `serial_port`가 존재하지 않는 경로여도 정상 실행된다. 명령은 `DRY-RUN` 로그만.
-- `dry_run=false`: `SerialLink`를 만들어 포트를 연다. 연결에 성공한 뒤에야 구독·타이머를
-  시작하고, 매 tick의 명령을 실제로 write한 뒤 **성공한 경우에만** `TX` 로그를 남긴다.
-  연결 실패 시 구독·타이머를 시작하지 않고 0이 아닌 종료 코드로 끝낸다.
+  `serial_port`가 존재하지 않는 경로여도 정상 실행된다. 명령은 `DRY-RUN` 로그만이며
+  **RX 타이머도 만들지 않는다**(읽을 포트가 없다). 단 `/stm/*` Publisher는 생성해
+  `connected=false`·`fault=NONE` 초기 상태를 발행한다.
+- `dry_run=false`: `SerialLink`를 만들어 포트를 연다. 연결에 성공한 뒤에야 구독·TX/RX
+  타이머를 시작하고, 매 tick의 명령을 실제로 write한 뒤 **성공한 경우에만** `TX` 로그를
+  남긴다. 연결 실패 시 아무 타이머도 시작하지 않고 0이 아닌 종료 코드로 끝낸다.
 
-write가 실패하면 경고만 남기고 계속하지 않는다 — 사용자가 "명령이 가고 있다"고 믿는데
-실제로는 가지 않는 상태가 가장 위험하다. 타이머 콜백은 fatal 상태만 래치하고 타이머를
-취소한 뒤 정상 반환하며(`_abort_on_tx_failure()`), 실제 종료 정리(포트 close → node
-destroy → rclpy shutdown)와 종료 코드 1은 `main()`의 공통 경로가 담당한다.
+Serial 오류(write/read 어느 쪽이든)는 경고만 남기고 계속하지 않는다 — 사용자가 "명령이
+가고 있다"고 믿는데 실제로는 가지 않는 상태가 가장 위험하다. 타이머 콜백은 fatal 상태만
+래치하고 TX/RX 타이머를 모두 취소한 뒤 정상 반환하며(`_abort_on_serial_failure()`),
+실제 종료 정리(포트 close → node destroy → rclpy shutdown)와 종료 코드 1은 `main()`의
+공통 경로가 담당한다.
 
 이 단계에서는 **아직 구현하지 않은 것**:
-- Serial read/readline, 수신 스레드, STATUS 파싱
-- 바퀴 최대 속도 clamp
-- STOP/ESTOP/RESET_STALL/SET_PI_GAINS 명령, 상태 토픽 발행
-- 실제 `/dev/ttyACM*` 연결 및 모터 구동
+- `STOP`/`ESTOP`/`RESET_STALL`/`SET_PI_GAINS` 명령 송신
+- Serial 자동 재연결
+- STATUS 수신 경로의 실기 검증(현재 PTY만), 좌우 물리 엔코더 매핑 확정
 
 STM 통신 프로토콜 정본: embedded/motor/docs/serial_protocol.md
 """
@@ -51,9 +56,20 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, Float32MultiArray, Int16MultiArray, Int32MultiArray, String
 
 from stm_serial_bridge.command_watchdog import select_wheel_command
 from stm_serial_bridge.differential_drive import cmd_vel_to_wheel_rad_s
+from stm_serial_bridge.line_decoder import LineDecoder
+from stm_serial_bridge.packet_parser import (
+    FaultPacket,
+    PacketKind,
+    PiGainsPacket,
+    StallCause,
+    StatusPacket,
+    parse_packet,
+)
 from stm_serial_bridge.protocol import build_set_wheel_vel_command
 from stm_serial_bridge.serial_link import SerialLink, SerialLinkError
 from stm_serial_bridge.wheel_speed_limiter import limit_wheel_rad_s
@@ -66,6 +82,31 @@ CMD_VEL_LOG_THROTTLE_SEC = 0.5
 CMD_VEL_TOPIC = "/cmd_vel"
 CMD_VEL_QOS_DEPTH = 10
 
+# STATUS 데이터 토픽. 값이 계속 바뀌는 스트림이라 일반 depth 10으로 발행한다.
+WHEEL_TARGET_TOPIC = "/stm/wheel_target_rad_s"
+WHEEL_ACTUAL_TOPIC = "/stm/wheel_actual_rad_s"
+PWM_TOPIC = "/stm/pwm"
+ENCODER_TOTAL_TOPIC = "/stm/encoder_total"
+STATUS_DATA_QOS_DEPTH = 10
+
+# 상태 토픽. 최신 값 하나만 의미가 있으므로 depth=1 + TRANSIENT_LOCAL로 발행해
+# 늦게 붙은 구독자도 곧바로 현재 상태를 받게 한다.
+CONNECTED_TOPIC = "/stm/connected"
+FAULT_TOPIC = "/stm/fault"
+
+# /stm/fault 값. STM의 Stall Fault는 latched 상태이므로 "현재 상태"로 표현한다
+# (단발 이벤트 로그가 아니다).
+FAULT_NONE = "NONE"
+FAULT_STALL_LEFT = "STALL_LEFT"
+FAULT_STALL_RIGHT = "STALL_RIGHT"
+FAULT_STALL_BOTH = "STALL_BOTH"
+
+_STALL_CAUSE_TO_FAULT = {
+    StallCause.LEFT: FAULT_STALL_LEFT,
+    StallCause.RIGHT: FAULT_STALL_RIGHT,
+    StallCause.BOTH: FAULT_STALL_BOTH,
+}
+
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
@@ -74,11 +115,11 @@ EXIT_FAILURE = 1
 SPIN_TIMEOUT_SEC = 0.1
 
 # dry_run=false로 포트를 연 직후, 실제 전송이 시작됨을 사용자에게 알리는 문구.
-# 5c-1에서는 PTY 검증만 했으므로 실기 대상이 아님도 함께 알린다.
+# 송신 경로는 2026-08-02 실기 검증을 마쳤고, 아직 검증되지 않은 것은 수신 경로다.
 TX_ENABLED_NOTICE = (
     "TX is ENABLED: every timer tick will be written to the serial port. "
-    "Stage 5c-1 is verified with a Linux PTY only — do not connect a real STM32 "
-    "or power the motors yet."
+    "The TX path was verified on real hardware (2026-08-02); the RX/STATUS path "
+    "is still PTY-only, so treat /stm/* topics as unverified."
 )
 
 
@@ -86,19 +127,18 @@ class StmSerialBridgeNode(Node):
     """Convert /cmd_vel into STM32 wheel-velocity commands.
 
     향후 이 노드가 `/cmd_vel`을 좌우 바퀴 목표 각속도로 변환해 USB Serial로
-    STM32에 전달하게 된다. 현재는 명령 문자열 생성과 포트 연결까지만 하고,
-    실제 송신은 하지 않는다.
+    STM32에 전달하고(TX), STM이 보내는 `STATUS`를 읽어 `/stm/*` 상태 토픽으로
+    발행한다(RX).
 
     생성은 두 단계로 나뉜다: `__init__`은 파라미터만 준비하고, `start()`가 실행 모드를
-    확정(필요하면 포트 연결)한 뒤에야 `/cmd_vel` 구독을 시작한다. 이렇게 하면
+    확정(필요하면 포트 연결)한 뒤에야 구독과 타이머를 시작한다. 이렇게 하면
     "연결 실패 시 구독하지 않는다"가 호출 순서에 의존하지 않고 구조적으로 보장된다.
     """
 
     def __init__(self) -> None:
-        """Declare and log parameters. 연결과 `/cmd_vel` 구독은 `start()`에서 한다."""
+        """Declare and log parameters. 연결·구독·타이머는 모두 `start()`에서 한다."""
         super().__init__("stm_serial_bridge")
 
-        # --- tx_rate_hz/cmd_vel_timeout_sec은 이 단계에서 로그 출력 외 사용하지 않음 ---
         self.declare_parameter("serial_port", "/dev/ttyACM0")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("wheel_radius_m", 0.065)
@@ -112,6 +152,12 @@ class StmSerialBridgeNode(Node):
         # STM32에는 목표 각속도 상한 clamp가 아직 없으므로(MOTION_CONTROLLER_MAX_
         # WHEEL_RAD_S 미적용) 현재 상한 방어는 브리지 쪽에만 존재한다.
         self.declare_parameter("max_wheel_rad_s", 1.0)
+        # RX 폴링 주기. STATUS는 10Hz로 오므로 50Hz면 한 줄이 도착한 뒤 최대 20ms 안에
+        # 읽힌다. TX 타이머(20Hz)와 분리한 이유는 두 주기가 서로 다른 이유로 바뀔 수
+        # 있기 때문이다(송신 주기는 STM timeout, 수신 주기는 상태 신선도가 기준).
+        self.declare_parameter("rx_poll_hz", 50.0)
+        # 마지막 유효 STATUS 이후 이 시간 이상 지나면 /stm/connected를 false로 내린다.
+        self.declare_parameter("status_timeout_sec", 0.5)
 
         self._log_parameters()
 
@@ -124,10 +170,31 @@ class StmSerialBridgeNode(Node):
         self._tx_rate_hz = float(self._param_value("tx_rate_hz"))
         self._cmd_vel_timeout_sec = float(self._param_value("cmd_vel_timeout_sec"))
         self._max_wheel_rad_s = float(self._param_value("max_wheel_rad_s"))
+        self._rx_poll_hz = float(self._param_value("rx_poll_hz"))
+        self._status_timeout_sec = float(self._param_value("status_timeout_sec"))
 
         self._cmd_vel_count = 0
         self._subscription: object | None = None
         self._tx_timer: object | None = None
+        self._rx_timer: object | None = None
+
+        # --- RX 상태 ---
+        # 줄 조립은 LineDecoder가, 의미 해석은 parse_packet()이 담당한다.
+        self._decoder = LineDecoder()
+        # /stm/connected는 **포트 open 여부가 아니라 유효한 STATUS 수신 여부**다.
+        # 포트가 열려 있어도 STM이 조용하면 데이터는 신선하지 않으므로 false여야 한다.
+        self._connected = False
+        # None = 아직 유효한 STATUS를 한 번도 받지 않음.
+        self._last_status_time_sec: float | None = None
+        # Stall Fault는 STM에서 latched 상태이므로 브리지도 상태로 들고 간다.
+        # 연결이 끊겨도 임의로 NONE으로 되돌리지 않는다(마지막 확인값 유지).
+        self._fault_state = FAULT_NONE
+        self._status_count = 0
+        self._malformed_count = 0
+        # 마지막으로 발행한 상태값. 50Hz마다 같은 값을 다시 쏘지 않도록 비교에 쓴다.
+        # None = 아직 한 번도 발행하지 않음(시작 시 강제 발행으로 채워진다).
+        self._last_published_connected: bool | None = None
+        self._last_published_fault: str | None = None
 
         # --- 타이머가 읽는 최신 목표 상태 ---
         # 콜백은 여기에만 쓰고, 송신은 타이머가 이 값을 읽어서 한다.
@@ -137,9 +204,11 @@ class StmSerialBridgeNode(Node):
         self._last_cmd_vel_time_sec: float | None = None
         self._tx_tick_count = 0
         self._last_watchdog_state: str | None = None
-        # Serial write가 한 번이라도 실패하면 True로 래치된다. 이후 어떤 tick도
-        # write를 시도하지 않으며, main()의 spin 루프가 이 값을 보고 빠져나온다.
-        self._tx_fatal_error = False
+        # Serial I/O(write 또는 read)가 한 번이라도 실패하면 True로 래치된다. 이후
+        # 어떤 tick도 write/read를 시도하지 않으며, main()의 spin 루프가 이 값을 보고
+        # 빠져나온다. TX/RX를 하나의 상태로 합친 이유: 포트가 고장 나면 방향과 무관하게
+        # 브리지 전체를 멈춰야 한다.
+        self._serial_fatal_error = False
         # main()이 반환할 종료 코드. 치명적 실패가 래치되면 EXIT_FAILURE로 바뀐다.
         self._requested_exit_code = EXIT_SUCCESS
 
@@ -162,23 +231,34 @@ class StmSerialBridgeNode(Node):
         return time.monotonic()
 
     def start(self) -> None:
-        """Validate parameters, connect if required, then subscribe and start the timer.
+        """Validate parameters, connect if required, then create publishers and timers.
 
         순서가 중요하다: 파라미터를 **포트를 열기 전에** 검증하고, 연결에 성공한 뒤에야
         구독과 타이머를 만든다. 어느 단계에서든 실패하면 예외가 올라가므로 구독·타이머가
         생성되지 않고, 노드가 살아 있는 채로 명령을 조용히 버리는 상태가 만들어지지 않는다.
 
+        `/stm/*` Publisher는 `dry_run` 여부와 무관하게 만들고 초기 상태
+        (`connected=false`, `fault=NONE`)를 발행한다 — 구독자가 "아직 아무 상태도 없음"과
+        "연결되지 않음"을 구분할 수 없으면 안 되기 때문이다. 반면 **RX 타이머는
+        `dry_run=false`에서만** 만든다(읽을 포트가 없으면 폴링할 이유가 없다).
+
         Raises:
-            ValueError: `tx_rate_hz`/`cmd_vel_timeout_sec`가 0 이하이거나,
-                `serial_port`/`baud_rate` 값이 유효하지 않을 때.
+            ValueError: 검증 대상 파라미터가 0 이하/비유한이거나, `serial_port`/
+                `baud_rate` 값이 유효하지 않을 때.
             SerialLinkError: `dry_run=false`인데 포트를 열 수 없을 때.
         """
-        self._validate_drive_parameters()
+        self._validate_parameters()
+
+        # 연결 시도보다 먼저 만든다 — 연결이 실패해도 connected=false가 발행되어
+        # 구독자가 상태를 알 수 있다.
+        self._create_status_publishers()
+        self._publish_connected(force=True)
+        self._publish_fault(force=True)
 
         if self._dry_run:
             self.get_logger().info(
                 "dry_run=true — SerialLink를 생성하지 않는다 "
-                "(포트를 열지 않으므로 serial_port 값은 사용되지 않음)"
+                "(포트를 열지 않으므로 serial_port 값은 사용되지 않고, RX 타이머도 없다)"
             )
         else:
             self._connect_serial()
@@ -190,15 +270,52 @@ class StmSerialBridgeNode(Node):
         tx_period_sec = 1.0 / self._tx_rate_hz
         self._tx_timer = self.create_timer(tx_period_sec, self._tx_timer_callback)
 
+        rx_description = "없음(dry_run)"
+        if not self._dry_run:
+            rx_period_sec = 1.0 / self._rx_poll_hz
+            self._rx_timer = self.create_timer(rx_period_sec, self._rx_timer_callback)
+            rx_description = f"{self._rx_poll_hz} Hz (주기 {rx_period_sec:.4f}s)"
+
         self.get_logger().info(
             f"stm_serial_bridge 시작 — {CMD_VEL_TOPIC} 구독 중, "
             f"송신 타이머 {self._tx_rate_hz} Hz (주기 {tx_period_sec:.4f}s), "
-            f"cmd_vel timeout {self._cmd_vel_timeout_sec}s "
-            "(구현 단계 5c-1: PTY로만 실제 송신 검증, 실기 미연결)"
+            f"cmd_vel timeout {self._cmd_vel_timeout_sec}s, "
+            f"수신 타이머 {rx_description}, "
+            f"STATUS timeout {self._status_timeout_sec}s"
         )
 
-    def _validate_drive_parameters(self) -> None:
-        """Reject invalid drive parameters before anything is opened or created.
+    def _create_status_publishers(self) -> None:
+        """Create the six `/stm/*` publishers.
+
+        STATUS 데이터 4개는 값이 계속 바뀌는 스트림이라 일반 depth 10으로 둔다.
+        `connected`/`fault`는 최신 값 하나만 의미가 있는 상태라 depth=1 +
+        RELIABLE + TRANSIENT_LOCAL로 두어, 늦게 붙은 구독자도 곧바로 현재 상태를 받는다.
+        """
+        self._wheel_target_publisher = self.create_publisher(
+            Float32MultiArray, WHEEL_TARGET_TOPIC, STATUS_DATA_QOS_DEPTH
+        )
+        self._wheel_actual_publisher = self.create_publisher(
+            Float32MultiArray, WHEEL_ACTUAL_TOPIC, STATUS_DATA_QOS_DEPTH
+        )
+        self._pwm_publisher = self.create_publisher(
+            Int16MultiArray, PWM_TOPIC, STATUS_DATA_QOS_DEPTH
+        )
+        self._encoder_publisher = self.create_publisher(
+            Int32MultiArray, ENCODER_TOTAL_TOPIC, STATUS_DATA_QOS_DEPTH
+        )
+
+        state_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._connected_publisher = self.create_publisher(
+            Bool, CONNECTED_TOPIC, state_qos
+        )
+        self._fault_publisher = self.create_publisher(String, FAULT_TOPIC, state_qos)
+
+    def _validate_parameters(self) -> None:
+        """Reject invalid parameters before anything is opened or created.
 
         `SerialLink`·포트·구독·타이머를 만들기 **전에** 호출된다 — 잘못된 설정으로
         장치를 점유했다가 되돌리는 일이 없도록 하기 위함이다.
@@ -220,6 +337,8 @@ class StmSerialBridgeNode(Node):
             ("tx_rate_hz", self._tx_rate_hz),
             ("cmd_vel_timeout_sec", self._cmd_vel_timeout_sec),
             ("max_wheel_rad_s", self._max_wheel_rad_s),
+            ("rx_poll_hz", self._rx_poll_hz),
+            ("status_timeout_sec", self._status_timeout_sec),
         )
         for name, value in checked:
             if not math.isfinite(value) or value <= 0.0:
@@ -249,9 +368,19 @@ class StmSerialBridgeNode(Node):
         self.get_logger().warning(TX_ENABLED_NOTICE)
 
     @property
-    def tx_fatal_error(self) -> bool:
-        """Serial write가 실패해 송신을 중단했으면 True. `main()`의 spin 루프가 읽는다."""
-        return self._tx_fatal_error
+    def serial_fatal_error(self) -> bool:
+        """Serial I/O가 실패해 송수신을 중단했으면 True. `main()`의 spin 루프가 읽는다."""
+        return self._serial_fatal_error
+
+    @property
+    def connected(self) -> bool:
+        """유효한 STATUS를 최근에 받았으면 True. 포트 open 여부와는 다르다."""
+        return self._connected
+
+    @property
+    def fault_state(self) -> str:
+        """현재 fault 상태 문자열(`NONE`/`STALL_LEFT`/`STALL_RIGHT`/`STALL_BOTH`)."""
+        return self._fault_state
 
     @property
     def requested_exit_code(self) -> int:
@@ -307,6 +436,10 @@ class StmSerialBridgeNode(Node):
             f"  max_wheel_rad_s     = {self._param_value('max_wheel_rad_s')}"
             "  <-- ⚠️ 실제 모터 정격 확정 전 임시 벤치 제한"
         )
+        logger.info(f"  rx_poll_hz          = {self._param_value('rx_poll_hz')}")
+        logger.info(
+            f"  status_timeout_sec  = {self._param_value('status_timeout_sec')}"
+        )
 
     def _param_value(self, name: str) -> object:
         """Return the current value of a declared parameter.
@@ -351,7 +484,7 @@ class StmSerialBridgeNode(Node):
             SerialLinkError: `dry_run=false`에서 실제 전송이 실패했을 때. 호출자
                 (`_tx_timer_callback`)가 잡아 치명적 오류로 처리한다.
         """
-        if self._tx_fatal_error:
+        if self._serial_fatal_error:
             # 이미 치명적 실패를 래치한 뒤라면 어떤 경로로 들어와도 write하지 않는다
             # (취소 직전 큐에 들어간 tick이 한 번 더 진입하는 경우 대비).
             return
@@ -474,12 +607,224 @@ class StmSerialBridgeNode(Node):
                 throttle_duration_sec=CMD_VEL_LOG_THROTTLE_SEC,
             )
 
-    def _abort_on_tx_failure(self, error: SerialLinkError) -> None:
-        """Latch a fatal TX failure and stop the timer. **종료는 하지 않는다.**
+    # ------------------------------------------------------------------
+    # RX: STATUS 수신 및 상태 토픽 발행
+    # ------------------------------------------------------------------
 
-        Serial write 실패를 경고만 남기고 계속 진행하면, 사용자는 명령이 STM에 가고
-        있다고 믿는데 실제로는 아무것도 가지 않는 상태가 된다 — 사람이 함께 있는
-        환경에서 가장 위험한 실패 방식이다. 따라서 즉시 송신을 멈춘다.
+    def _publish_connected(self, *, force: bool = False) -> None:
+        """Publish `/stm/connected` when the value changed (or when forced).
+
+        50Hz마다 같은 값을 다시 쏘지 않는다 — TRANSIENT_LOCAL depth=1이라 늦게 붙은
+        구독자도 마지막 값을 받으므로 변화 시점만 발행하면 충분하다.
+
+        Args:
+            force: 값이 바뀌지 않아도 발행한다. 시작 시 초기 상태 발행에 쓴다.
+        """
+        if not force and self._last_published_connected == self._connected:
+            return
+        self._connected_publisher.publish(Bool(data=self._connected))
+        self._last_published_connected = self._connected
+
+    def _publish_fault(self, *, force: bool = False) -> None:
+        """Publish `/stm/fault` when the state changed (or when forced).
+
+        Args:
+            force: 값이 바뀌지 않아도 발행한다. 시작 시 초기 상태 발행에 쓴다.
+        """
+        if not force and self._last_published_fault == self._fault_state:
+            return
+        self._fault_publisher.publish(String(data=self._fault_state))
+        self._last_published_fault = self._fault_state
+
+    def _set_connected(self, connected: bool) -> None:
+        """Update the connected state and publish/log only on change.
+
+        Args:
+            connected: 새 연결 상태.
+        """
+        if self._connected == connected:
+            return
+        self._connected = connected
+        if connected:
+            self.get_logger().info(
+                f"{CONNECTED_TOPIC}: true — 유효한 STATUS 수신 시작"
+            )
+        else:
+            self.get_logger().warning(
+                f"{CONNECTED_TOPIC}: false — 마지막 유효 STATUS 이후 "
+                f"{self._status_timeout_sec}s 이상 경과 "
+                f"(fault 상태 {self._fault_state}는 마지막 확인값을 유지)"
+            )
+        self._publish_connected()
+
+    def _set_fault_state(self, fault_state: str) -> None:
+        """Update the fault state and publish only on change.
+
+        Args:
+            fault_state: 새 fault 상태 문자열.
+        """
+        if self._fault_state == fault_state:
+            return
+        self._fault_state = fault_state
+        self._publish_fault()
+
+    def _publish_status(self, status: StatusPacket) -> None:
+        """Publish one STATUS packet to the four data topics.
+
+        모든 배열은 `[left, right]` 순서다. STATUS 와이어 순서는 `LT,LA,RT,RA`(좌우
+        교차)이므로 여기서 좌우로 다시 묶는다 — 순서를 잘못 묶으면 목표와 실측이
+        서로 섞인다.
+
+        Args:
+            status: 파싱된 STATUS 패킷.
+        """
+        self._wheel_target_publisher.publish(
+            Float32MultiArray(
+                data=[status.left_target_rad_s, status.right_target_rad_s]
+            )
+        )
+        self._wheel_actual_publisher.publish(
+            Float32MultiArray(
+                data=[status.left_actual_rad_s, status.right_actual_rad_s]
+            )
+        )
+        self._pwm_publisher.publish(
+            Int16MultiArray(data=[status.left_pwm, status.right_pwm])
+        )
+        self._encoder_publisher.publish(
+            Int32MultiArray(
+                data=[status.left_encoder_total, status.right_encoder_total]
+            )
+        )
+
+    def _handle_status(self, status: StatusPacket) -> None:
+        """Publish the STATUS data and mark the link as fresh.
+
+        Args:
+            status: 파싱된 STATUS 패킷.
+        """
+        self._status_count += 1
+        self._last_status_time_sec = self._now_sec()
+        self._publish_status(status)
+        self._set_connected(True)
+
+        self.get_logger().info(
+            f"STATUS #{self._status_count}: "
+            f"target L={status.left_target_rad_s:.2f} R={status.right_target_rad_s:.2f}, "
+            f"actual L={status.left_actual_rad_s:.2f} R={status.right_actual_rad_s:.2f}, "
+            f"pwm L={status.left_pwm} R={status.right_pwm}, "
+            f"enc L={status.left_encoder_total} R={status.right_encoder_total}",
+            throttle_duration_sec=CMD_VEL_LOG_THROTTLE_SEC,
+        )
+
+    def _handle_fault(self, fault: FaultPacket) -> None:
+        """Latch the stall fault state reported by the STM32.
+
+        Args:
+            fault: 파싱된 FAULT 패킷.
+        """
+        fault_state = _STALL_CAUSE_TO_FAULT[fault.cause]
+        self.get_logger().error(
+            f"STM Stall Fault: {fault.cause.value} -> {FAULT_TOPIC}={fault_state}. "
+            "STM은 이 상태를 latch하므로 RESET_STALL 없이는 해제되지 않는다 "
+            "(RESET_STALL 송신은 아직 구현되지 않았다)"
+        )
+        self._set_fault_state(fault_state)
+
+    def _handle_line(self, line: str) -> None:
+        """Parse one received line and dispatch by packet kind.
+
+        Args:
+            line: `LineDecoder`가 조립한 완성된 한 줄.
+        """
+        packet = parse_packet(line)
+        kind = packet.kind
+
+        if kind is PacketKind.STATUS and isinstance(packet.payload, StatusPacket):
+            self._handle_status(packet.payload)
+        elif kind is PacketKind.FAULT and isinstance(packet.payload, FaultPacket):
+            self._handle_fault(packet.payload)
+        elif kind is PacketKind.FAULT_CLEARED:
+            self.get_logger().info(
+                f"STM Stall Fault 해제됨 -> {FAULT_TOPIC}={FAULT_NONE}"
+            )
+            self._set_fault_state(FAULT_NONE)
+        elif kind is PacketKind.PI_GAINS and isinstance(
+            packet.payload, PiGainsPacket
+        ):
+            self.get_logger().info(
+                f"STM PI gains applied: kp={packet.payload.kp} ki={packet.payload.ki}"
+            )
+        elif kind is PacketKind.STALL_RESET_ACK:
+            # ACK는 "Fault가 해제됐다"는 뜻이 아니다. 해제는 FAULT_CLEARED로 통보되므로
+            # 여기서 fault 상태를 NONE으로 바꾸지 않는다(프로토콜 정본 RESET_STALL 절).
+            self.get_logger().info(
+                "STM RESET_STALL 수락 — fault 해제는 FAULT_CLEARED로 별도 통보된다"
+            )
+        elif kind is PacketKind.ERROR:
+            self.get_logger().warning(f"STM 오류 응답: {packet.raw}")
+        elif kind is PacketKind.MALFORMED:
+            self._malformed_count += 1
+            self.get_logger().warning(
+                f"손상된 수신 줄 #{self._malformed_count} "
+                f"({packet.token}: {packet.reason}): {packet.raw!r}",
+                throttle_duration_sec=CMD_VEL_LOG_THROTTLE_SEC,
+            )
+        elif kind is PacketKind.UNKNOWN:
+            self.get_logger().debug(f"알 수 없는 수신 줄(무시): {packet.raw!r}")
+        # BLANK는 조용히 무시한다(빈 줄은 오류가 아니다).
+
+    def _update_connected_timeout(self) -> None:
+        """Drop `/stm/connected` to false when STATUS has gone stale.
+
+        경계값(정확히 `status_timeout_sec` 경과)에서도 false로 내린다 — 애매한 순간에는
+        "데이터가 낡았다"고 보는 편이 안전하다. `command_watchdog`의 timeout 판정과
+        같은 규칙이다.
+        """
+        if self._last_status_time_sec is None:
+            return  # 아직 한 번도 받지 않았다 -> 이미 false
+        elapsed_sec = self._now_sec() - self._last_status_time_sec
+        if elapsed_sec >= self._status_timeout_sec:
+            self._set_connected(False)
+
+    def _rx_timer_callback(self) -> None:
+        """Read available bytes, dispatch complete lines, then check the STATUS timeout.
+
+        `rx_poll_hz` 주기로 호출된다. 읽을 데이터가 없어도(`b""`) timeout 검사는 반드시
+        수행한다 — STM이 조용해지는 것이 바로 감지해야 할 상황이기 때문이다.
+        """
+        if self._serial_fatal_error:
+            # 타이머는 취소했지만 취소 직전에 큐에 들어간 tick이 한 번 더 실행될 수 있다.
+            return
+        if self._serial_link is None:
+            return  # dry_run에서는 RX 타이머를 만들지 않으므로 도달하지 않는다
+
+        try:
+            data = self._serial_link.read_available()
+        except SerialLinkError as error:
+            self._abort_on_serial_failure(error, direction="RX")
+            return
+
+        for line in self._decoder.feed(data):
+            self._handle_line(line)
+
+        self._update_connected_timeout()
+
+    # ------------------------------------------------------------------
+    # 치명적 Serial 오류
+    # ------------------------------------------------------------------
+
+    def _abort_on_serial_failure(
+        self, error: SerialLinkError, *, direction: str
+    ) -> None:
+        """Latch a fatal serial failure and stop both timers. **종료는 하지 않는다.**
+
+        Serial 오류를 경고만 남기고 계속 진행하면, 사용자는 명령이 STM에 가고(또는
+        상태가 올라오고) 있다고 믿는데 실제로는 아무것도 오가지 않는 상태가 된다 —
+        사람이 함께 있는 환경에서 가장 위험한 실패 방식이다. 따라서 즉시 멈춘다.
+
+        TX/RX를 하나의 상태로 합친 이유: 포트가 고장 나면 방향과 무관하게 브리지 전체를
+        멈춰야 한다. 두 타이머를 모두 취소하지 않으면 남은 쪽이 계속 실패한 포트를 두드린다.
 
         이 메서드는 **타이머 콜백 안에서 호출되므로** ROS context나 노드의 수명을
         직접 건드리지 않는다. `rclpy.shutdown()`/`destroy_node()`/`close_serial()`을
@@ -487,23 +832,26 @@ class StmSerialBridgeNode(Node):
         DDS 수신 스레드가 정리되지 못하고 프로세스가 남는다(2026-08-02 실측 확인).
         실제 종료 정리는 `main()`의 공통 경로가 담당한다.
 
-        타이머를 취소하는 이유: 취소하지 않으면 종료 정리가 진행되는 동안에도 다음
-        tick이 들어와 이미 실패한 포트에 다시 write를 시도한다.
-
         Args:
-            error: 첫 write 실패 원인.
+            error: 첫 실패 원인.
+            direction: 실패한 방향(`TX`/`RX`). 로그 문구에만 쓴다.
         """
-        if self._tx_fatal_error:
+        if self._serial_fatal_error:
             return  # 이미 래치됨(중복 로그·중복 종료 요청 방지)
-        self._tx_fatal_error = True
+        self._serial_fatal_error = True
         self._requested_exit_code = EXIT_FAILURE
 
-        if self._tx_timer is not None:
-            self._tx_timer.cancel()
+        for timer in (self._tx_timer, self._rx_timer):
+            if timer is not None:
+                timer.cancel()
 
-        self.get_logger().error(f"Serial TX failed: {error}")
+        # 데이터가 더 이상 갱신되지 않으므로 연결이 끊긴 것으로 알린다.
+        # fault 상태는 마지막 확인값을 그대로 유지한다(임의로 NONE으로 되돌리지 않는다).
+        self._set_connected(False)
+
+        self.get_logger().error(f"Serial {direction} failed: {error}")
         self.get_logger().error(
-            "송신을 중단하고 노드를 종료한다 (정리는 main의 공통 종료 경로에서 수행)"
+            "송수신을 중단하고 노드를 종료한다 (정리는 main의 공통 종료 경로에서 수행)"
         )
 
     def _tx_timer_callback(self) -> None:
@@ -512,7 +860,7 @@ class StmSerialBridgeNode(Node):
         `tx_rate_hz` 주기로 호출된다. `/cmd_vel` 도착과 무관하게 항상 돌기 때문에,
         상위가 멈춰도 `timed_out`으로 넘어가 0,0을 계속 내보낼 수 있다.
         """
-        if self._tx_fatal_error:
+        if self._serial_fatal_error:
             # 타이머는 취소했지만, 취소 직전에 이미 큐에 들어간 tick이 한 번 더
             # 실행될 수 있다. 실패한 포트에 다시 write하지 않도록 여기서 막는다.
             return
@@ -565,7 +913,7 @@ class StmSerialBridgeNode(Node):
             )
         except SerialLinkError as error:
             # 실제 전송 실패는 복구 시도 대상이 아니다 — 즉시 멈추고 종료한다.
-            self._abort_on_tx_failure(error)
+            self._abort_on_serial_failure(error, direction="TX")
 
 
 def _shutdown(node: StmSerialBridgeNode) -> None:
@@ -613,7 +961,7 @@ def main(args: Sequence[str] | None = None) -> int:
         # 정리되지 못하고 프로세스가 남는다(2026-08-02 실측 확인).
         # timeout_sec는 유한값이므로 콜백이 fatal을 래치하고 반환하면 최대 이 시간
         # 안에 while 조건을 다시 평가한다. busy loop가 아니다.
-        while rclpy.ok() and not node.tx_fatal_error:
+        while rclpy.ok() and not node.serial_fatal_error:
             rclpy.spin_once(node, timeout_sec=SPIN_TIMEOUT_SEC)
     except (KeyboardInterrupt, ExternalShutdownException):
         # Humble의 rclpy는 SIGINT를 받으면 context를 먼저 shutdown하므로,
