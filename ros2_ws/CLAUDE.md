@@ -101,22 +101,70 @@ source install/setup.bash
 - [x] 5c-2. 실기 전 안전장치 (최대 wheel rad/s 비례 제한 + 핵심 파라미터 시작 검증)
 - [x] 5c-3. **실기 STM32 연결 및 모터 구동 (2026-08-02 확인)** — 아래 "실기 검증 현황" 참고
 - [ ] 6. 키보드(`teleop_twist_keyboard`)로 실제 모터 공중 테스트 — **미완료**
-      (2026-08-02 실기는 `ros2 topic pub`으로 수행, teleop은 아직 사용하지 않음)
+      (2026-08-02·08-03 실기는 모두 `ros2 topic pub`으로 수행, teleop은 아직 사용하지 않음)
 - [x] 7. `/cmd_vel` timeout 안전정지 (5b 구현 + 실기 확인)
-- [ ] 8. **STM STATUS 수신 및 ROS2 상태 발행 — 다음 작업**
+- [x] 8. **STM STATUS 수신 및 ROS2 상태 발행 (2026-08-03 실기 확인)**
+  - [x] 8a. 수신 패킷 파서 (`packet_parser.py`)
+  - [x] 8b. raw 수신 + 줄 조립 (`SerialLink.read_available()` / `line_decoder.py`)
+  - [x] 8c. RX 타이머 + `/stm/*` 상태 토픽 발행
+  - [x] 8e. **실기 수신 검증** — 아래 "실기 검증 현황" 참고
+  - [ ] 8d. 수신 끊김 시 추가 안전 정책(STATUS 끊기면 주행 명령을 0으로 강제) — **미착수**
 
-## 실기 검증 현황 (2026-08-02)
+## 실기 검증 현황
 
-대상 커밋: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가."
 기록: [tests/TEST_LOG.md](../tests/TEST_LOG.md)
 
-**송신 경로(ROS2 → Serial Bridge → STM32 → Motor)는 실기 검증 완료**입니다.
+### 송신 경로 (ROS2 → Serial Bridge → STM32 → Motor) — 2026-08-02 검증 완료
+
+대상 커밋: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가."
 
 - `/cmd_vel` 발행 → 노드 수신 → 차동구동 좌우 rad/s 변환 정상
 - `SET_WHEEL_VEL,<left>,<right>` USB Serial 전달 → STM32가 수신해 양쪽 모터 실제 구동
 - 전진·후진·좌회전·우회전 정상
 - `/cmd_vel` 중단 시 watchdog이 약 0.5초 후 자동 정지 (`timed_out` → `0.000,0.000`)
+  — 2026-08-03에 `ros2 topic pub --once`로 재확인
 
-**수신 경로(STM32 → Serial Bridge → ROS2)는 아직 구현되지 않았습니다.** 8번 단계에서
-`STATUS` 패킷 수신·파싱·상태 토픽 발행·잘못된 패킷/수신 끊김 처리를 다룹니다.
-현재 `serial_link.py`에는 `read()`/`readline()`이 없습니다(설계상 5c 범위에서 제외).
+### 수신 경로 (STM32 → Serial Bridge → ROS2) — 2026-08-03 검증 완료
+
+대상 커밋: `d6bbe29` "[feat] STM STATUS 수신 및 ROS2 상태 토픽 발행"
+환경: Ubuntu + ROS2 Humble, `/dev/ttyACM0`, 115200, **바퀴 공중 상태**
+
+`STM → SerialLink → LineDecoder → parse_packet() → ROS2 Publisher` 전 구간이 실제
+장치에서 동작함을 확인했습니다.
+
+- `/stm/connected` = **true** — 포트 open 여부가 아니라 **유효 STATUS 수신** 기준임을 확인
+- `/stm/fault` 초기값 = **NONE**
+- STATUS 주기: `/stm/wheel_actual_rad_s`를 `ros2 topic hz`로 측정해 **약 9.995~9.999 Hz**
+  → 펌웨어 `STATUS_REPORTER_INTERVAL_MS`(10Hz)와 일치
+- `in_waiting` 기반 `read_available()`이 실제 `/dev/ttyACM0`에서 정상 동작
+  (PTY에서만 검증됐던 부분이 실기로 확인됨)
+
+**좌우 매핑 실측 확정** — 이전까지 "코드 주석 기준, 실측 미확정"이던 항목입니다.
+
+```
+물리 왼쪽  바퀴 ↔ STM 논리 Left  ↔ /stm/encoder_total[0] ↔ /stm/wheel_actual_rad_s[0]
+물리 오른쪽 바퀴 ↔ STM 논리 Right ↔ /stm/encoder_total[1] ↔ /stm/wheel_actual_rad_s[1]
+```
+
+- 손으로 물리 왼쪽 바퀴를 돌리면 `encoder_total[0]`만, 오른쪽은 `[1]`만 변화
+- `SET_WHEEL_VEL,2.000,0.000`(= `linear.x=0.065, angular.z=-0.433333`) → 물리 왼쪽만 회전 +
+  `encoder_total[0]`만 변화
+- `SET_WHEEL_VEL,0.000,2.000`(= `linear.x=0.065, angular.z=+0.433333`) → 물리 오른쪽만 회전 +
+  `encoder_total[1]`만 변화
+- **PWM 출력 채널과 엔코더 입력 채널의 좌우 짝이 정상** — 즉 "엔코더만 교차"된 상태가 아니다
+- `/stm/wheel_actual_rad_s` 부호: 왼쪽만 전진 → `[+, ~0]`, 오른쪽만 전진 → `[~0, +]`,
+  왼쪽만 후진 → `[-, ~0]`, 오른쪽만 후진 → `[~0, -]`
+
+> 실기 중 왼쪽 모터/엔코더가 동작하지 않는 현상이 있었으나, 장비 이동 과정에서 배선이
+> 빠진 하드웨어 문제였고 재연결 후 정상 확인됐습니다. **코드 결함이 아니었습니다.**
+
+### 수신 경로에서 아직 검증하지 않은 것
+
+- STATUS 중단 후 `/stm/connected=false` 전환 및 재연결 복귀
+- USB 강제 분리 시 RX fatal error 처리(종료 코드 1, 타이머 취소)
+- 실제 Stall 발생 시 `/stm/fault` 전이(`STALL_LEFT`/`RIGHT`/`BOTH`)와 `FAULT_CLEARED` 수신
+- `RESET_STALL` 송신 (미구현)
+- 엔코더 1회전당 카운트 수 및 `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`(현재 4.0f) 검증
+- `wheel_separation_m=0.30` 실측 확정 (여전히 플레이스홀더)
+- 실제 바닥 주행
+- STATUS 수신이 끊겼을 때 주행 명령을 강제로 0으로 만드는 추가 안전 정책(8d)

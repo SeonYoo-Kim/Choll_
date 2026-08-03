@@ -15,6 +15,108 @@
 
 ---
 
+## 2026-08-03 — ✅ EM+ROS2 실기: STM32 STATUS → Serial Bridge → ROS2 수신 확인 + 좌우 매핑 실측 확정 (relu, 실기)
+
+- **대상 커밋**: `d6bbe29` "[feat] STM STATUS 수신 및 ROS2 상태 토픽 발행" (`em/feature/motor-control`)
+- **대상 코드**: `ros2_ws/src/stm_serial_bridge` (STM32 펌웨어는 변경 없음, UART Protocol v1 그대로)
+- **환경**: Ubuntu + ROS2 Humble, 실제 STM32 USB Serial 연결, `serial_port=/dev/ttyACM0`, `baud_rate=115200`
+- **⚠️ 바퀴를 공중에 띄운 상태에서 진행 — 바닥 주행 아님**
+- **`/cmd_vel` 발행 수단**: `ros2 topic pub` (`teleop_twist_keyboard` 미사용 — 키보드 teleop은 여전히 미완료 항목)
+- **Bridge 파라미터**: `dry_run=false`, `rx_poll_hz=50.0`, `status_timeout_sec=0.5`,
+  `max_wheel_rad_s=2.0`, `tx_rate_hz=20.0`, `cmd_vel_timeout_sec=0.5`,
+  `wheel_radius_m=0.065`, `wheel_separation_m=0.30`
+- **실행자**: relu (사람이 직접 실기 수행). 이 항목은 사용자 보고를 받아 Claude가 대신 기록함.
+
+### 결과: 수신 경로(STM32 → Bridge → ROS2) 실기 연동 완료
+
+| # | 확인 항목 | 결과 |
+|---|---|---|
+| 1 | STM STATUS 패킷이 USB Serial로 Bridge에 수신 | ✅ |
+| 2 | Bridge 로그의 `STATUS #N` 번호가 계속 증가 | ✅ |
+| 3 | `STM → SerialLink → LineDecoder → parse_packet() → Publisher` 전 구간 동작 | ✅ |
+| 4 | `/stm/connected` = `true` | ✅ |
+| 5 | connected가 **포트 open이 아니라 유효 STATUS 수신** 기준임을 확인 | ✅ |
+| 6 | `/stm/fault` 초기값 = `NONE` | ✅ |
+| 7 | STATUS 주기 (`ros2 topic hz /stm/wheel_actual_rad_s`) | ✅ **약 9.995~9.999 Hz** |
+| 8 | 펌웨어 STATUS 10Hz 설정과 일치 | ✅ |
+| 9 | `in_waiting` 기반 `read_available()`이 실제 `/dev/ttyACM0`에서 동작 | ✅ |
+| 10 | `/stm/encoder_total`로 양쪽 누적값 수신 | ✅ |
+| 11 | `/stm/wheel_actual_rad_s`로 양쪽 실제 속도 수신 | ✅ |
+| 12 | `ros2 topic pub --once` 후 약 0.5초에 watchdog 자동 정지(`0.000,0.000`) | ✅ |
+| 13 | 송신 경로(ROS2 → STM) 재확인 | ✅ |
+
+7번은 PTY에서만 확인됐던 `in_waiting` 폴링이 실제 USB CDC 드라이버에서도 정상 동작함을
+보여준다 — 이전 기록에서 "실기에서 확인 필요"로 남겨둔 위험이 해소됐다.
+
+### ★ 좌우 매핑 실측 확정
+
+그동안 "코드 주석 기준이며 실측 미확정"으로 남아 있던 항목이 이번에 확정됐다.
+
+```
+물리 왼쪽  바퀴 ↔ STM 논리 Left  ↔ /stm/encoder_total[0] ↔ /stm/wheel_actual_rad_s[0]
+물리 오른쪽 바퀴 ↔ STM 논리 Right ↔ /stm/encoder_total[1] ↔ /stm/wheel_actual_rad_s[1]
+```
+
+| 조작 | 관측 |
+|---|---|
+| 물리 왼쪽 바퀴를 돌림 | `encoder_total[0]`만 변화 |
+| 물리 오른쪽 바퀴를 돌림 | `encoder_total[1]`만 변화 |
+| `SET_WHEEL_VEL,2.000,0.000` (`linear.x=0.065, angular.z=-0.433333`) | 물리 왼쪽만 회전, `encoder_total[0]`만 변화 |
+| `SET_WHEEL_VEL,0.000,2.000` (`linear.x=0.065, angular.z=+0.433333`) | 물리 오른쪽만 회전, `encoder_total[1]`만 변화 |
+| 왼쪽만 전진 | `wheel_actual_rad_s` = `[양수, 0 근처]` |
+| 오른쪽만 전진 | `[0 근처, 양수]` |
+| 왼쪽만 후진 | `[음수, 0 근처]` |
+| 오른쪽만 후진 | `[0 근처, 음수]` |
+
+→ **PWM 출력 채널과 엔코더 입력 채널의 좌우 짝이 정상**이다. 이전에 우려했던
+"엔코더만 교차되어 Left PI가 오른쪽 실측값을 오차 입력으로 쓰는" 상태가 **아님**을 확인했다.
+전진 양수 / 후진 음수 부호도 좌우 모두 정상.
+
+### 실기 중 발견하고 해결한 사항 (하드웨어)
+
+- SSAFY로 장비를 이동하는 과정에서 일부 배선이 빠져 있었다.
+- 초기에는 왼쪽 모터 또는 왼쪽 엔코더가 동작하지 않는 현상이 나타났다.
+- 배선을 재확인·재연결한 뒤 재시험하여 양쪽 모터 구동, 양쪽 엔코더 값, 좌우 매핑 모두 정상 확인.
+- **코드 결함이 아니라 이동 과정의 하드웨어 배선 문제였다.**
+
+### 아직 검증하지 않은 것
+
+1. STATUS 중단 후 `/stm/connected=false` 전환 및 재연결 복귀
+2. USB 강제 분리 시 RX fatal error 처리(종료 코드 1, TX/RX 타이머 취소)
+3. 실제 Stall 발생과 `/stm/fault` 전이(`STALL_LEFT`/`STALL_RIGHT`/`STALL_BOTH`)
+4. `FAULT_CLEARED,STALL` 수신
+5. `RESET_STALL` 송신 (브리지 미구현)
+6. 엔코더 1회전당 정확한 카운트 수 및 `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`(현재 4.0f) 검증
+7. 실제 바닥 주행
+8. `wheel_separation_m=0.30` 실측 확정 (여전히 플레이스홀더)
+9. STATUS 수신이 끊겼을 때 주행 명령을 강제로 0으로 만드는 추가 안전 정책
+
+### ⚠️ 이 기록의 한계
+
+이 저장소 규칙은 원본 출력을 `<details>`로 남겨 검증 가능하게 하는 것인데, 이번 실기도
+**콘솔 원본 출력이 확보되지 않았다.** 위 수치 중 근거가 있는 것은 사용자가 보고한
+STATUS 주기(약 9.995~9.999Hz)뿐이며, 아래는 **관측되지 않았으므로 기록하지 않는다**:
+
+- 각 토픽의 구체적 target/actual/pwm/encoder 수치
+- watchdog 정지까지의 정확한 경과 시간(로그 타임스탬프 차)
+- 손 회전 시 엔코더 카운트 절댓값(→ quadrature 배율 검증에 필요했던 값)
+- 실행 호스트(Jetson / 개발 PC)
+
+다음 실기에서는 노드 콘솔 출력(`STATUS #N ...`, `TX tx#N ...`, `watchdog state: ...`)을
+`tee`로 파일에 남겨 함께 첨부할 것.
+
+### 참고: 같은 커밋의 자동화 테스트 결과 (2026-08-03, Claude, PTY/단위 테스트)
+
+실기와 별개로 하드웨어 없이 돌린 결과다.
+
+- `colcon build --symlink-install` — 경고·에러 0
+- `python3 -m pytest src/stm_serial_bridge/test/ -q` — **298 passed**
+  (차동구동 9 + 프로토콜 10 + SerialLink 53 + watchdog 26 + limiter 28 + 패킷파서 96 +
+  라인디코더 34 + RX 노드 42)
+- PTY 통합: `master → read_available() → feed() → parse_packet() → Publisher` 경로 확인
+- `connected` 경계값(정확히 `status_timeout_sec`)에서 false 전환, 비STATUS 패킷은
+  timeout을 갱신하지 않음, `STALL_RESET,OK` 단독으로 fault가 NONE이 되지 않음 등 확인
+
 ## 2026-08-02 — ✅ EM+ROS2 실기: `/cmd_vel` → Serial Bridge → STM32 → 모터 구동 확인 (relu, 실기)
 
 - **대상 커밋**: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가." (`em/feature/motor-control`)
