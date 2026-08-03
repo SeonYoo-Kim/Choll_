@@ -93,7 +93,12 @@ export function CartControlCard() {
           ) : (
             <Compass size={24} />
           )}
-          <span>{following ? '추종 중' : paused ? '일시정지' : '추종 시작'}</span>
+          {/*
+            버튼 글자는 '지금 상태'가 아니라 '누르면 할 일'을 쓴다.
+            추종 중에 "추종 중"이라고 적혀 있으면 상태 표시로 읽혀서 눌러도 되는지 알 수 없다.
+            현재 상태는 홈 상단 배지와 버튼 색으로 이미 보인다.
+          */}
+          <span>{following ? '일시정지' : paused ? '다시 따라오기' : '추종 시작'}</span>
         </button>
         <button
           onClick={stopCart.stop}
