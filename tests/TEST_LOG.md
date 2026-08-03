@@ -15,6 +15,67 @@
 
 ---
 
+## 2026-08-02 — ✅ EM+ROS2 실기: `/cmd_vel` → Serial Bridge → STM32 → 모터 구동 확인 (relu, 실기)
+
+- **대상 커밋**: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가." (`em/feature/motor-control`)
+- **대상 코드**: `ros2_ws/src/stm_serial_bridge` (STM32 펌웨어는 변경 없음, UART Protocol v1 그대로)
+- **하드웨어**: STM32 NUCLEO-F446RE + BTS7960 + DC 모터 2개(엔코더), USB Serial(USART2/ST-LINK VCP, 115200 8N1)
+- **실행자**: relu (사람이 직접 실기 수행). 이 항목은 사용자 보고를 받아 Claude가 대신 기록함.
+- **`/cmd_vel` 발행 수단**: `ros2 topic pub` (`teleop_twist_keyboard`는 사용하지 않음 — 키보드
+  teleop 실기는 여전히 미완료 항목)
+
+### 결과: 송신 경로(ROS2 → Bridge → STM32 → Motor) 실기 연동 완료
+
+| # | 확인 항목 | 결과 |
+|---|---|---|
+| 1 | ROS2 `/cmd_vel` 토픽 발행 | ✅ |
+| 2 | `stm_serial_bridge` 노드의 `/cmd_vel` 수신 | ✅ |
+| 3 | 차동구동 계산 → 좌우 바퀴 각속도 변환 | ✅ |
+| 4 | `SET_WHEEL_VEL,<left_rad_s>,<right_rad_s>` USB Serial 전달 | ✅ |
+| 5 | STM32가 명령 수신해 양쪽 모터 실제 구동 | ✅ |
+| 6 | 전진 / 후진 | ✅ |
+| 7 | 좌회전 / 우회전 | ✅ |
+| 8 | `/cmd_vel` 중단 시 watchdog 자동 정지 (약 0.5초) | ✅ |
+| 9 | ROS2 → Bridge → STM32 → Motor 전체 송신 경로 | ✅ |
+
+8번은 Bridge의 `command_watchdog`이 `timed_out`으로 전환해 `SET_WHEEL_VEL,0.000,0.000`을
+계속 내보내는 동작이다. STM32 자체의 Communication Timeout(`MOTION_CONTROLLER_COMM_TIMEOUT_MS`)과는
+별개의 상위 안전장치이며, 이번 실기에서는 상위(Bridge) 쪽이 먼저 동작한 것으로 확인됐다.
+
+### 아직 검증되지 않은 것 (STM → ROS2 수신 경로 전체)
+
+1. STM32가 보내는 `STATUS` 패킷을 Bridge가 수신 — **미구현** (`serial_link.py`에 `read()` 없음)
+2. `STATUS` 문자열 파싱 — 미구현
+3. actual wheel velocity / PWM / encoder total의 ROS2 토픽 발행 — 미구현
+4. 잘못된 패킷·수신 끊김 처리 — 미구현
+5. STATUS 수신 경로 실기 테스트 — 미수행
+
+### ⚠️ 이 기록의 한계 (검증 가능성 관련)
+
+이 저장소의 기록 규칙은 "원본 출력을 `<details>`로 남겨 사람이 검증 가능하게" 하는 것인데,
+이번 실기는 **콘솔 원본 출력이 확보되지 않았다.** 아래 항목도 미기록이다:
+
+- 실행 호스트 (Jetson Orin Nano / 개발 PC 중 어디였는지)
+- 실제 `serial_port` 값, `max_wheel_rad_s` 사용값, `tx_rate_hz`·`cmd_vel_timeout_sec` 값
+- 바퀴 공중 상태였는지 지면 주행이었는지
+- 좌우 회전 방향이 명령과 일치했는지에 대한 정량 근거
+  (엔코더 좌우 매핑 `TIM2`=Left / `TIM8`=Right는 여전히 코드 주석 기준이며 실측 미확정)
+
+따라서 이 항목은 **"동작을 확인했다"는 사람의 관찰 기록**이며, 재현 가능한 로그 근거는 없다.
+다음 실기에서는 노드 콘솔 출력(`TX tx#N state=... command='...'`)과 사용 파라미터를 함께 남길 것.
+
+### 참고: 같은 커밋의 자동화 테스트 결과 (2026-08-02, Claude, PTY/단위 테스트)
+
+실기와 별개로 하드웨어 없이 돌린 결과다.
+
+- `colcon build --symlink-install` — 경고·에러 0
+- `python3 -m pytest src/stm_serial_bridge/test/ -q` — **112 passed**
+  (차동구동 9 + 프로토콜 10 + SerialLink 39 + watchdog 26 + limiter 28)
+- PTY(`pty.openpty()`) 통합: 54~57 프레임 전부 ASCII·CRLF 종단, 깨진/빈 프레임 0, 평균 20.00 Hz,
+  `waiting(0,0)` → `active` → `timed_out(0,0)` 전이 확인
+- `max_wheel_rad_s=2.0`에서 원본 `1.923/4.231` → `0.909/2.000` 비례 축소, 제한 전 프레임 PTY 송신 0건
+- write 실패(PTY master close → `[Errno 5]`) 시 `Serial TX failed` 1회 + 0.22초 내 자동 종료, 종료 코드 1
+
 ## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test`

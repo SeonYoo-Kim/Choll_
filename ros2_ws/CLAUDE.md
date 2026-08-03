@@ -97,9 +97,26 @@ source install/setup.bash
 - [x] 4. dry-run 검증 (`_send_command()` 송신 단일 출구 + `dry_run=false` 시작 거부)
 - [x] 5a. Serial 연결만 (`serial_link.py` open/close + 단위 테스트, 송신 없음)
 - [x] 5b. 주기 송신 구조 (`command_watchdog.py` + 20Hz 타이머 + timeout 0,0, 송신 없음)
-- [x] 5c-1. USB Serial 실제 write (`SerialLink.write()`, **PTY로만 검증** — 실기 미연결)
+- [x] 5c-1. USB Serial 실제 write (`SerialLink.write()`, PTY로 검증)
 - [x] 5c-2. 실기 전 안전장치 (최대 wheel rad/s 비례 제한 + 핵심 파라미터 시작 검증)
-- [ ] 5c-3. 실기 STM32 연결 (`/dev/ttyACM*`, 바퀴 공중 상태) — **미완료**
-- [ ] 6. 키보드로 실제 모터 공중 테스트
-- [x] 7. `/cmd_vel` timeout 안전정지 (5b에서 함께 구현)
-- [ ] 8. STM STATUS 수신 및 ROS2 상태 발행
+- [x] 5c-3. **실기 STM32 연결 및 모터 구동 (2026-08-02 확인)** — 아래 "실기 검증 현황" 참고
+- [ ] 6. 키보드(`teleop_twist_keyboard`)로 실제 모터 공중 테스트 — **미완료**
+      (2026-08-02 실기는 `ros2 topic pub`으로 수행, teleop은 아직 사용하지 않음)
+- [x] 7. `/cmd_vel` timeout 안전정지 (5b 구현 + 실기 확인)
+- [ ] 8. **STM STATUS 수신 및 ROS2 상태 발행 — 다음 작업**
+
+## 실기 검증 현황 (2026-08-02)
+
+대상 커밋: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가."
+기록: [tests/TEST_LOG.md](../tests/TEST_LOG.md)
+
+**송신 경로(ROS2 → Serial Bridge → STM32 → Motor)는 실기 검증 완료**입니다.
+
+- `/cmd_vel` 발행 → 노드 수신 → 차동구동 좌우 rad/s 변환 정상
+- `SET_WHEEL_VEL,<left>,<right>` USB Serial 전달 → STM32가 수신해 양쪽 모터 실제 구동
+- 전진·후진·좌회전·우회전 정상
+- `/cmd_vel` 중단 시 watchdog이 약 0.5초 후 자동 정지 (`timed_out` → `0.000,0.000`)
+
+**수신 경로(STM32 → Serial Bridge → ROS2)는 아직 구현되지 않았습니다.** 8번 단계에서
+`STATUS` 패킷 수신·파싱·상태 토픽 발행·잘못된 패킷/수신 끊김 처리를 다룹니다.
+현재 `serial_link.py`에는 `read()`/`readline()`이 없습니다(설계상 5c 범위에서 제외).

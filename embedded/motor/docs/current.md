@@ -105,6 +105,16 @@ App_Run()
   PI 제어, Feedforward+PI 구조, Speed Profile(Direction Change Protection 포함), StopController
   (Normal Stop/ESTOP), Communication Timeout 모두 정상 동작 확인. Kp/Ki Runtime 변경(UART
   `SET_PI_GAINS`) 및 Python Tool/CSV Logger도 정상 동작 확인.
+- **ROS2 Serial Bridge 연동(Jetson cmd_vel → STM) 실기 검증 완료 (2026-08-02)**: Python Tool이 아니라
+  ROS2 노드가 `SET_WHEEL_VEL`을 보내는 경로가 실기에서 동작함을 확인. `/cmd_vel`(Twist) → 차동구동
+  좌우 rad/s 변환 → `SET_WHEEL_VEL,<left>,<right>` USB Serial 송신 → STM 수신 → 양쪽 모터 구동,
+  전진/후진/좌회전/우회전 정상. `/cmd_vel`이 끊기면 Bridge watchdog이 약 0.5초 후 `0.000,0.000`을
+  보내 자동 정지(STM 자체 Communication Timeout과는 별개의 상위 안전장치).
+  브리지 구현은 이 저장소의 `ros2_ws/`이며 STM 펌웨어는 변경되지 않았다
+  (Protocol v1 그대로). 상세: [../../../ros2_ws/CLAUDE.md](../../../ros2_ws/CLAUDE.md),
+  기록: [../../../tests/TEST_LOG.md](../../../tests/TEST_LOG.md).
+  ⚠️ **STM → ROS2 수신 경로(STATUS Packet)는 아직 미구현** — 현재 STATUS를 소비하는 것은
+  Python Tool뿐이다.
 
 ## 현재 개발 중인 기능
 
@@ -127,7 +137,9 @@ App_Run()
 2. `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`/`MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN` 실측 검증
 3. 하드웨어 실측(바퀴 반지름/최대 RPM) 후 `MOTION_CONTROLLER_MAX_WHEEL_RAD_S`와 `MOTOR_OPEN_LOOP_PWM_PER_RAD_S` 확정 및 clamp 적용 (`motion_controller.c`/`motor_config.h` TODO 참고)
 4. Python Tool의 FAULT/RESET_STALL 지원(별도 작업)
-5. (이후) ROS2 Serial Bridge, Jetson cmd_vel 연동
+5. (STM 쪽 작업 아님, 참고) ROS2 Serial Bridge의 **STATUS 수신 경로** 구현 — STM → ROS2 방향.
+   STM 송신부(`StatusReporter`)는 이미 완성되어 있어 펌웨어 변경은 예상되지 않는다.
+   Bridge 쪽 진행 상태는 [../../../ros2_ws/CLAUDE.md](../../../ros2_ws/CLAUDE.md) 참고.
 
 ## Claude가 다음 세션에서 가장 먼저 이해해야 하는 내용
 
