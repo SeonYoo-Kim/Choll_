@@ -29,7 +29,7 @@ from rclpy.qos import (
     QoSReliabilityPolicy,
 )
 from rclpy.task import Future
-from std_msgs.msg import Empty, String
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from choll_nav.nav_logic import make_goal_pose_2d, should_send_goal
@@ -81,7 +81,7 @@ class GoalForwarder(Node):
                 PointStamped, target_point_topic, self._on_target_point, 10
             )
         self.create_subscription(
-            Empty,
+            String,
             str(self.get_parameter("cancel_topic").value),
             self._on_cancel,
             10,
@@ -156,13 +156,16 @@ class GoalForwarder(Node):
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"target_position 처리 실패: {exc}")
 
-    def _on_cancel(self, _msg: Empty) -> None:
+    def _on_cancel(self, msg: String) -> None:
         """현재 주행을 취소한다. 진행 중인 goal이 없으면 로그만 남긴다.
 
         Args:
-            _msg: 빈 메시지 (트리거).
+            msg: 취소 요청. data에 BE requestId를 담을 수 있음
+                (선택 — 빈 문자열 허용, 상태 추적·로그 대조용).
         """
         try:
+            request_id = msg.data.strip()
+            tag = f" (requestId={request_id})" if request_id else ""
             acted = False
             if self._goal_pending:
                 # goal 응답 대기 창에서 온 취소 — 수락 시점에 즉시 취소하도록 예약
@@ -175,9 +178,11 @@ class GoalForwarder(Node):
                 self._active_goal_handle.cancel_goal_async()
                 acted = True
             if acted:
-                self.get_logger().info("주행 취소 요청 → Nav2에 취소 전송")
+                self.get_logger().info(f"주행 취소 요청{tag} → Nav2에 취소 전송")
             else:
-                self.get_logger().info("취소 요청 수신 — 진행 중인 goal 없음")
+                self.get_logger().info(
+                    f"취소 요청 수신{tag} — 진행 중인 goal 없음"
+                )
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"취소 처리 실패: {exc}")
 

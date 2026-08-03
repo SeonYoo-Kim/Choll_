@@ -10,7 +10,7 @@
 | `/robot_pose` | PoseStamped | 발행 10Hz | 명세서 ROS2-08 (AI 확정 계약 2026-07-31). frame=map, RELIABLE. 추가 발행 토픽은 `pose_topics` 파라미터로 확장 |
 | `/target_position` | PointStamped | 구독 | AI가 발행하는 목표 지점 (방향 없음 → auto_orient). 스로틀 적용 |
 | `/cart/target_pose` | PoseStamped | 구독 | 수동/BE 목표. **frame_id 필수**, map 외 프레임 TF 자동 변환. **스로틀 없이 항상 선점** |
-| `/cart/cancel` | Empty | 구독 | 주행 취소 |
+| `/cart/cancel` | String | 구독 | 주행 취소. data=requestId (선택, 빈 문자열 허용 — BE 명령 추적용) |
 | `/cart/nav_status` | String | 발행(래치) | IDLE / NAVIGATING / SUCCEEDED / ABORTED / CANCELED / REJECTED / NAV2_UNAVAILABLE |
 
 ## 주요 파라미터 (정본: launch/interface.launch.py)

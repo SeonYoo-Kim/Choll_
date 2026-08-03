@@ -59,7 +59,7 @@
 | `/robot_pose` | PoseStamped | 발행 10Hz | 명세 ROS2-08. frame=map, RELIABLE (BestEffort 금지) |
 | `/target_position` | PointStamped | 구독 | 명세 ROS2-09 (AI 발행). 스로틀 적용 |
 | `/cart/target_pose` | PoseStamped | 구독 | 단발 명령. frame_id 필수, 스로틀 없음 (제안 ROS2-14) |
-| `/cart/cancel` / `/cart/nav_status` | Empty / String | 구독/발행(래치) | 제안 ROS2-15/16 |
+| `/cart/cancel` / `/cart/nav_status` | String / String | 구독/발행(래치) | 제안 ROS2-15/16. cancel data=requestId(선택) |
 | `/scan` | LaserScan | 발행 ~11Hz | 구독 측 **BestEffort** 필수 |
 | `/odom_rf2o` | Odometry | 발행 10Hz | 임시. `/odom`은 휠 오도메트리 예약 |
 | `/cmd_vel` | Twist | Nav2 발행 20Hz | ⚠ AI control_node와 발행 주체 충돌 — 동시 구동 금지 |
