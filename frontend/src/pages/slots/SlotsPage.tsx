@@ -67,32 +67,35 @@ export function SlotsPage() {
 
   return (
     <>
-      <div className={styles.pageHeader}>
-        <p className={styles.overline}>CART INVENTORY</p>
-        <h1 className={styles.pageTitle}>슬롯 관리</h1>
-        <p className={styles.pageDesc}>책이 어디에 있는지, 한눈에 찾아보세요.</p>
-      </div>
-      <div className={styles.filters}>
-        {filters.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            aria-pressed={effectiveFilter === f.id}
-            className={`${styles.filterChip} ${effectiveFilter === f.id ? styles.filterActive : ''}`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-      <div className={styles.board}>
-        {filteredSlots.map((slot) => (
-          <SlotTile
-            key={slot.slotNumber}
-            slot={slot}
-            active={selectedSlotNumber === slot.slotNumber}
-            onSelect={setSelectedSlotNumber}
-          />
-        ))}
+      {/* 데스크톱에서 보드가 남은 높이를 채우려면 페이지 전체가 하나의 flex 컬럼이어야 한다 */}
+      <div className={styles.page}>
+        <div className={styles.pageHeader}>
+          <p className={styles.overline}>CART INVENTORY</p>
+          <h1 className={styles.pageTitle}>슬롯 관리</h1>
+          <p className={styles.pageDesc}>책이 어디에 있는지, 한눈에 찾아보세요.</p>
+        </div>
+        <div className={styles.filters}>
+          {filters.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              aria-pressed={effectiveFilter === f.id}
+              className={`${styles.filterChip} ${effectiveFilter === f.id ? styles.filterActive : ''}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className={styles.board}>
+          {filteredSlots.map((slot) => (
+            <SlotTile
+              key={slot.slotNumber}
+              slot={slot}
+              active={selectedSlotNumber === slot.slotNumber}
+              onSelect={setSelectedSlotNumber}
+            />
+          ))}
+        </div>
       </div>
       {selected && <SlotDetailModal slot={selected} onClose={() => setSelectedSlotNumber(null)} />}
     </>

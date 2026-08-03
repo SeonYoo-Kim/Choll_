@@ -1,5 +1,16 @@
 @use '@/shared/styles/variables' as *;
 
+// 데스크톱(6열 2줄)에서만 flex 컬럼 — .board가 남은 높이를 전부 받아 화면을 채운다.
+// 모바일·태블릿은 슬롯이 여러 줄로 쌓여 높이를 채울 이유가 없으므로 기존 블록 흐름 유지.
+.page {
+  @media (min-width: $bp-lg) {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+  }
+}
+
 .pageHeader {
   margin-bottom: 0;
 }
@@ -76,5 +87,10 @@
   // 데스크톱에서는 항상 6열 — 12개 슬롯이 2줄로 한눈에 들어온다
   @media (min-width: $bp-lg) {
     grid-template-columns: repeat(6, minmax(0, 1fr)); // 6
+    // 슬롯 개수는 그대로 두고, 남은 높이를 두 줄이 균등하게(1fr) 나눠 갖는다.
+    // min-height: 0 — flex 자식의 기본 최소 높이(auto) 때문에 줄어들지 못하는 것을 푼다
+    flex: 1;
+    min-height: 0;
+    grid-auto-rows: 1fr;
   }
 }

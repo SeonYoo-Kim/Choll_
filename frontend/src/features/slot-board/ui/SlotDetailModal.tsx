@@ -36,11 +36,20 @@ export function SlotDetailModal({ slot, onClose }: SlotDetailModalProps) {
   };
 
   return (
-    <div className={styles.backdrop}>
+    <div
+      className={styles.backdrop}
+      // 모달 밖(배경)을 눌렀을 때만 닫는다 — 모달 내부 클릭은 버블링돼 올라와도
+      // target이 currentTarget(배경)과 달라서 무시된다
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className={styles.modal}>
         <div className={styles.header}>
           <div>
-            <span className={styles.slotId}>SLOT {slotLabel(slot.slotNumber)}</span>
+            <span className={styles.slotId}>{slotLabel(slot.slotNumber)}</span>
             <h3 className={styles.title}>{slot.book?.title ?? '비어 있는 슬롯'}</h3>
           </div>
           <button className={styles.close} onClick={onClose} aria-label="닫기">

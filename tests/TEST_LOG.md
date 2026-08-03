@@ -15,6 +15,57 @@
 
 ---
 
+## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
+  (SLAM 미터→픽셀 변환이 먼저 develop에 머지돼 `application.properties`·`backend/CLAUDE.md`·
+  이 로그에서 충돌 → 양쪽 다 살려 해결. `mqtt.position-unit`·`mqtt.map-id`는 그대로 두고
+  토픽 값만 교체)
+- **변경**: MQTT 토픽 전면 개편 (`ai/`·`backend/` 양쪽 동시 적용).
+  네이밍 규칙 = **상행(카트·AI→BE) `status/*`, 하행(BE→카트) `cmd/*`** (선행 슬래시 없음)
+
+  | 구 토픽 | 신 토픽 | 방향 |
+  |---------|---------|------|
+  | `carts/{cartId}/telemetry/position` | `status/position` | 카트→BE |
+  | `carts/status` | `status/cart` | 카트→BE (하트비트) |
+  | `choll/cart/rfid` | `status/slot` | 카트→BE |
+  | `choll/cart/cmd` | `cmd/move/cart` | BE→카트 (MOVE/CANCEL/SELECT_TARGET) |
+  | `choll/cart/tracks` | `status/target` | AI→BE (추종 후보 트랙) |
+
+- **구조 변경(주의)**: 새 위치 토픽에 cartId가 없어, `MqttPositionMessageHandler`가
+  토픽 정규식(`^carts/(\d+)/telemetry/position$`)에서 cartId를 뽑던 방식을 폐기하고
+  하트비트·RFID·tracks와 동일하게 `mqtt.cart-id`(기본 1)로 귀속하도록 변경.
+  토픽 검증은 주입된 `mqtt.position-topic`과 정확 비교. **이제 수신 4종 모두 cartId가
+  토픽에 없으므로 다중 카트 도입 시 EM과 재협의 필요.**
+- **결과**: 21 suites, **59 tests, 0 failures, 0 errors**
+  (내 변경으로 늘어난 테스트는 없음 — 토픽 상수만 갱신. 59는 develop의 SLAM 변환 테스트 4개 포함)
+- **적용 범위**: `ai/`·`backend/`와 공용 E2E 도구(`tests/tools/fake_jetson.py`의 트랙 발행).
+  FE(`frontend/`)·`docs/`에는 MQTT 토픽 문자열이 없어 변경 없음.
+  **EM 파트(`embedded/`)는 이 MR에서 제외** — 실카트 코드는 EM 담당자가 별도 반영 예정.
+  TEST_LOG의 과거 기록은 실행 증거라 옛 토픽명 그대로 보존.
+- **미검증 / ⚠️ 배포 시 주의**: 브로커 실연동 E2E는 돌리지 않음 (단위 테스트만).
+  - **EM 반영 전까지 실카트↔BE 통신 단절** — `embedded/rfid/rfid_mqtt.py`가 아직 옛 토픽
+    (`choll/cart/rfid`, `carts/status`)으로 발행하므로, BE만 먼저 배포하면 슬롯·하트비트를 못 받는다.
+    **BE 배포와 EM 반영은 함께 나가야 한다.**
+  - EC2 브로커에 남은 옛 `carts/status` retained LWT도 새 `status/cart`로 자동 이관되지 않음.
+- **AI 파트 기록**: [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md) 2026-08-03 항목
+
+<details>
+<summary>gradle test 출력 (마지막 부분) + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL in 19s
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=59 failures=0 errors=0 suites=21
+```
+
+</details>
+
 ## 2026-08-03 — ✅ EM+ROS2 실기: STM32 STATUS → Serial Bridge → ROS2 수신 확인 + 좌우 매핑 실측 확정 (relu, 실기)
 
 - **대상 커밋**: `d6bbe29` "[feat] STM STATUS 수신 및 ROS2 상태 토픽 발행" (`em/feature/motor-control`)
@@ -117,6 +168,17 @@ STATUS 주기(약 9.995~9.999Hz)뿐이며, 아래는 **관측되지 않았으므
 - `connected` 경계값(정확히 `status_timeout_sec`)에서 false 전환, 비STATUS 패킷은
   timeout을 갱신하지 않음, `STALL_RESET,OK` 단독으로 fault가 NONE이 되지 않음 등 확인
 
+## 2026-08-03 — ✅ BE 59 tests, SLAM 미터→이미지 픽셀 변환 추가 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(EC2 Docker)
+- **결과**: BUILD SUCCESSFUL, 59 tests, 0 failures (신규 4: SlamCoordinateConverterTest 3, 텔레메트리 meters 모드 1)
+- **변경**: EM 협의(위치는 SLAM 미터로 발행, BE가 변환)에 따라 `SlamCoordinateConverter` 신설.
+  `픽셀x=(x-originX)/resolution`, `픽셀y=height-(y-originY)/resolution` (ROS 규약 세로축 뒤집기).
+  `mqtt.position-unit`(기본 pixels)·`mqtt.map-id`(기본 2)로 제어 — EM 발행 시작 시 meters 전환
+- **활성화 전제**: `library_maps` id=2 행에 EM의 실제 map.yaml 값(resolution·origin)과
+  FE가 쓰는 지도 이미지 크기가 정확히 들어가야 함
+
 ## 2026-08-02 — ✅ EM+ROS2 실기: `/cmd_vel` → Serial Bridge → STM32 → 모터 구동 확인 (relu, 실기)
 
 - **대상 커밋**: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가." (`em/feature/motor-control`)
@@ -177,6 +239,54 @@ STATUS 주기(약 9.995~9.999Hz)뿐이며, 아래는 **관측되지 않았으므
   `waiting(0,0)` → `active` → `timed_out(0,0)` 전이 확인
 - `max_wheel_rad_s=2.0`에서 원본 `1.923/4.231` → `0.909/2.000` 비례 축소, 제한 전 프레임 PTY 송신 0건
 - write 실패(PTY master close → `[Errno 5]`) 시 `Serial TX failed` 1회 + 0.22초 내 자동 종료, 종료 코드 1
+
+## 2026-08-02 13:45 — ✅ BE 55 tests + FE 타겟 선택 릴레이 3종 E2E 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081, **MQTT_BROKER_URL=tcp://localhost:1883 강제**)
+  + 가짜 Jetson(Python: mp4→JPEG WS 발행) + 가짜 FE(Node WS 리스너) + mosquitto_pub/sub + curl
+- **환경**: Windows 11, OpenJDK 21.0.12, MySQL(AWS RDS), Mosquitto 로컬 브로커
+- **브랜치**: `backend/feature/video-select-relay`
+- **결과**: 18→**19 suites, 55 tests**, 0 failures (신규 7: MqttTracksMessageHandlerTest 4, FollowTargetServiceTest 3)
+- **신규 기능 E2E**:
+  - 영상 릴레이: `/ws/carts/1/video/publish`(발행) → `/ws/carts/1/video`(시청).
+    98프레임/10초(9.7fps, ~40KB JPEG) 손실 0, 시청측 저장 JPEG 디코딩 정상(640×480)
+  - 트랙 릴레이: MQTT `choll/cart/tracks` → WS `TRACKS_UPDATED` 페이로드 원형 그대로 수신
+  - 타겟 선택: `POST /api/carts/1/follow/target {trackId:16}` → 202 `{SENT}` →
+    MQTT `choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}` 수신 확인
+- **추가(14:00) 브라우저 시각 검증**: BE 정적 테스트 페이지
+  `http://localhost:8081/target-select-test.html` (FE 참조 구현으로 커밋) +
+  `tests/tools/fake_jetson.py`(result01.mp4→JPEG WS + 가짜 이동 트랙 MQTT 5Hz)로
+  영상 렌더링(271프레임)·박스 실시간 갱신·**박스 클릭→202 SENT→MQTT SELECT_TARGET** 확인
+- **트러블슈팅 2건** (재발 방지 기록):
+  - `ServletServerContainerFactoryBean`이 테스트 mock 서블릿 컨텍스트에서 기동 실패
+    → 세션별 `setBinaryMessageSizeLimit(1MB)`로 대체
+  - **backend/.env의 MQTT_BROKER_URL이 EC2 브로커**라 로컬 pub/sub과 분리돼 침묵
+    → E2E는 반드시 `MQTT_BROKER_URL=tcp://localhost:1883` 오버라이드로 실행할 것.
+    EC2 브로커에는 실카트 LWT(retained carts/status)가 살아 있음 — 테스트 트래픽 금지
+
+<details>
+<summary>E2E 원본 출력 (가짜 FE 수신 로그·cmd 구독)</summary>
+
+```text
+# fake_jetson.py
+connected: ws://localhost:8081/ws/carts/1/video/publish
+sent 98 frames in 10.1s (~9.7 fps)
+
+# fake_fe.mjs (발췌)
+[video] frame #1 (38560 bytes) saved
+[video] frame #80 (40644 bytes) saved
+[events] {"type":"TRACKS_UPDATED","payload":{"image_width":640,"image_height":480,"tracks":[{"id":16,"x":220,"y":30,"w":180,"h":420},{"id":23,"x":20,"y":180,"w":60,"h":120}]}}
+[video] total frames=98, last=39245 bytes
+
+# mosquitto_sub -t choll/cart/cmd -v
+choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}
+
+# REST 응답
+{"trackId":16,"status":"SENT"}
+```
+
+</details>
+
 
 ## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
 

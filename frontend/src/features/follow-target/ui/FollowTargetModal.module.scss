@@ -1,0 +1,156 @@
+@use '@/shared/styles/variables' as *;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: $spacing-md;
+  background: rgba(69, 65, 57, 0.2);
+}
+
+.modal {
+  width: 100%;
+  max-width: 640px;
+  border-radius: $radius-panel;
+  background: #fff;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.overline {
+  font-family: $font-mono;
+  font-size: 12px;
+  font-weight: 700;
+  color: $text-overline;
+}
+
+.title {
+  margin: 8px 0 0;
+  font-family: $font-display;
+  font-size: 24px;
+  font-weight: 400;
+  word-break: keep-all;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f7f0e4;
+}
+
+.desc {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: $text-muted;
+  word-break: keep-all;
+}
+
+/**
+ * 영상 무대 — aspect-ratio는 TRACKS_UPDATED가 알려준 영상 해상도로 인라인 지정한다.
+ * 박스가 %로 배치되므로 프레임을 fill로 늘려 좌표계를 무대와 정확히 일치시킨다.
+ */
+.stage {
+  position: relative;
+  margin-top: $spacing-md;
+  width: 100%;
+  overflow: hidden;
+  border-radius: $radius-tile;
+  background: #1b1a18;
+}
+
+.frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.box {
+  position: absolute;
+  border: 3px solid $primary;
+  border-radius: 10px;
+  background: rgba(105, 194, 182, 0.12);
+  padding: 0;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    box-shadow 0.12s;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    border-color: #fff;
+    background: rgba(105, 194, 182, 0.32);
+    box-shadow: 0 0 0 3px rgba(105, 194, 182, 0.5);
+    outline: none;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.boxPending {
+  border-color: #fff;
+  background: rgba(105, 194, 182, 0.4);
+}
+
+.boxLabel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 7px 0 8px 0;
+  background: $primary;
+  padding: 2px 6px;
+  font-family: $font-mono;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(27, 26, 24, 0.55);
+  font-size: 14px;
+  color: #fff;
+  word-break: keep-all;
+}
+
+.spinner {
+  flex-shrink: 0;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

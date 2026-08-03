@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>타겟 선택 테스트 (FE 참조 구현)</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; background: #111; color: #eee; }
+  #stage { position: relative; width: 640px; height: 480px; background: #000; }
+  #frame, #overlay { position: absolute; top: 0; left: 0; width: 640px; height: 480px; }
+  #overlay { cursor: crosshair; }
+  #log { width: 640px; height: 160px; overflow-y: auto; background: #1c1c1c;
+         font-family: monospace; font-size: 12px; padding: 8px; margin-top: 8px;
+         white-space: pre-wrap; }
+  .hint { color: #8bc34a; }
+</style>
+</head>
+<body>
+<h3>쫄래쫄래 — FE 타겟 선택 테스트 페이지</h3>
+<p class="hint">영상 위 파란 박스를 클릭하면 그 track id로 SELECT_TARGET이 하행됩니다.</p>
+<div id="stage">
+  <img id="frame" alt="video">
+  <canvas id="overlay" width="640" height="480"></canvas>
+</div>
+<div id="log"></div>
+<script>
+"use strict";
+const cartId = 1;
+const frameImg = document.getElementById("frame");
+const overlay = document.getElementById("overlay");
+const ctx = overlay.getContext("2d");
+const logBox = document.getElementById("log");
+let tracks = [];
+let imageWidth = 640, imageHeight = 480;
+let frameCount = 0;
+
+function log(line) {
+  logBox.textContent += line + "\n";
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+// ── 영상 채널: 바이너리 메시지 1건 = JPEG 1프레임 ──
+const videoWs = new WebSocket(`ws://${location.host}/ws/carts/${cartId}/video`);
+videoWs.binaryType = "arraybuffer";
+videoWs.onopen = () => log("[video] connected");
+videoWs.onclose = (e) => log(`[video] closed (${e.code})`);
+let lastUrl = null;
+videoWs.onmessage = (e) => {
+  frameCount += 1;
+  const url = URL.createObjectURL(new Blob([e.data], { type: "image/jpeg" }));
+  frameImg.src = url;
+  if (lastUrl) URL.revokeObjectURL(lastUrl);
+  lastUrl = url;
+  if (frameCount === 1) log("[video] first frame received");
+};
+
+// ── 이벤트 채널: TRACKS_UPDATED로 bbox 갱신 ──
+const eventsWs = new WebSocket(`ws://${location.host}/ws/carts/${cartId}`);
+eventsWs.onopen = () => log("[events] connected");
+eventsWs.onclose = (e) => log(`[events] closed (${e.code})`);
+eventsWs.onmessage = (e) => {
+  const message = JSON.parse(e.data);
+  if (message.type !== "TRACKS_UPDATED") {
+    log(`[events] ${message.type}`);
+    return;
+  }
+  tracks = message.payload.tracks || [];
+  imageWidth = message.payload.image_width || 640;
+  imageHeight = message.payload.image_height || 480;
+};
+
+// ── 오버레이: 트랙 박스 그리기 (영상 해상도 → 캔버스 스케일) ──
+function draw() {
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const scaleX = overlay.width / imageWidth;
+  const scaleY = overlay.height / imageHeight;
+  for (const track of tracks) {
+    const x = track.x * scaleX, y = track.y * scaleY;
+    const w = track.w * scaleX, h = track.h * scaleY;
+    ctx.strokeStyle = "#2196f3";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = "#2196f3";
+    ctx.fillRect(x, y - 20, 64, 20);
+    ctx.fillStyle = "#fff";
+    ctx.font = "14px monospace";
+    ctx.fillText(`ID ${track.id}`, x + 4, y - 5);
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+
+// ── 클릭 → bbox 히트테스트 → SELECT_TARGET ──
+overlay.addEventListener("click", async (event) => {
+  const rect = overlay.getBoundingClientRect();
+  const px = (event.clientX - rect.left) * (imageWidth / overlay.width);
+  const py = (event.clientY - rect.top) * (imageHeight / overlay.height);
+  const hit = tracks.find(
+    (t) => px >= t.x && px <= t.x + t.w && py >= t.y && py <= t.y + t.h
+  );
+  if (!hit) { log(`클릭 (${px | 0},${py | 0}) — 박스 없음`); return; }
+  log(`클릭 → track ${hit.id} 선택 요청...`);
+  const response = await fetch(`/api/carts/${cartId}/follow/target`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trackId: hit.id }),
+  });
+  log(`POST /follow/target → ${response.status} ${await response.text()}`);
+});
+</script>
+</body>
+</html>

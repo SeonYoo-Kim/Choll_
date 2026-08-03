@@ -1,0 +1,16 @@
+# YDLiDAR 드라이버 부팅 자동 실행 (systemd)
+# 설치: scripts/jetson/README.md 참조
+[Unit]
+Description=YDLiDAR ROS2 driver (choll cart)
+After=network.target
+
+[Service]
+Type=simple
+User=ssafy
+# 로그인 셸(-l)로 실행해 ROS 환경을 직접 source 한다
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/ssafy/ydlidar_ros2_ws/install/setup.bash && exec ros2 launch ydlidar_ros2_driver ydlidar_launch.py'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

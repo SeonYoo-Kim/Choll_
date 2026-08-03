@@ -3,6 +3,8 @@ package com.ssafy.backend.mqtt.position;
 import com.ssafy.backend.cart.domain.Cart;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
+import com.ssafy.backend.map.domain.LibraryMap;
+import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
 import com.ssafy.backend.websocket.CartEventPublisher;
 import com.ssafy.backend.zone.domain.Zone;
@@ -12,6 +14,7 @@ import java.time.ZoneId;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +25,7 @@ public class CartPositionTelemetryService {
 		LoggerFactory.getLogger(CartPositionTelemetryService.class);
 	private static final ZoneId DATABASE_ZONE = ZoneId.of("Asia/Seoul");
 	private static final String POSITION_EVENT_TYPE = "CART_POSITION_UPDATE";
+	private static final String UNIT_METERS = "meters";
 	// EM 하드웨어 제작 중이라 yaw 미수신 — EM이 송신을 시작하면 PositionSample에 편입할 것
 	private static final BigDecimal TEMPORARY_YAW = BigDecimal.ZERO;
 
@@ -31,6 +35,12 @@ public class CartPositionTelemetryService {
 	private final StableZoneTracker zoneTracker;
 	private final CartEventPublisher eventPublisher;
 	private final CartConnectionService connectionService;
+	private final LibraryMapRepository mapRepository;
+	private final SlamCoordinateConverter coordinateConverter;
+	// EM 계약(2026-07-31 확정): 위치는 SLAM 미터 좌표 — meters면 BE가 이미지 픽셀로 변환.
+	// EM 발행 시작 전까지는 pixels(무변환)로 두고 수동 테스트 호환 유지.
+	private final String positionUnit;
+	private final long mapId;
 
 	public CartPositionTelemetryService(
 		CartRepository cartRepository,
@@ -38,7 +48,11 @@ public class CartPositionTelemetryService {
 		ZoneLocator zoneLocator,
 		StableZoneTracker zoneTracker,
 		CartEventPublisher eventPublisher,
-		CartConnectionService connectionService
+		CartConnectionService connectionService,
+		LibraryMapRepository mapRepository,
+		SlamCoordinateConverter coordinateConverter,
+		@Value("${mqtt.position-unit:pixels}") String positionUnit,
+		@Value("${mqtt.map-id:2}") long mapId
 	) {
 		this.cartRepository = cartRepository;
 		this.positionBuffer = positionBuffer;
@@ -46,6 +60,10 @@ public class CartPositionTelemetryService {
 		this.zoneTracker = zoneTracker;
 		this.eventPublisher = eventPublisher;
 		this.connectionService = connectionService;
+		this.mapRepository = mapRepository;
+		this.coordinateConverter = coordinateConverter;
+		this.positionUnit = positionUnit;
+		this.mapId = mapId;
 	}
 
 	@Transactional
@@ -54,7 +72,20 @@ public class CartPositionTelemetryService {
 			.orElseThrow(() -> new ResourceNotFoundException("카트", position.cartId()));
 		positionBuffer.add(position);
 
-		Optional<Zone> detectedZone = zoneLocator.locate(position.x(), position.y());
+		BigDecimal x = position.x();
+		BigDecimal y = position.y();
+		Long knownMapId = null;
+		if (UNIT_METERS.equalsIgnoreCase(positionUnit)) {
+			LibraryMap map = mapRepository.findById(mapId)
+				.orElseThrow(() -> new ResourceNotFoundException("지도", mapId));
+			SlamCoordinateConverter.ImagePosition converted =
+				coordinateConverter.toImagePixels(x, y, map);
+			x = converted.x();
+			y = converted.y();
+			knownMapId = map.getId();
+		}
+
+		Optional<Zone> detectedZone = zoneLocator.locate(x, y);
 		StableZoneTracker.Decision decision = zoneTracker.observe(
 			position.cartId(),
 			detectedZone.map(Zone::getId).orElse(null)
@@ -69,28 +100,33 @@ public class CartPositionTelemetryService {
 
 		// 위치 수신도 생존 신호 — OFFLINE→ONLINE 전환 시 연결 이벤트 발행 포함
 		connectionService.markAlive(cart, measuredAt);
-		cart.updatePosition(position.x(), position.y(), currentZone, measuredAt);
+		cart.updatePosition(x, y, currentZone, measuredAt);
 
+		Long eventMapId = knownMapId != null
+			? knownMapId
+			: (currentZone == null ? null : currentZone.getMap().getId());
 		eventPublisher.publish(position.cartId(), POSITION_EVENT_TYPE, new PositionEventPayload(
-			currentZone == null ? null : currentZone.getMap().getId(),
-			position.x(),
-			position.y(),
+			eventMapId,
+			x,
+			y,
 			TEMPORARY_YAW,
 			true
 		));
 
 		log.info(
-			"카트 위치 수신 cartId={}, x={}, y={}, detectedZoneId={}, stable={}, bufferSize={}",
+			"카트 위치 수신 cartId={}, raw=({}, {}), image=({}, {}), unit={}, detectedZoneId={}, stable={}",
 			position.cartId(),
 			position.x(),
 			position.y(),
+			x,
+			y,
+			positionUnit,
 			detectedZone.map(Zone::getId).orElse(null),
-			decision.stable(),
-			positionBuffer.snapshot(position.cartId()).size()
+			decision.stable()
 		);
 	}
 
-	// WS-FE-01 CART_POSITION_UPDATE 페이로드 (mapId는 구역 미확정 시 null)
+	// WS-FE-01 CART_POSITION_UPDATE 페이로드 (x·y는 지도 이미지 픽셀, mapId는 구역 미확정 시 null)
 	private record PositionEventPayload(
 		Long mapId,
 		BigDecimal x,

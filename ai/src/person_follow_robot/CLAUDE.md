@@ -47,7 +47,10 @@ cd ~/Choll
 ros2 launch person_follow_robot follow_robot_launch.py
 #   video_path:=/path/to.mp4      # USB 카메라 대신 영상 입력
 #   save_debug_video:=true        # /debug/image를 result.mp4로 저장
-#   threshold:=0.80               # Re-ID 유사도 임계값 실험 (기본 0.85)
+#   threshold:=0.80               # Re-ID 유사도 임계값 실험 (기본 0.70)
+#   fe_bridge:=true auto_select:=false \
+#     be_video_ws_url:=ws://<BE호스트>:8080/ws/carts/1/video/publish mqtt_host:=<브로커IP>
+#                                 # FE 화면에서 타겟을 직접 고르는 모드 (자동 선택 끔)
 
 # 터미널 3) 타겟 선택 — 기본은 자동 (카메라 앞에 서면 최대 bbox가 0.5초 뒤 자동 선택됨)
 # 수동으로 고르고 싶을 때만 (launch에 auto_select_enabled:=false 주고):
@@ -55,7 +58,7 @@ ros2 topic echo /person_tracks                                    # track id 확
 ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: 1}"  # 확인한 id로 선택
 ```
 
-> 초심자용 단계별 안내(SSH 접속 포함)는 [README Quick Start](../../../README.md#quick-start-처음-실행하는-사람용)를 참조.
+> 초심자용 단계별 안내(SSH 접속 포함)는 [AI README Quick Start](../../README.md#quick-start-처음-실행하는-사람용)를 참조.
 
 ## 테스트
 
@@ -81,6 +84,7 @@ pytest ai/test/
 | `control_node` | control_node.py | PID (거리/각도) → cmd_vel |
 | `motor_node` | motor_node.py | cmd_vel → 좌우 바퀴 RPM(/wheel_speed_cmd) (레거시, EM 재활용 예정) |
 | `target_position_node` | target_position_node.py | 카트 포즈(SLAM)+방위각+거리 → 사서 지도 좌표 /target_position |
+| `fe_bridge_node` | fe_bridge_node.py | FE 타겟 선택 연동 (영상·트랙 하행, SELECT_TARGET 상행. fe_bridge:=true일 때만) |
 | `debug_visualization_node` | debug_visualization_node.py | 오버레이 영상 발행/저장 |
 
 ## 규칙

@@ -78,9 +78,10 @@ describe('RouteErrorFallback', () => {
     expect(screen.getByText('잠시 후 다시 시도해 주세요.')).toBeInTheDocument();
   });
 
-  it('개발 모드에서는 에러 원문을 함께 보여준다', () => {
+  it('에러 원문은 화면에 노출하지 않고 콘솔에만 남긴다', () => {
     renderAfterRouteError(<RouteErrorFallback />);
 
-    expect(screen.getByText('테스트용 렌더 에러')).toBeInTheDocument();
+    expect(screen.queryByText('테스트용 렌더 에러')).not.toBeInTheDocument();
+    expect(console.error).toHaveBeenCalledWith('[RouteError]', expect.any(Error));
   });
 });

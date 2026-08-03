@@ -13,6 +13,66 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-03 14:11 — ✅ MQTT 토픽 개편 후 114 passed, ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/ -q` + `ruff check fe_bridge_logic.py fe_bridge_node.py follow_robot_launch.py test_fe_bridge_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12 (miniforge base), ruff 0.16.0
+- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
+- **변경**: MQTT 토픽 개편에 따른 fe_bridge 파라미터 기본값 교체
+  - `tracks_topic`: `choll/cart/tracks` → `status/target` (launch + `declare_parameter` 양쪽)
+  - `command_topic`: `choll/cart/cmd` → `cmd/move/cart` (launch + `declare_parameter` 양쪽)
+  - 나머지는 docstring·주석의 토픽명 갱신. **로직 변경 없음 → 테스트 개수 변화 없음(114).**
+- **미검증**: Jetson 실기 스모크(새 토픽으로 BE와 실제 송수신)는 미실시.
+  BE 단위 테스트 결과는 [tests/TEST_LOG.md](../../tests/TEST_LOG.md) 2026-08-03 항목 참조.
+- **참고**: 저장소 전체 `ruff check .`는 **219건으로 변화 없음** — 이번 변경과 무관한 기존 지적
+  (docstring 누락 등). AI 변경 파일만 검사하면 0건. 함께 손댄 `tests/tools/fake_jetson.py`는
+  토픽 문자열만 바뀌어 기존 1건(D103)이 그대로 유지된다.
+
+<details>
+<summary>pytest / ruff 원본 출력</summary>
+
+```
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.14s
+```
+
+```
+warning: The following rules have been removed and ignoring them has no effect:
+    - ANN101
+    - ANN102
+
+All checks passed!
+```
+
+</details>
+
+## 2026-08-02 13:47 — ✅ 114 passed (+11 신규), ruff 변경 파일 0건 (Claude)
+
+- **명령**: `pytest ai/test/` + `ruff check fe_bridge_logic.py fe_bridge_node.py launch setup.py test_fe_bridge_logic.py`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), pytest 9.1.1, ruff 0.16.0
+- **커밋**: develop 이후 작업 트리 (`ai/feature/fe-target-select`, 커밋 전)
+- **맥락**: FE 화면에서 추종 대상을 직접 선택하는 모드 — Jetson 쪽 브릿지.
+  - `fe_bridge_node.py` 신규: /camera/image_raw→JPEG→BE WS(10fps, drop-oldest),
+    /person_tracks→MQTT choll/cart/tracks(5Hz, bbox 좌상단 변환),
+    MQTT choll/cart/cmd SELECT_TARGET→/select_target. 연결 실패 시 재접속(BE보다
+    먼저 떠도 안전). launch `fe_bridge:=true auto_select:=false`로 활성화.
+  - `fe_bridge_logic.py` 순수 모듈: RateLimiter/build_tracks_payload/parse_select_command.
+  - 신규 테스트 11개: 전송률 제한 3, 페이로드 변환 3, 명령 파싱 5
+    (MOVE 등 타 명령 무시, 비정수 trackId 거부 포함).
+  - **BE 상대편은 backend/feature/video-select-relay에서 가짜 Jetson/FE로 E2E 완료**
+    (tests/TEST_LOG.md 2026-08-02 항목). Jetson 실기 스모크는 내일 오전 예정.
+- **주의**: Jetson에 `pip3 install websocket-client paho-mqtt` 선행 필요.
+
+<details>
+<summary>pytest 출력 (마지막 줄)</summary>
+
+```
+============================= 114 passed in 0.12s =============================
+```
+
+</details>
+
 ## 2026-07-31 15:20 — ✅ Jetson 실기: 가짜 SLAM 포즈로 /target_position 검증 (사용자+Claude)
 
 - **명령**: launch(8노드) + `ros2 topic pub -r 10 /robot_pose ...` (yaw 0°/90° 두 케이스)
