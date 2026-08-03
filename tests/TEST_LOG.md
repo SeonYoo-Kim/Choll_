@@ -15,6 +15,192 @@
 
 ---
 
+## 2026-08-04 00:35 — ✅ FE API 활용 감사 후속 개선 5건: 빌드·린트·단위테스트·브라우저 확인 통과 (Claude)
+
+**배경**: 명세서의 "개발상태" 표기를 믿지 말고 코드로 직접 확인해 달라는 요청으로 REST 14 + WS 14종을 전수 조사.
+실제로 쓰이는 것은 REST 10종·WS 8종이었고, 쓰더라도 서버가 주는 필드를 상당수 버리고 있었다. 그중 5건을 고쳤다.
+
+1. **구역 판정을 문자열 → 구역 id로 교체** (가장 중요)
+   - 기존: `slot.book.zoneName === "3구역"` 문자열 비교. 서버 구역 이름과 화면이 만드는 이름이
+     다르면 **오류 없이 조용히 0건**이 된다. BE 시드 구역명은 `'왼쪽 상단 존'` 형식이라 실서버에서 깨질 상황이었다.
+   - 변경: 신규 `slotTargeting.ts`의 `isSlotForZone(slot, zoneId)` — `book.shelfZoneId`(숫자)로만 판정.
+     적용처 3곳: 홈 "이 구역에 꽂을 책" 카운트, 슬롯 화면 "현재 구역" 필터, 도착 알림 모달(+ "이 구역 작업 끝" 캐시 갱신).
+   - **중간에 한 번 잘못 짚었다가 되돌린 이력**: 처음엔 서버의 `Slot.isTarget`을 쓰도록 했으나(카트 LED와
+     같은 기준이라는 이유), 브라우저 확인에서 **홈이 0권으로 표시되는 버그**를 발견. 원인은 `isTarget`이
+     *서버 응답 시점의 카트 구역* 기준이라 **이동 중에 받은 응답은 전부 false**이고, `staleTime: 30초` 때문에
+     도착 후에도 그 값이 남는 것. 구역 변경 시 슬롯 재조회를 넣어도 재조회 시점 경합이 남아,
+     `shelfZoneId`(책 고정값) + WS로 오는 카트 현재 구역 조합으로 최종 정리했다 — 서버가 isTarget을
+     계산할 때 쓰는 것과 같은 두 값이라 결과는 같으면서 캐시 시점에 흔들리지 않는다.
+2. **FOLLOW-03 응답 검사 추가** — 기존에는 응답 본문을 `_response`로 버리고 요청값만 썼다.
+   서버가 거절해도 성공으로 보고 추종 시작(FOLLOW-04)까지 진행됐다. `isTargetCommandSent()` 추가 —
+   status가 명시적으로 다른 값이면 중단하고 안내. 본문이 없으면(204 등) 판단 근거가 없어 성공으로 본다.
+   응답의 `trackId`를 우선 사용해 서버 정정도 반영.
+3. **이동 실패 사유 표시** — `NavigationStatusUpdatedPayload.failReason`을 읽지 않아 FAILED가 와도
+   조용히 대기 상태로 돌아갔다. 실패 토스트에 사유를 함께 표시.
+4. **지도 이미지를 서버 것으로** — MAP-01의 `imageUrl`을 쓰지 않고 번들된 `assets/map.png`만 그렸다.
+   실제 SLAM 지도로 바뀌면 좌표와 그림이 어긋난다. 서버 주소 우선 + 불러오기 실패 시 번들 이미지로 폴백
+   (실패한 주소를 기억해 무한 재시도 방지).
+5. **정리** — 추종+이동 동시 정지 시 같은 토스트가 두 번 뜨던 것을 1회로(`notifyStoppedOnce`),
+   `cartControlStore`의 미사용 `connected`/`setConnected` 제거(연결 상태는 `cartConnectionStore` 담당).
+
+- **MSW 개선**: 슬롯 픽스처의 고정 `isTarget: true` 9개를 제거하고 **실제 BE처럼 응답 시점에
+  카트 구역과 비교해 계산**(`withTargetFlag`). 고정값이면 카트가 어디 있든 항상 대상으로 보였다.
+  지도 픽스처 `imageUrl`도 번들 이미지를 가리켜 "서버 지도 그리기" 정상 경로를 개발 중 확인 가능.
+- **결과**: `pnpm build` 성공 · `eslint .` exit 0 · `prettier --check` 통과 · **vitest 17 files / 104 tests 전부 통과**
+  (신규: `slotTargeting.test.ts` 6개, `followTarget.test.ts` 4개, `useStopCart` 토스트 중복 2개)
+- **브라우저 확인**(MSW 모킹): 3구역 이동 → 도착 팝업 9권 / 홈 9권 **일치**, 6구역 이동 → 팝업 2권 / 홈 2권 **일치**
+  (수정 전에는 홈이 0권). 슬롯 "현재 구역" 필터도 6구역에서 정확히 2권(어린 왕자·불편한 편의점)만 표시.
+  지도 이미지가 서버가 준 주소로 렌더됨. 콘솔 에러 없음
+- **⚠️ 남은 것**: WS 미처리 6종(`CART_STATUS_UPDATED`, `CURRENT_ZONE_TASKS_UPDATED`,
+  `RFID_RESCAN_COMPLETED`, `ALERT_OCCURRED`, `ALERT_RESOLVED`, `FOLLOW_TARGETS_UPDATED`)은
+  BE 미구현이거나 대체 구현이 있어 손대지 않음. `FOLLOW-04`가 요청 본문 없이 나가는 점(서버가 직전 대상
+  선택을 기억한다는 가정)은 BE 확인 필요.
+- **명령**: `pnpm build` / `pnpm exec eslint .` / `pnpm exec vitest run` (frontend/)
+- **환경**: Windows 11, Node v24.16.0, pnpm 10.34.5, vitest 4.1.10
+- **커밋**: `4751ba4` 기준 — 브랜치 `frontend/feature/api` (미커밋)
+
+<details>
+<summary>원본 출력</summary>
+
+```
+> tsc -b && vite build
+dist/index.html                   0.82 kB │ gzip:   0.47 kB
+dist/assets/index-B8eWkSfq.css   25.34 kB │ gzip:   5.62 kB
+dist/assets/index-Bt1KFs7M.js   446.07 kB │ gzip: 148.98 kB
+✓ built in 647ms
+
+eslint exit=0
+Checking formatting...
+All matched files use Prettier code style!
+```
+
+```
+ RUN  v4.1.10 C:/Phython/S15P11C101/frontend
+
+ Test Files  17 passed (17)
+      Tests  104 passed (104)
+   Duration  2.94s (transform 2.10s, setup 7.35s, import 4.54s, tests 1.04s, environment 20.91s)
+```
+
+브라우저 시나리오 결과:
+```
+{ "3구역_도착팝업": "9", "3구역_홈": "9", "6구역_도착팝업": "2", "6구역_홈": "2" }
+{ "칩": "6구역", "필터후_보이는책": ["어린 왕자", "불편한 편의점"] }
+{ "서버가준주소": "/src/assets/map.png", "화면이쓴주소": "/src/assets/map.png", "그려짐": true }
+```
+
+</details>
+
+---
+
+## 2026-08-03 23:50 — ✅ FE WS-FE-03(카트 연결 끊김 팝업) 구현: 빌드·린트·단위테스트·브라우저 확인 통과 (Claude)
+
+- **작업**: `CART_CONNECTION_UPDATED`를 받아 **어느 화면에서든** 연결 끊김 팝업을 띄운다.
+  이전에는 `cartSocket.ts`에 이벤트 이름만 있고 처리기가 없어, 카트가 꺼져도 화면이 알지 못했다.
+  - 신규 `cartConnectionStore.ts` — online·lastSeenAt·dismissed 보관. 초기값 online=true(진입 직후 깜빡임 방지)
+  - 신규 `useCartConnectionEvents.ts` — WS 구독 + **REST CART-01(`CartDetail.online`)로 진입 시점 상태 시딩**.
+    BE는 상태가 *바뀔 때만* 발행하므로(`CartConnectionService`), 이미 끊긴 채 들어오면 WS만으로는 알 수 없다
+  - 신규 `CartOfflineModal.tsx` — AppLayout에 배치해 전 화면 공통. 복구되면 자동으로 닫히고 토스트로 알림
+  - MSW: `setCartOnline()` + `window.__setCartOnline(false)` 개발용 트리거 추가 (BE 없이 팝업 확인용)
+- **페이로드는 BE 소스 기준**: `CartConnectionService.ConnectionEventPayload(boolean online, LocalDateTime lastSeenAt)`
+  → `{online, lastSeenAt}`. lastSeenAt은 타임존 표기 없는 문자열이라 브라우저 로컬 시각으로 해석(사서·서버 동일 시간대 전제)
+- **결과**: `pnpm build`(tsc+vite) 성공 · `eslint .` exit 0 · `prettier --check` 통과 ·
+  **vitest 15 files / 92 tests 전부 통과** (신규 13개: 스토어 상태 전이 7개, 팝업 렌더·닫기·자동닫힘 6개)
+- **브라우저 확인**(MSW 모킹, `/slots` 화면 = 지도 아닌 페이지에서):
+  진입 시 팝업 없음 → `__setCartOnline(false)` → 팝업 표시("카트와 연결이 끊겼어요", 마지막 통신 시각 포함) →
+  확인 클릭 시 닫힘 → 재차 끊기면 다시 표시 → `__setCartOnline(true)` 시 **자동으로 닫히고 "다시 연결됐어요" 토스트**.
+  콘솔 에러 없음
+- **⚠️ 검증 못 한 경로 1건**: "이미 끊긴 상태로 화면에 진입" (REST 시딩 경로). 모킹은 새로고침 시
+  시뮬레이터 상태가 초기화돼 재현이 안 된다 — 실제 BE로 확인 필요
+- **명령**: `pnpm build` / `pnpm exec eslint .` / `pnpm exec vitest run` (frontend/)
+- **환경**: Windows 11, Node v24.16.0, pnpm 10.34.5, vitest 4.1.10
+- **커밋**: `4751ba4` 기준 — 브랜치 `frontend/feature/api` (미커밋 작업분, MAP-02 작업과 같은 브랜치)
+- **참고**: 개발 서버를 켜둔 채 `pnpm build`를 돌리면 tsconfig·vite.config 산출물 변경으로 서버가 재시작되며
+  `[vite] Failed to reload App.tsx` 오류가 뜬다. 코드 문제가 아니므로 둘을 동시에 돌리지 말 것
+
+<details>
+<summary>원본 출력</summary>
+
+```
+> tsc -b && vite build
+vite v8.1.5 building client environment for production...
+✓ 3361 modules transformed.
+dist/index.html                   0.82 kB │ gzip:   0.48 kB
+dist/assets/index-B8eWkSfq.css   25.34 kB │ gzip:   5.62 kB
+dist/assets/index-Bd_OYJB1.js   445.40 kB │ gzip: 148.74 kB
+✓ built in 696ms
+```
+
+```
+ RUN  v4.1.10 C:/Phython/S15P11C101/frontend
+
+ Test Files  15 passed (15)
+      Tests  92 passed (92)
+   Duration  2.91s (transform 2.10s, setup 6.36s, import 4.88s, tests 800ms, environment 20.53s)
+```
+
+브라우저 시나리오 결과:
+```
+{ 시작화면: "/slots", 초기팝업: "없음(정상)", 끊긴뒤: "팝업 뜸",
+  문구: "CONNECTION LOST / 카트와 연결이 끊겼어요 / 카트의 전원과 네트워크를 확인해주세요.",
+  복구뒤: "자동으로 닫힘", 복구토스트: "표시됨" }
+```
+
+</details>
+
+---
+
+## 2026-08-03 22:05 — ✅ FE MAP-02(책장 구역 목록) 연동: 타입체크·린트·단위테스트·브라우저 확인 통과 (Claude)
+
+- **작업**: 지도 구역을 하드코딩(`zones.ts`의 `ZONE_RECTS`/`ZONE_NAMES`) 대신
+  **MAP-02 `GET /api/maps/{mapId}/zones`** 응답으로 그리도록 교체
+  - 신규 `shelfZoneBoundary.ts` — `boundaryData`(픽셀 폴리곤 JSON 문자열) 파싱 + 외접 사각형을 %로 변환
+  - 신규 `zoneStore.ts` — 구역 목록 스토어. 서버 응답 전에는 데모 구역(`DEMO_ZONES`)으로 동작
+  - 신규 `useShelfZones.ts` — 조회 후 스토어 반영. 실패·파싱 불가 시 데모 구역 유지 + 토스트
+  - **id↔인덱스 가정 제거**: 기존 `zoneIdOf=index+1`/`zoneIndexOf=id-1`은 서버 DB id에서 깨진다 →
+    스토어 목록 조회로 변경 (구역 코드 오름차순 정렬로 인덱스 안정화)
+  - MSW에 `shelfZonesFixture` 추가 — 실제 BE와 같은 픽셀 폴리곤 문자열로 주어 파싱 경로를 그대로 통과시킴
+- **좌표계 확인**: WS-FE-01(`CART_POSITION_UPDATE`)의 표시 좌표와 MAP-02 경계가 **같은 이미지 픽셀 공간**
+  (BE가 SLAM 미터→픽셀 변환 후 발행). 기존 `displayToPercent`를 구역에도 그대로 재사용
+- **⚠️ 노션 API 명세서와 실제 BE 응답이 다름** (코드/Swagger 기준으로 구현):
+  노션은 `{data:[{zoneId, boundary:{minX,maxX,minY,maxY}, callNumberStart/End}]}`,
+  실제 `ZoneService.Response`는 `data` 래퍼 없는 배열 + `{id, mapId, code, name, boundaryData}`(폴리곤 문자열).
+  **노션 명세 갱신 필요**
+- **결과**: `tsc -b` exit 0 · `eslint .` exit 0 · `prettier --check` 통과 · **vitest 13 files / 79 tests 전부 통과**
+  (신규 테스트 14개: 경계 파싱·정렬·손상 데이터 스킵, 스토어 id↔인덱스 변환·좌표 판정)
+- **브라우저 확인**(MSW 모킹, `pnpm dev` + `.env.development.local`에 `VITE_ENABLE_MSW=true`):
+  `GET /api/maps/1/zones` 200 → 구역 버튼 7개 렌더, 인라인 style이 서버 파싱값(`left: 3.49233%`,
+  `width: 14.9915%`)으로 찍혀 **하드코딩(3.5%/15.0%)이 아님을 확인**. 1구역 클릭 → `POST /navigation` 202 →
+  카트 이동 후 "1구역에 도착했어요" 모달·현재 위치 "1구역 총류" 표시. 콘솔 에러 없음
+- **명령**: `pnpm exec tsc -b` / `pnpm exec eslint .` / `pnpm exec vitest run` (frontend/)
+- **환경**: Windows 11, Node v24.16.0, pnpm 10.34.5, vitest 4.1.10
+- **커밋**: `4751ba4` 기준 — 브랜치 `frontend/feature/api` (미커밋 작업분)
+
+<details>
+<summary>원본 출력</summary>
+
+```
+=== tsc -b ===
+exit=0
+=== eslint ===
+exit=0
+=== prettier --check ===
+Checking formatting...
+All matched files use Prettier code style!
+```
+
+```
+ RUN  v4.1.10 C:/Phython/S15P11C101/frontend
+
+ Test Files  13 passed (13)
+      Tests  79 passed (79)
+   Duration  2.33s (transform 2.01s, setup 4.24s, import 3.78s, tests 633ms, environment 13.53s)
+```
+
+</details>
+
+---
+
 ## 2026-08-03 16:05 — ✅ main 승격 리허설: 로컬 가상 머지 + Jenkins Test 단계 재현 통과 (Claude)
 
 - **목적**: develop(+슬롯 LED 브랜치)을 main에 머지·배포했을 때 파이프라인이 깨지는지 사전 확인
