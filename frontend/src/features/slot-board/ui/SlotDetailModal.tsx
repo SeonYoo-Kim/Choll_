@@ -77,11 +77,16 @@ export function SlotDetailModal({ slot, onClose }: SlotDetailModalProps) {
             <Check size={16} className={styles.checkIcon} />
             비움 확인됨
           </button>
-          {isError && (
-            <button className={styles.danger} onClick={() => notify('RFID 재인식을 요청했어요')}>
-              재인식 요청
-            </button>
-          )}
+          {/*
+            RFID 재인식 요청 — 버튼만 내린다. BE에 재인식 명령 엔드포인트가 생기면
+            아래 주석을 풀고 onClick을 mutation으로 바꿔 다시 붙일 것.
+            (지금은 토스트만 띄우는 껍데기라 사서에게 잘못된 기대를 준다)
+            {isError && (
+              <button className={styles.danger} onClick={() => notify('RFID 재인식을 요청했어요')}>
+                재인식 요청
+              </button>
+            )}
+          */}
         </div>
       </div>
     </div>

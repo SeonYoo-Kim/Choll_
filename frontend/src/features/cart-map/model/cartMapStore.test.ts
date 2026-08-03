@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCartMapStore } from './cartMapStore';
 import { ZONE_POSITIONS } from './zones';
@@ -8,11 +8,17 @@ beforeEach(() => {
     cartZone: 2,
     cartPosition: ZONE_POSITIONS[2],
     cartYaw: 0,
+    positionIntervalMs: 1_000,
+    lastPositionAt: null,
     cartStatus: 'IDLE',
     navStatus: null,
     isMoving: false,
     arrivalZone: null,
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('cartMapStore', () => {
@@ -29,7 +35,8 @@ describe('cartMapStore', () => {
     const result = useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 1.57);
     const state = useCartMapStore.getState();
     expect(state.cartPosition).toEqual({ x: 10, y: 20 });
-    expect(state.cartYaw).toBe(1.57);
+    // cartYaw는 짧은 쪽으로 누적한 값이라 부동소수 오차가 섞인다 (angle.ts 참조)
+    expect(state.cartYaw).toBeCloseTo(1.57);
     expect(state.cartZone).toBe(4);
     expect(result.enteredZone).toBe(4);
   });
@@ -50,6 +57,63 @@ describe('cartMapStore', () => {
     const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[2], 0);
     expect(result.moved).toBe(false);
     expect(useCartMapStore.getState().cartStatus).toBe('IDLE');
+  });
+
+  it('applyPosition은 yaw가 π를 넘어가도 짧은 쪽으로 누적한다', () => {
+    useCartMapStore.setState({ cartYaw: 3.1 });
+
+    // BE는 -π..π로 접어서 준다 — 실제로는 0.08rad만 움직인 상황
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, -3.1);
+
+    const yaw = useCartMapStore.getState().cartYaw;
+    expect(Math.abs(yaw - 3.1)).toBeLessThan(0.1);
+  });
+
+  it('applyPosition은 yaw가 없으면 이전 방향을 유지한다', () => {
+    useCartMapStore.setState({ cartYaw: 1.2 });
+
+    // 모킹·구버전 BE가 yaw를 빼고 보내는 경우 (그대로 넣으면 rotate(NaNrad)로 회전이 죽는다)
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, undefined as unknown as number);
+
+    expect(useCartMapStore.getState().cartYaw).toBe(1.2);
+  });
+
+  it('applyPosition은 값이 그대로면 좌표 참조를 유지한다 (정지 중 리렌더 방지)', () => {
+    const before = useCartMapStore.getState().cartPosition;
+
+    // 값은 같고 객체만 새로 만들어 보낸다 — 멈춰 있는 카트가 주기마다 같은 좌표를 보내는 상황
+    useCartMapStore.getState().applyPosition({ ...before }, 0);
+
+    expect(useCartMapStore.getState().cartPosition).toBe(before);
+  });
+
+  it('applyPosition은 연속 이벤트 간격을 애니메이션 길이로 반영한다', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    vi.setSystemTime(300);
+
+    useCartMapStore.getState().applyPosition({ x: 12, y: 22 }, 0);
+
+    // 기본값 1000ms에서 실제 간격(300ms) 쪽으로 당겨진다
+    const interval = useCartMapStore.getState().positionIntervalMs;
+    expect(interval).toBeLessThan(1_000);
+    expect(interval).toBeGreaterThanOrEqual(150);
+  });
+
+  it('applyPosition은 오래 멈췄다 다시 움직인 공백을 주기로 착각하지 않는다', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    vi.setSystemTime(300);
+    useCartMapStore.getState().applyPosition({ x: 12, y: 22 }, 0);
+    const beforeIdle = useCartMapStore.getState().positionIntervalMs;
+
+    // 30초 정지 후 재출발 — 이 공백이 섞이면 다음 구간이 느려터지게 보인다
+    vi.setSystemTime(30_300);
+    useCartMapStore.getState().applyPosition({ x: 14, y: 24 }, 0);
+
+    expect(useCartMapStore.getState().positionIntervalMs).toBe(beforeIdle);
   });
 
   it('applyPosition은 추종 중 상태를 이동 중으로 덮지 않는다', () => {

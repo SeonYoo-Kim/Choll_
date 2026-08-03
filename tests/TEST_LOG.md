@@ -15,6 +15,149 @@
 
 ---
 
+## 2026-08-03 21:33 — ✅ BE: MOVE 하행에 SLAM 미터 target 추가 + NAV-01 픽셀 클릭 지원 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21. 단위 테스트만 (외부 의존 모킹)
+- **커밋**: 브랜치 `backend/feature/follow-control` (d27affe 위에 추가)
+- **변경**:
+  - `SlamCoordinateConverter.toSlamMeters()` 신규 — 픽셀→미터 역변환 (세로축 뒤집기 포함)
+  - `MoveCommand` 페이로드 개편: `{"requestId","command":"MOVE","zoneId","target":{x,y},"pixel":{x,y}}`
+    — target은 SLAM 미터(EM nav goal). `mqtt.position-unit=meters`일 때만 변환·포함,
+    pixels 모드(지도 메타 미입력)에선 null. pixel은 항상 포함(참고용)
+  - NAV-01 요청에 선택 필드 x·y(지도 픽셀) 추가 — 주면 클릭 지점, 없으면 구역 bbox 중심 (기존 FE 무영향)
+  - FOLLOW_* 명령은 좌표를 싣지 않기로 확정 — 사서 좌표는 로봇 내부에서 AI `/target_position`이
+    데이터 플레인 (BE 경유 왕복은 지연만 추가)
+- **결과**: 23 suites, **81 tests, 0 failures, 0 errors** (신규 4: 픽셀→미터 변환/왕복,
+  meters 모드 target 포함, 클릭 픽셀 우선. 기존 MOVE 테스트는 target=null(pixels 모드) 검증으로 갱신)
+- **미검증**: 실지도 메타 기반 변환 정확도 — EM이 map.yaml 값(`library_maps` id=2) 입력 후
+  실기 좌표로 재검증 필요
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+> Task :compileJava
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 32s
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=23 tests=81 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-03 20:22 — ✅ BE: 추종 시작·일시정지·종료(FOLLOW-01/02/04) 단위 테스트 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test --console=plain` (backend/ 에서)
+- **환경**: Windows 11, OpenJDK 21. 브로커·DB 실연동 없이 단위 테스트만 (외부 의존 Mockito 모킹)
+- **커밋**: develop `4751ba4` 기준 — 브랜치 `backend/feature/follow-control`
+- **신규 기능**: FE가 완료해 둔 추종 제어 3종의 BE 구현
+  - `FollowControlService` 신규 — `POST /follow`(FOLLOW-04, 202)·`POST /follow/pause`(FOLLOW-01, 202)·
+    `DELETE /follow`(FOLLOW-02, 204·멱등). NavigationService 패턴 준용 (인메모리 세션, 카트당 1건)
+  - MQTT `cmd/move/cart`로 `{"requestId","command":"FOLLOW_START|FOLLOW_PAUSE|FOLLOW_STOP"}` 하행
+    — ⚠️ **EM·AI 수신측 미구현, 임시 계약** (API 명세서 MQTT-04 데이터란에 반영)
+  - WS `FOLLOW_STATUS_UPDATED`(WS-FE-07) 발행 — FOLLOWING/PAUSED/STOPPED (REST 접수 기준.
+    대상 인식 여부·거리·대상 상실은 카트 상행 결과 토픽 확정 후)
+  - 가드: 오프라인 400, NAVIGATING 중 시작 400, 중복 시작 400. 일시정지 재시작은 같은 followId 재개.
+    일시정지 중 카트 동작 상태는 FOLLOWING 유지, 종료 시 IDLE 복귀
+- **결과**: 23 suites, **77 tests, 0 failures, 0 errors** (신규 11: FollowControlServiceTest —
+  시작/오프라인 거부/이동 중 거부/중복 거부/재개/일시정지/일시정지 멱등/무세션 일시정지 거부/종료/종료 멱등/MQTT 부재)
+- **미검증**: 브로커 실연동, EM·AI의 FOLLOW_* 명령 수신 (수신측 코드 자체가 아직 없음)
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+> Task :compileJava
+> Task :processResources UP-TO-DATE
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 33s
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=23 tests=77 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-03 16:05 — ✅ main 승격 리허설: 로컬 가상 머지 + Jenkins Test 단계 재현 통과 (Claude)
+
+- **목적**: develop(+슬롯 LED 브랜치)을 main에 머지·배포했을 때 파이프라인이 깨지는지 사전 확인
+- **방법**: 임시 worktree에서 `origin/main`(c9b54d6) ← `backend/feature/slot-led-command`(d7d795f,
+  develop 1fb0dba 포함) 가상 머지 → Jenkinsfile Backend Test 단계와 동일 조건으로 테스트
+  (`MQTT_ENABLED=false`, `WS_POSITION_TEST_ENABLED=false`, DB 자격증명만 주입)
+- **결과**:
+  - 가상 머지: **충돌 없음 (clean merge)**
+  - BE: `gradlew test` BUILD SUCCESSFUL — **22 suites, 66 tests, 0 failures** (contextLoads 포함)
+  - AI: `pytest ai/test/` **114 passed**
+  - FE: main 대비 `frontend/` **변경 0** — 지난 성공 배포와 동일 소스로 이미지 빌드
+  - 이미지 빌드 단계(docker build)는 로컬에 docker가 없어 미검증 — BE는 컴파일 검증됨, FE는 무변경이라 잔여 위험 낮음
+- **⚠️ 파이프라인은 통과해도, 배포 직후 카트 연동이 끊긴다 (코드가 아니라 운영 이슈)**:
+  1. **RPi 실카트가 아직 옛 토픽 발행** (`choll/cart/rfid`, `carts/status`) — 새 BE는 `status/slot`·
+     `status/cart` 구독이라 하트비트 15초 뒤 카트 OFFLINE, RFID 이벤트 유실. **RPi 반영과 동시 배포 필수.**
+  2. **Jenkins 시크릿 `choll-app-env`가 compose `env_file`로 통째 주입됨** — 그 안에
+     `MQTT_POSITION_TOPIC=carts/+/telemetry/position` 같은 옛 값이 남아 있으면 새 코드 기본값을
+     **덮어써서 토픽 개편이 서버에서 무효화**된다 (과거 MQTT_POSITION_TEST.md가 .env에 넣도록 안내했었음).
+     → main 머지 전 시크릿 파일에서 `MQTT_*_TOPIC` 라인 제거 또는 신값 갱신 필수.
+  3. Jetson도 pull + colcon 재빌드 전까지 옛 `choll/cart/tracks` 발행 → TRACKS_UPDATED·타겟 선택 단절.
+- **배포 후 확인 절차**: 405 프로브 + `mosquitto_sub -t 'status/#' -v`(EC2 브로커)로 신토픽 수신 확인
+- **[추기 16:20] 위 운영 리스크 3종 해소 확인** (사용자 확인, 2026-08-03):
+  - ① ③: RPi·Jetson 모두 실기에서 신토픽 코드로 구동 중
+  - ②: 배포용 시크릿 .env 내용 확인 — `MQTT_*_TOPIC` 핀 없음 (DB_*, MQTT_ENABLED/BROKER_URL/계정,
+    WS_POSITION_TEST_ENABLED뿐) → 코드 기본값이 그대로 적용됨. **수정 불필요, main 머지 가능 상태.**
+  - 남은 조건부 1건: EM이 SLAM 미터 좌표 발행을 시작하면 `MQTT_POSITION_UNIT=meters` 추가
+    + `library_maps` id=2에 실제 map.yaml 값 입력 (그 전까지 기본 pixels가 맞음)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `1fb0dba`(develop, MR !58 머지 후) 기준 — 브랜치 `backend/feature/slot-led-command`
+- **신규 기능**: 카트의 **구역이 바뀔 때** 그 구역에서 내려놓을 슬롯 번호를 MQTT `cmd/lit/led`로 발행.
+  페이로드 `{"slot_id":[1,3,5]}` — 그 시점에 켜져 있어야 할 슬롯 전체 (카트 1대 가정, cartId 없음).
+  **BE 범위는 발행까지** — 구독·점등 제어는 라즈베리파이(EM) 몫
+  - `SlotLedService` 신규 — 대상 조회 + 발행. MQTT 비활성이면 경고 후 무시
+  - `SlotService.findTargetSlotNumbers()` 신규 — 기존 `isTarget`(책의 서가 구역 == 카트 현재 구역) 재사용
+  - `CartPositionTelemetryService`에 **구역 전이 감지**(`zoneChanged`) 추가 — 갱신 전
+    `cart.getCurrentZone()`과 비교. 같은 구역 유지면 발행하지 않음
+  - `MqttCommandPublisher.publishLed()` 추가 — 토픽별 발행을 `publishTo(topic, payload)`로 분리
+    (기존 `publish()` 호출처 NavigationService·FollowTargetService는 무영향)
+  - 설정: `mqtt.led-topic`(기본 `cmd/lit/led`)
+- **발행 규칙** (2026-08-03 협의):
+  - 구역 진입/구역 간 이동 → 새 구역의 대상 목록 발행
+  - **구역 이탈 → 빈 목록 `[]` 발행(소등)** — 책을 남기고 나가도 LED가 켜진 채 남지 않도록
+  - 구역 밖 → 대상 없는 구역: 켤 것도 끌 것도 없어 미발행
+  - 책이 빠졌을 때(RFID REMOVED)의 소등은 라즈베리파이 몫 — BE는 재발행하지 않음
+- **결과**: 22 suites, **66 tests, 0 failures, 0 errors** (신규 7: SlotLedServiceTest 4 —
+  점등/이탈 시 빈 목록/미발행/MQTT 비활성, CartPositionTelemetryServiceTest 3 — 진입/동일 구역 유지/이탈)
+- **슬롯 번호 범위**: DB는 1~12번이지만 실물 RFID 리더는 5개만 설치(재정상). RFID 없는 슬롯은
+  책이 인식되지 않아 `isTarget`이 될 수 없으므로 `slot_id`에도 나오지 않는다 — 불일치 아님
+- **미검증**: 브로커 실연동 미실시. 라즈베리파이 구독·점등부는 EM 담당
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=66 failures=0 errors=0 suites=22
+```
+
+</details>
+
 ## 2026-08-03 — ⚠️ EM 실기: 엔코더 count/rev 실측 → 감속비 100:1 오기재 정정(51:1), 12.1% 차이 원인 미확정 (relu 실측 / Claude 반영)
 
 - **대상**: `embedded/motor/stm32_workspace/motor-control/Application/Config/motor_config.h`
