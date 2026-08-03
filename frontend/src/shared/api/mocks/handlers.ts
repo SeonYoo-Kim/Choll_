@@ -2,6 +2,7 @@ import { HttpResponse, http } from 'msw';
 
 import type { StartNavigationBody } from '@/features/cart-map/api/moveCommands';
 import { zoneIdOf, zoneIndexOfBookshelf } from '@/features/cart-map/model/zones';
+import type { SelectFollowTargetBody } from '@/features/follow-target/api/followTarget';
 import { getGetCartMockHandler } from '@/shared/api/generated/carts/carts.msw';
 import type { Slot, SlotBook } from '@/shared/api/generated/model';
 import { SlotStatus } from '@/shared/api/generated/model';
@@ -18,6 +19,7 @@ import {
   stopCartFollow,
   stopCartMove,
 } from '@/shared/api/mocks/cartSimulator';
+import { cartVideoWsHandler } from '@/shared/api/mocks/videoSimulator';
 
 /** 빈 슬롯 픽스처 생성 (slot.id는 slotNumber + 100으로 고정) */
 const emptySlot = (slotNumber: number): Slot => ({
@@ -165,6 +167,12 @@ export const handlers = [
     stopCartFollow();
     return new HttpResponse(null, { status: 202 });
   }),
+  // 추종 대상 선택 — 실제 BE는 카트로 명령을 하행하고 202 {trackId, status:"SENT"}를 준다
+  http.post('*/api/carts/:cartId/follow/target', async ({ request }) => {
+    const body = (await request.json()) as SelectFollowTargetBody;
+    return HttpResponse.json({ trackId: body.trackId, status: 'SENT' }, { status: 202 });
+  }),
   getGetMapMockHandler(mapInfoFixture),
   cartWsHandler,
+  cartVideoWsHandler,
 ];

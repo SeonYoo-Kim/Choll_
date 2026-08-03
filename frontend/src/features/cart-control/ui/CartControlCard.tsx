@@ -1,8 +1,11 @@
+import { useRef, useState } from 'react';
+
 import { CircleStop, Compass, Pause, Play } from 'lucide-react';
 
 import { usePauseFollow, useStartFollow, useStopFollow } from '../api/followCommands';
 import { useCartControlStore } from '../model/cartControlStore';
 
+import { FollowTargetModal } from '@/features/follow-target/ui/FollowTargetModal';
 import { DEMO_CART_ID } from '@/shared/config/cart';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
@@ -15,11 +18,24 @@ export function CartControlCard() {
   const following = runState === 'FOLLOWING';
   const paused = runState === 'PAUSED';
 
+  const [targetModalOpen, setTargetModalOpen] = useState(false);
+  // 방금 고른 track id — 추종 시작 응답이 왔을 때 안내 문구에 쓴다.
+  // state가 아니라 ref인 이유: 이 값이 바뀐다고 다시 그릴 것이 없다.
+  const selectedTrackIdRef = useRef<number | null>(null);
+
   const startFollow = useStartFollow({
     mutation: {
       onSuccess: () => {
         applyFollowStatus('STARTED');
-        notify(paused ? '카트가 다시 따라와요' : '추종을 시작했어요');
+        const trackId = selectedTrackIdRef.current;
+        selectedTrackIdRef.current = null;
+        notify(
+          trackId !== null
+            ? `${trackId}번 사람을 따라가요`
+            : paused
+              ? '카트가 다시 따라와요'
+              : '추종을 시작했어요',
+        );
       },
       onError: () => notify('추종 시작에 실패했어요'),
     },
@@ -44,13 +60,25 @@ export function CartControlCard() {
   });
   const pending = startFollow.isPending || pauseFollow.isPending || stopFollow.isPending;
 
-  // 추종 중 → 일시정지, 그 외(정지·일시정지) → 시작/재개
+  /**
+   * 추종 중 → 일시정지, 일시정지 → 바로 재개, 정지 → 추종 대상 선택부터.
+   * 재개할 때 대상을 다시 고르게 하지 않는 이유: 잠시 멈춘 것뿐이라 대상은 그대로다.
+   */
   const handleFollowClick = () => {
     if (following) {
       pauseFollow.mutate({ cartId: DEMO_CART_ID });
-    } else {
+    } else if (paused) {
       startFollow.mutate({ cartId: DEMO_CART_ID });
+    } else {
+      setTargetModalOpen(true);
     }
+  };
+
+  // 대상 선택(202) 성공 → 모달을 닫고 이어서 추종을 시작한다
+  const handleTargetSelected = (trackId: number) => {
+    selectedTrackIdRef.current = trackId;
+    setTargetModalOpen(false);
+    startFollow.mutate({ cartId: DEMO_CART_ID });
   };
 
   return (
@@ -82,6 +110,13 @@ export function CartControlCard() {
           <span>이동 취소</span>
         </button>
       </div>
+      {targetModalOpen && (
+        <FollowTargetModal
+          cartId={DEMO_CART_ID}
+          onClose={() => setTargetModalOpen(false)}
+          onSelected={handleTargetSelected}
+        />
+      )}
     </div>
   );
 }
