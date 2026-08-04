@@ -16,20 +16,26 @@
 
 ROS2-01~06, 11, 13은 AI 파트 내부 토픽으로 Lidar 패키지와 무관 (사용하지 않음).
 
-### 중복 정리 이력 (2026-08-03)
+### 중복 정리 이력 (2026-08-03~05)
 
 - `/cart/pose` (PoseStamped, 10Hz) — **ROS2-08 `/robot_pose`와 동일 내용의 이름만 다른
   중복 발행이어서 제거**, `/robot_pose`로 일원화. BE MQTT 브릿지도 `/robot_pose`를
   구독하면 됨. 추가 발행 토픽이 필요하면 `pose_topics` 파라미터 배열에 추가
   (`choll_nav/launch/interface.launch.py`).
+- MQTT-04 SELECT_TARGET — **AI `fe_bridge_node`가 이미 `/select_target`(ROS2-04) 변환
+  담당**(backend/CLAUDE.md 실측, 2026-08-04 확인). choll_mqtt_bridge는 이중 발행 방지를
+  위해 이 명령을 무시한다.
+- MQTT-01 `status/position` 페이로드 — BE 파서(`MqttPositionMessageHandler`) 실측으로
+  `{"x","y","timestamp"(ISO-8601, 선택)}` 확정. EM은 `yaw`(라디안, CCW+)를 추가 송신
+  (BE 파서 확장 제안 상태). mapId는 페이로드에 없음(BE `mqtt.map-id` 설정).
 
 ## 표 B. 명세서에 없는 사용 중 API — 명세서 추가 제안 (노션 붙여넣기용)
 
 | 메시지 ID(제안) | Topic | 메시지 타입 | 기능 설명 | Publisher | Subscriber | 사용 이유 |
 |---|---|---|---|---|---|---|
-| ROS2-14 | `/cart/target_pose` | geometry_msgs/PoseStamped | 단발성 목적지 이동 명령 (BE·수동). **header.frame_id 필수** — map 외 프레임은 TF 자동 변환 | (예정) MQTT→ROS2 브릿지 (`choll/cart/cmd` MOVE), 수동 테스트 | goal_forwarder | ROS2-09(AI 연속 스트림·PointStamped)와 달리 ①방향 지정 가능 ②임의 프레임 허용 ③**스로틀 없이 즉시 선점**(사용자 명령 유실 방지). 웹 "구역 이동" 기능의 ROS 측 입구 |
-| ROS2-15 | `/cart/cancel` | std_msgs/String | 주행 취소. **data = requestId** (선택, 빈 문자열 허용) — BE `choll/cart/cmd`의 requestId를 그대로 실어 명령↔결과(CANCELED) 추적 가능 | (예정) MQTT→ROS2 브릿지 (`choll/cart/cmd` CANCEL) | goal_forwarder | 웹 취소 버튼의 ROS 측 입구. goal 응답 대기 창에 도착해도 유실되지 않도록 구현됨. Empty 대신 String을 쓰는 이유: requestId 추적성 (2026-08-03 변경) |
-| ROS2-16 | `/cart/nav_status` | std_msgs/String | 주행 상태: IDLE·NAVIGATING·SUCCEEDED·ABORTED·CANCELED·REJECTED·NAV2_UNAVAILABLE (래치 발행, 변화 시에만) | goal_forwarder | (예정) ROS2→MQTT 브릿지 → BE/FE | FE `NAVIGATION_STATUS`(ACCEPTED/STARTED/ARRIVED/CANCELLED/FAILED) 이벤트의 원천 데이터. **값 매핑 팀 합의 필요** (예: NAVIGATING→STARTED, SUCCEEDED→ARRIVED). Nav2 미기동 시 NAV2_UNAVAILABLE로 배선 자가진단 가능 |
+| ROS2-14 | `/cart/target_pose` | geometry_msgs/PoseStamped | 단발성 목적지 이동 명령 (BE·수동). **header.frame_id 필수** — map 외 프레임은 TF 자동 변환 | **choll_mqtt_bridge `mqtt_bridge`** (MQTT-04 `cmd/move/cart` MOVE의 `target{x,y}` 변환 — 구현 완료), 수동 테스트 | goal_forwarder | ROS2-09(AI 연속 스트림·PointStamped)와 달리 ①방향 지정 가능 ②임의 프레임 허용 ③**스로틀 없이 즉시 선점**(사용자 명령 유실 방지). 웹 "구역 이동" 기능의 ROS 측 입구 |
+| ROS2-15 | `/cart/cancel` | std_msgs/String | 주행 취소. **data = requestId** (선택, 빈 문자열 허용) — MQTT-04 CANCEL의 requestId를 그대로 실어 명령↔결과(CANCELED) 추적 가능 | **choll_mqtt_bridge `mqtt_bridge`** (MQTT-04 CANCEL 변환 — 구현 완료) | goal_forwarder | 웹 취소 버튼의 ROS 측 입구. goal 응답 대기 창에 도착해도 유실되지 않도록 구현됨. Empty 대신 String을 쓰는 이유: requestId 추적성 (2026-08-03 변경) |
+| ROS2-16 | `/cart/nav_status` | std_msgs/String | 주행 상태: IDLE·NAVIGATING·SUCCEEDED·ABORTED·CANCELED·REJECTED·NAV2_UNAVAILABLE (래치 발행, 변화 시에만) | goal_forwarder | (예정) choll_mqtt_bridge — 상행 `status/nav` `{"requestId","status"}` 신설 합의 후 발행 추가 | FE `NAVIGATION_STATUS`(ACCEPTED/STARTED/ARRIVED/CANCELLED/FAILED) 이벤트의 원천 데이터. BE는 STARTED/ARRIVED/FAILED를 "카트 상행 결과 토픽 확정 후"로 보류 중(backend/CLAUDE.md). **값 매핑 팀 합의 필요** |
 | ROS2-17 | `/odom_rf2o` | nav_msgs/Odometry | 레이저 스캔매칭 오도메트리 (10Hz) + TF odom→base_link | rf2o_laser_odometry (외부) | Nav2 (bt_navigator·controller·velocity_smoother) | STM32 휠 오도메트리 도입 전 임시. **`/odom` 이름은 향후 휠 오도메트리용으로 예약**되어 있어 충돌 회피를 위해 별도 이름 사용. 휠 odom 도입 시 rf2o 제거 또는 EKF 융합으로 전환 |
 | ROS2-18 | `/map` | nav_msgs/OccupancyGrid | SLAM 점유 격자 지도 (0.05m/셀, TRANSIENT_LOCAL 래치) | slam_toolbox (매핑) / map_server (저장 지도 모드) | Nav2 global costmap, RViz | Nav2 경로계획의 기반 지도. 저장본(`~/maps/library_map.yaml`)의 resolution·origin이 BE `SlamCoordinateConverter`(미터↔픽셀 변환)의 입력값 |
 

@@ -15,6 +15,29 @@
 
 ---
 
+## 2026-08-05 — ✅ EM choll_mqtt_bridge 이관: ruff·pytest 21 통과 (Claude, 노트북)
+
+- **명령**: `~/.local/bin/ruff check --config pyproject.toml embedded/Lidar/src/choll_mqtt_bridge/` + `python3 -m pytest embedded/Lidar/src/choll_mqtt_bridge/test/test_bridge_logic.py -q`
+- **환경**: 노트북 Ubuntu 22.04, Python 3.10, ruff 0.6.9. colcon build는 노트북 ws(`~/choll/embeded`) 동일 소스로 통과.
+- **커밋**: 이관 커밋에 포함 (MQTT↔ROS2 브릿지 패키지 추가)
+- **맥락**: MQTT-04 `cmd/move/cart`(MOVE/CANCEL)→ROS 변환 + `/robot_pose`→MQTT-01 `status/position` 발행 브릿지.
+  페이로드는 BE 파서(`MqttPositionMessageHandler`) 실측 계약(x/y/timestamp ISO-8601 + yaw 추가 송신).
+  실브로커 접속 검증(CONNACK 0, `cmd/move/cart` QoS1 구독 승인)은 노트북에서 완료 — 엔드투엔드 스모크는 Jetson STEP에서 예정.
+
+<details>
+<summary>전체 출력</summary>
+
+```text
+$ ruff check --config pyproject.toml embedded/Lidar/src/choll_mqtt_bridge/
+All checks passed!
+
+$ python3 -m pytest embedded/Lidar/src/choll_mqtt_bridge/test/test_bridge_logic.py -q
+.....................                                                    [100%]
+21 passed in 0.02s
+```
+
+</details>
+
 ## 2026-08-04 — ✅ EM 통합브랜치 실기: WASD 수동주행 재검증 + 펌웨어 통신 타임아웃 5초 실측 + 데드존 실측 (relu 실기 / Claude 실행·기록)
 
 - **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
