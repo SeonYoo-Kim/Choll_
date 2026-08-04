@@ -15,6 +15,54 @@
 
 ---
 
+## 2026-08-04 — ✅ EM 브랜치 통합(Lidar + motor-control) 후 회귀: 449 tests 통과 (Claude)
+
+- **작업**: `em/feature/Lidar`(4fd5a44) + `origin/em/feature/motor-control`(1a1f7a5)
+  → **`em/feature/motor-Lidar-integrated`** 머지 커밋 `3f0b145`
+- **충돌**: `tests/TEST_LOG.md` 1건뿐(양쪽이 같은 위치에 항목 추가). 3-way 스테이지를
+  꺼내 날짜순으로 재조립 — **ours 대비 삭제 0줄**, theirs 대비 Lidar 항목 30줄만 추가로 검증
+- **환경**: Jetson Orin Nano, Ubuntu 22.04 arm64, ROS2 소싱 없이 순수 pytest
+- **결과**: **449 passed** (nav_logic 31 + stm_serial_bridge 349 + cart_teleop 69)
+
+### ⚠️ 이번에 검증하지 **않은** 것 (성공으로 단정하지 말 것)
+
+- `colcon build` — 두 워크스페이스(`embedded/Lidar`, `ros2_ws`) **미실행**
+- 실기 동작 — Nav2 `/cmd_vel` → `stm_serial_bridge` 연결은 **코드가 합쳐졌을 뿐 미검증**.
+  ⚠️ `/cmd_vel` 발행 주체 충돌(Nav2 vs teleop vs AI control_node) 정리 필요
+- ruff: `ros2_ws/src` 89건 / Lidar `test_nav_logic.py` I001 1건 — **머지 이전부터 있던 것**
+  (머지 전 원본 워크트리에서 91건 확인, `pyproject.toml`·Lidar 소스 무변경). 이번 작업 범위 밖이라 미수정
+
+<details>
+<summary>원본 출력</summary>
+
+```
+$ git log -1 --format='parents: %p'
+parents: 4fd5a44 1a1f7a5
+
+$ python3 -m pytest embedded/Lidar/src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.15s
+
+$ cd ros2_ws/src/stm_serial_bridge && python3 -m pytest test/ -q
+........................................................................ [ 20%]
+........................................................................ [ 41%]
+........................................................................ [ 61%]
+........................................................................ [ 82%]
+.............................................................            [100%]
+349 passed in 5.85s
+
+$ cd ros2_ws/src/cart_teleop && python3 -m pytest test/ -q
+.....................................................................    [100%]
+69 passed in 0.27s
+
+$ ruff check --config pyproject.toml ros2_ws/src            # 머지 후
+Found 89 errors.
+$ ruff check --config pyproject.toml <머지 전 원본 워크트리>/ros2_ws/src
+Found 91 errors.                                            # 머지가 만든 문제 아님
+```
+
+</details>
+
 ## 2026-08-04 — ✅ EM+ROS2 실기: `cart_teleop` WASD 수동 주행 동작 확인 / ⚠️ 수치 정확도는 미검증 (relu 실기 / Claude 문서 반영)
 
 - **환경**: 실제 STM32 + 모터 연결. `cart_teleop → /cmd_vel → stm_serial_bridge`,
