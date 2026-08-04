@@ -15,6 +15,18 @@
 
 ---
 
+## 2026-08-04 09:55 — ✅ BE: TRACKS_UPDATED 중계를 영상 시청자 있을 때만으로 게이트 (Claude)
+
+- **배경**: AI가 status/target을 5Hz 상시 발행 → BE가 무조건 WS 중계 → FE 콘솔에
+  TRACKS_UPDATED 스팸 (선택 모달 밖에서도). FE는 선택 모달을 열 때만 영상 WS 시청자로
+  붙으므로(명세 그대로), **시청자 존재 여부를 게이트**로 사용 — FE 수정 불필요
+- **변경** (브랜치 `backend/feature/tracks-relay-gating`):
+  - `VideoRelayHandler.hasViewers(cartId)` 신규
+  - `MqttTracksMessageHandler`: 시청자 없으면 파싱 전에 조기 리턴 (중계·로그 없음)
+- **결과**: 23 suites, **82 tests, 0 failures** (신규 1: 시청자 없으면 미중계.
+  기존 4개는 시청자 있음 스텁으로 갱신)
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+
 ## 2026-08-04 09:35 — 🐛→✅ 배포 후 실기 연동: 추종 시작 400 원인 분석 + 재시작 잔재 상태 버그 수정 (Claude)
 
 - **증상**: 배포 서버에서 FE 추종 시작 → 사서 선택 시 `POST /follow` 400.
@@ -130,6 +142,7 @@ POST /api/carts/1/follow -> 400 "카트가 오프라인 상태라 추종을 시�
 ```
 
 </details>
+
 
 ## 2026-08-03 21:33 — ✅ BE: MOVE 하행에 SLAM 미터 target 추가 + NAV-01 픽셀 클릭 지원 (Claude)
 

@@ -41,7 +41,8 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   — 실구현 7종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
   `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED —
   STARTED/ARRIVED/FAILED는 카트 상행 결과 토픽 확정 후), `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
-  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용),
+  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용. **영상 시청자가 있을 때만 중계** —
+  FE가 선택 모달을 열면 영상 WS에 붙는 것을 게이트로 사용, 모달 밖 콘솔·트래픽 스팸 차단),
   `FOLLOW_STATUS_UPDATED`(FOLLOWING/PAUSED/STOPPED — REST 접수 기준. 대상 인식 여부·거리는 카트 상행 확정 후)
 - **WebSocket 영상**: `/ws/carts/{cartId}/video` (FE 시청, 바이너리 JPEG 1메시지=1프레임)
   ← `/ws/carts/{cartId}/video/publish` (Jetson 발행, 10fps/품질70 기준 ~4Mbps)
