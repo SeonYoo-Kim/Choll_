@@ -15,6 +15,195 @@
 
 ---
 
+## 2026-08-04 — ✅ EM 통합브랜치 실기: WASD 수동주행 재검증 + 펌웨어 통신 타임아웃 5초 실측 + 데드존 실측 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
+  실제 STM32(NUCLEO-F446RE, ST-LINK `0483:374b` → `/dev/ttyACM0`) + 모터 + 쫄래쫄래 선반 카트.
+  브릿지 `mode:=hardware speed_profile:=slow`(`max_wheel_rad_s=2.0`), 전 구간 `ROS_DOMAIN_ID=42`로 격리
+- **브랜치**: `em/feature/motor-Lidar-integrated` (`355cb0d`). **코드 변경 0건** — 검증·문서만
+- **증거 파일**: `ros2_ws/log/phase1_20260804/` (브릿지 로그 667 KB, teleop 화면 캡처 3종, check_stm_topics)
+- **목적**: 이 브랜치의 실기 동작은 미검증이었고(머지 후 회귀는 `pytest 449` 순수 로직만),
+  기존 실기 기록은 전부 "사용자 보고값 / 원본 미확보" 한계를 달고 있었다 → **원본 증거 확보**가 목표
+
+### 확인된 것
+
+| 항목 | 결과 |
+|---|---|
+| `pytest` (teleop 69 + bridge 349) | **418 passed** |
+| `verify_bridge_mock.sh` | **3/3 통과** (exit 0, 잔존 프로세스 없음, 로그에 `ttyACM` 0건 = 실제 장치 미개방) |
+| 브릿지 파라미터 | `dry_run=False`, `max_wheel_rad_s=2.0`, `baud_rate=115200`, `wheel_radius_m=0.065`, `wheel_separation_m=0.38`, `tx_rate_hz=20.0`, `cmd_vel_timeout_sec=0.5`, `status_timeout_sec=0.5` |
+| `/stm/connected` · `/stm/fault` | `true` · `NONE`, `check_stm_topics` **✅ 합격**(6토픽) |
+| **RX/STATUS 경로** | **실기 확인** (STATUS #1~#6600+ 수신) — 노드 docstring의 "PTY-only, unverified"는 이제 stale |
+| watchdog | `active → timed_out` 전이 **0.501초** (설정 0.5s와 일치) |
+| Speed Profile 램프 | target이 **틱당 0.2 rad/s** 증가 = `MOTOR_ACCEL_LIMIT_RAD_S2 4.0` × 0.05s와 일치 |
+| 개루프 PWM | **PWM = 10 × target rad/s** = `MOTOR_OPEN_LOOP_PWM_PER_RAD_S 10.0`과 일치 |
+| 직진 (공중) | target `2.00/2.00`, actual `2.22/2.16` (편차 **2.7%**), PWM `20/20`, 엔코더 ΔL 62802 / ΔR 60608 (편차 3.5%) |
+| 후진 (공중) | target `-2.00/-2.00`, actual `-2.19/-2.17`, 엔코더 양쪽 **감소** |
+| 제자리 회전 (공중) | CCW target **`-1.75/+1.75`**, CW **`+1.75/-1.75`**, PWM `∓17/±17`, 엔코더 좌우 반대 |
+| **`wheel_separation_m=0.38` 반영 확인** | 회전 target `∓1.754`가 실측됨 (L=0.30이면 `1.385`였을 것) → 실측값이 실제 경로에 반영돼 있음 |
+| teleop 화면 ↔ 브릿지 수신 | 단계 1~5의 `linear.x 0.026/0.052/0.078/0.104/0.130` ↔ target `0.40/0.80/1.20/1.60/2.00` **1:1 일치** |
+| teleop 상태 전이 | `STOPPED → ARMED → TIMEOUT → QUIT`, lease 만료 자동정지 |
+| **`Space` 정지 — 실기 최초** | 공중 + **바닥 부하 상태** 양쪽 확인 (`#6416 target 2.00, actual L=1.84 R=1.95` → `#6422 target 0.00, actual ~0`) |
+| **DISARMED 충돌 차단 — 실기 최초** | 외부 zero Twist 발행자 투입 → `/cmd_vel` Pub 1→2, teleop `DISARMED`, **W를 눌러도 브릿지 수신 26/26 샘플 전부 `0.00/0.00`**. 발행자 제거 후 Pub 2→1, 새 키 입력으로만 복귀(자동 재개 없음) |
+| 바닥 주행 | **3.5 m × 3.5 m 구역 주행 완료**. 속도 단계 **5/5 유지**, target `2.00/2.00` 161샘플, CCW 61샘플, CW 20샘플, 후진 3샘플 |
+| 바닥 부하 시 실제 속도 | PWM 20에서 actual `L≈1.85 R≈1.97` (공중 `2.22/2.16`보다 낮음, 좌우 편차 약 6%) |
+| STALL / FAULT / 속도제한 / ERROR | **전 구간 0건** |
+| 엔코더 누적(바닥 세션 종료 시) | `L=2,231,388 R=2,758,456` |
+
+### 🔴 새로 실측한 값 — 펌웨어 통신 타임아웃 = **약 5.0초** (문서와 불일치 해소)
+
+주행 중(바퀴 공중, 바퀴 1.0 rad/s) 브릿지를 `SIGKILL` 하고 원시 시리얼을 인수해 STATUS를 캡처했다.
+
+```
+T_kill           = 1785827829.4306
+포트 인수         = 1785827829.4471   (kill 후 16.5 ms, stty 재시도 0회)
+캡처 STATUS       = 121줄 @ 10Hz
+첫 zero-PWM       = 51번째 줄  →  캡처시작 +5.0초
+```
+
+→ `motion_controller.c:14` 의 `MOTION_CONTROLLER_COMM_TIMEOUT_MS 5000u` 가 **실제 동작값**이고,
+`motion_controller.c:13` 과 `app_event.h:22` 의 **"300ms" 주석 두 곳이 stale**이다.
+전원 차단은 필요하지 않았고 모터는 스스로 멈췄다. 정지 시 `pwm 10,10 → 0,0` 으로 램프 없음.
+
+**안전 함의**: 브릿지가 죽으면 STM32는 최대 5초간 마지막 속도를 유지한다.
+slow 프로파일 0.13 m/s면 **약 0.65 m**를 더 간다 → 바닥 주행 시 진행 방향 여유 거리에 반영해야 한다.
+
+### 🔴 새로 실측한 값 — 개루프 데드존 (`PWM<20`)
+
+공중에서 측정. 문서의 "PWM<20은 비선형 데드존" 경고가 숫자로 확인됐다.
+
+```
+PWM  4 (단계 1) : actual L=0.00 R=0.00   ← 바퀴가 공중인데도 무회전
+PWM  8 (단계 2) : actual L=0.02 R=1.18   ← 한쪽만 회전 (심한 비대칭)
+PWM 20 (단계 5) : actual L=2.22 R=2.16   ← 대칭 (편차 2.7%)
+```
+
+공중에서도 이러므로 **바닥에서는 더 나쁘다.** 바닥 주행은 **속도 단계 5/5 고정**이 필수다
+(PWM 8에서 한쪽만 1.18 rad/s로 도는 상태는 바닥에서 카트를 급격히 틀어버린다).
+
+### ⚠️ 이 기록의 한계 — 원본 소실 구간 있음
+
+세션 중간에 **Jetson을 보조배터리 연결 때문에 재부팅**했고, 그때 `/tmp` 스크래치패드가 비워져
+**Stage 0~2(mock·펄스·페일세이프·공중 teleop) 구간의 브릿지 원본 로그가 소실**됐다.
+그 구간 수치는 **실행 중 실제 출력을 그대로 인용해 보고한 세션 기록에서 재구성**한 것이다.
+**바닥 주행분과 teleop 화면 캡처 3종은 파일로 보존**돼 있다(`ros2_ws/log/phase1_20260804/`).
+이후 검증은 재부팅에 견디는 `ros2_ws/log/`(gitignore 대상)에 기록하도록 바꿨다.
+
+`ros2 param dump /cart_keyboard_teleop` 은 `Node not found` 로 실패했다(원인 미확인).
+teleop 파라미터는 **명령줄에 명시한 값**(`input_timeout_sec:=1.0 max_linear_mps:=0.13
+max_angular_rps:=0.6 speed_step_count:=5`)과 화면 캡처의 `속도 단계 5 / 5`·`linear.x +0.130`
+으로 확인한다 — teleop 노드는 파라미터를 로그에 전혀 남기지 않는다(`get_logger` 0건).
+
+### ⚠️ 여전히 미검증 (유지)
+
+- **slow 프로파일의 실제 속도 정확도** — 램프(0.5초 가감속) + 엔코더 스케일 12% 미확정 +
+  lease 경계 오차가 겹쳐 **m/s로 환산하지 않는다.** 엔코더 누적으로 환산한 바퀴 경로
+  (L≈11.4 m / R≈13.6 m)는 3.5×3.5 m 구역 주행과 **자릿수가 맞다**는 정합성 확인일 뿐이고,
+  거리 측정으로 주장하지 않는다(제자리 회전은 이동 없이 바퀴 경로만 늘린다)
+- `/stm/wheel_actual_rad_s` 수치 정확도, 엔코더 count/rev 12.1% 원인 — 미확정
+- `bench`(1.0)·`nav2`(6.4) 프로파일의 바닥 주행 — 미검증 유지
+- **속도 단계 ≤4의 바닥 주행** — STALL 래치 위험(PI 적분이 PWM 80까지 상승) 때문에 **의도적으로 미실시**
+- LiDAR/slam_toolbox 동시 실행, 지도 작성 품질 — Phase 3
+- 장시간 SSH 세션에서의 입력 지연·안정성
+
+### 후속 조치 대상 (이번 검증에서 발견한 코드·문서 불일치)
+
+1. `motion_controller.c:13`, `app_event.h:22` 주석 `300ms` → 실제 `5000ms` (위 실측)
+2. `stm_serial_bridge_node.py` docstring "RX/STATUS 경로는 PTY-only" → 실기 확인됨
+3. **브릿지가 종료 시 정지 명령을 보내지 않는다** (`_shutdown()` → `close_serial()` 뿐).
+   주행 중 Ctrl+C 하면 STM이 최대 5초간 마지막 속도 유지 → 종료 순서 규칙(발행자 → 0 확인 → 브릿지)이
+   안전 속성이다. `close_serial()` 전에 `SET_WHEEL_VEL,0.000,0.000` 송신하는 소규모 수정 검토 가치 있음
+4. `nav2` 프로파일: launch 설명 `6.0` vs `speed_profile_nav2.yaml` 실제 `6.4`
+5. **NUCLEO B1 버튼은 Latched Safe Stop을 *걸고*, 해제는 RESET(NRST)/전원 재투입만 가능**
+   (`latched_stopped`는 `StopController_Init()`=부팅에서만 0). "B1으로 해제" 표현은 오류
+6. `ros2 param dump /cart_keyboard_teleop` 실패 원인 확인
+
+<details>
+<summary>원본 출력 (파일 보존분 + 세션 기록 재구성분)</summary>
+
+```
+$ python3 -m pytest src/cart_teleop/test src/stm_serial_bridge/test -q
+418 passed in 2.77s
+
+$ bash scripts/verify_bridge_mock.sh
+ 결과: ✅ 3개 시나리오 전부 통과 (잔존 프로세스 없음)
+   [1/3] connect  ---> ✅ 통과
+   [2/3] cmd_vel  encoder_total 1차: array('i', [17591, 17591]) / 2차: array('i', [66750, 66750])  ---> ✅ 통과
+   [3/3] disconnect  /stm/connected 2 False  ---> ✅ 통과
+ (로그에 'ttyACM' 0건 = 실제 장치 미개방)
+
+$ ros2 run stm_serial_bridge check_stm_topics --timeout-sec 10     # 하드웨어
+  OK  /stm/wheel_target_rad_s         1  [0.0, 0.0]
+  OK  /stm/wheel_actual_rad_s         1  [0.0, 0.0]
+  OK  /stm/pwm                        1  [0, 0]
+  OK  /stm/encoder_total              1  [0, 0]
+  OK  /stm/connected                  1  True
+  OK  /stm/fault                      1  NONE
+  결과: ✅ 합격
+
+# 브릿지 기동 로그 (파라미터)
+  serial_port  = /dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066FFF525771555067235049-if02
+  baud_rate = 115200 / wheel_radius_m = 0.065 / wheel_separation_m = 0.38
+  tx_rate_hz = 20.0 / cmd_vel_timeout_sec = 0.5 / dry_run = False
+  max_wheel_rad_s = 2.0 / rx_poll_hz = 50.0 / status_timeout_sec = 0.5
+  /stm/connected: true — 유효한 STATUS 수신 시작
+
+# 공중 단발 펄스 x=0.065  (watchdog 0.501초)
+watchdog state: waiting -> active     [1785827041.236165537]
+watchdog state: active -> timed_out   [1785827041.736701869]
+target 0.2/0.4/0.6/0.8/1.0 (틱당 +0.2)   pwm 2/4/6/8/10
+STATUS #4971: target L=0.60 R=0.60, actual L=0.84 R=0.58, pwm L=6 R=6, enc L=3739 R=2304
+
+# 공중 2초 펄스 x=0.13
+STATUS #5454: target L=2.00 R=2.00, actual L=2.20 R=2.14, pwm L=20 R=20, enc L=15380 R=13303
+STATUS #5466: target L=2.00 R=2.00, actual L=2.22 R=2.16, pwm L=20 R=20, enc L=48167 R=45301
+
+# 공중 후진 / 회전
+target L=-2.00 R=-2.00, actual L=-2.19 R=-2.17, pwm L=-20 R=-20   (엔코더 양쪽 감소)
+target L=-1.75 R=1.75,  actual L=-1.80 R=1.78,  pwm L=-17 R=17    (CCW: L 감소, R 증가)
+target L=1.75 R=-1.75,  actual L=1.83 R=-1.80,  pwm L=17 R=-17    (CW: 반대)
+
+# 페일세이프 실측
+T_kill=1785827829.430572869 / 포트인수=1785827829.447056289 / stty_retries=0
+캡처 STATUS 121줄, 첫 zero-PWM = 51번째 줄 → +5.0초
+STATUS,1.00,0.29,1.00,0.57,10,10,34174,31182     (kill 직후, 계속 주행)
+STATUS,0.00,0.00,0.00,0.64,0,0,35831,68972       (5.0초 후 PWM 0, 램프 없음)
+
+# DISARMED (외부 zero Twist 발행자 투입)
+/cmd_vel Publisher count: 1 → 2 → (제거) → 1
+DISARMED 구간 브릿지 수신: 26  target L=0.00 R=0.00, actual L=0.00 R=0.00, pwm L=0 R=0   (W 눌렀음에도)
+
+# 바닥 주행 (3.5m x 3.5m) — 브릿지 수신 분포
+    661 target L=0.00 R=0.00        661 pwm L=0 R=0
+    161 target L=2.00 R=2.00        161 pwm L=20 R=20
+     61 target L=-1.75 R=1.75        61 pwm L=-17 R=17
+     20 target L=1.75 R=-1.75        20 pwm L=17 R=-17
+      3 target L=-2.00 R=-2.00        3 pwm L=-20 R=-20
+STALL/FAULT/속도제한 0건, ERROR/MALFORMED 0건
+watchdog: waiting→active 1회, active→timed_out 1회 (teleop 20Hz 발행 중에는 watchdog 미발동)
+최종 enc L=2231388 R=2758456
+
+# Space 부하 정지
+STATUS #6416: target L=2.00 R=2.00, actual L=1.84 R=1.95, pwm L=20 R=20
+STATUS #6422: target L=0.00 R=0.00, actual L=-0.05 R=0.01, pwm L=0 R=0
+
+# teleop 화면 캡처 (script, 바닥 세션)
+속도 단계       : 5 / 5          ← 유일한 값 (끝까지 유지)
+상태            : STOPPED / ARMED / TIMEOUT / QUIT
+linear.x        : +0.130 / -0.130 / +0.000 m/s
+angular.z       : +0.600 / -0.600 / +0.000 rad/s
+마지막 입력 키  : W 전진 / S 후진 / A 제자리 좌회전 / D 제자리 우회전 / Space 정지 / q 종료
+/cmd_vel 충돌   : 없음 (teleop 단독)
+cart_teleop: 정지 명령 발행 후 종료했다.
+
+# 종료 순서 (안전 속성 — 브릿지는 종료 시 정지 명령을 보내지 않으므로)
+teleop q 종료 → 발행자 0 확인 → target/pwm 0 확인 → 브릿지 PGID SIGINT
+/cmd_vel Publisher count: 0 / target L=0.00 R=0.00, pwm L=0 R=0 / fault NONE
+ttyACM 점유자 수: 0
+```
+
+</details>
+
 ## 2026-08-04 — ✅ EM 브랜치 통합(Lidar + motor-control) 후 회귀: 449 tests 통과 (Claude)
 
 - **작업**: `em/feature/Lidar`(4fd5a44) + `origin/em/feature/motor-control`(1a1f7a5)
