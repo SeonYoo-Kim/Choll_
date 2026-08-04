@@ -225,6 +225,20 @@ class NavigationServiceTest {
 	}
 
 	@Test
+	void cancelClearsStaleNavigatingStatusWithoutSession() {
+		// 재시작으로 세션은 사라지고 DB 상태만 NAVIGATING으로 남은 경우
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.NAVIGATING);
+
+		service.cancel(1L);
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		// 취소할 실제 이동이 없으므로 MQTT·WS 발행은 없어야 한다
+		verify(commandPublisher, never()).publish(any());
+		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
 	void startsWithoutMqttWhenPublisherIsAbsent() {
 		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
 		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
