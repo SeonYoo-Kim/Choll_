@@ -5,17 +5,9 @@
 // 128px = 패딩 32 + 테두리 2 + 라벨 17 + 라벨-값 간격 14 + 값 2줄(21px x 2줄 = 60) + 여유 3
 $stat-row-height: 128px;
 
+// 배지를 걷어내 자식이 제목 블록 하나뿐이라, 양끝 정렬용 flex는 두지 않는다
 .pageHeader {
   margin-bottom: 28px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 12px;
-
-  @media (min-width: $bp-sm) {
-    flex-direction: row;
-    align-items: flex-end;
-  }
 }
 
 .overline {
@@ -37,58 +29,6 @@ $stat-row-height: 128px;
   margin: 4px 0 0;
   font-size: 14px;
   color: $text-soft;
-}
-
-.statusBadge {
-  width: fit-content;
-  border-radius: 999px;
-  padding: $spacing-sm $spacing-md;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.moving {
-  background: #fff0df;
-  color: #9a6435;
-
-  .dot {
-    background: #fab67a;
-    animation: pulse 1.6s infinite;
-  }
-}
-
-// 사서 추종 중 — 홈의 추종 배지와 같은 민트 톤, 점이 뛰어 진행 중임을 알린다
-.following {
-  background: $primary-bg;
-  color: #398c80;
-
-  .dot {
-    background: $primary;
-    animation: pulse 1.6s infinite;
-  }
-}
-
-.idle {
-  background: $primary-bg;
-  color: #398c80;
-
-  .dot {
-    background: $primary;
-  }
-}
-
-.dot {
-  margin-right: $spacing-sm;
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.4;
-  }
 }
 
 .mapArea {
