@@ -16,7 +16,7 @@
 | MotorNode | motor_node.py | (레거시 — EM이 재활용 예정, 데모용 유지) `/cmd_vel` → 차동구동 역기구학 → `/wheel_speed_cmd` 10Hz. cmd 끊기면 [0,0]. |
 | DebugVisualizationNode | debug_visualization_node.py | 트랙/타겟/재탐색 이벤트 + 타겟 거리(박스 우상단, m)를 프레임에 오버레이, `/debug/image` 발행 및 선택적 mp4 저장. |
 
-| FeBridgeNode | fe_bridge_node.py | (선택 실행: `fe_bridge:=true`, `auto_select:=false`와 함께) FE 타겟 선택 연동 — 영상 JPEG를 BE WS로(10fps), 트랙 목록을 MQTT `choll/cart/tracks`로(5Hz) 하행, MQTT `choll/cart/cmd`의 SELECT_TARGET을 `/select_target`으로 상행. **Jetson에 `pip3 install websocket-client paho-mqtt` 필요.** 순수 로직: fe_bridge_logic.py |
+| FeBridgeNode | fe_bridge_node.py | (선택 실행: `fe_bridge:=true`, `auto_select:=false`와 함께) FE 타겟 선택 연동 — 영상 JPEG를 BE WS로(10fps), 트랙 목록을 MQTT `status/target`으로(5Hz) BE에 발행, BE가 MQTT `cmd/move/cart`로 보내는 SELECT_TARGET을 받아 ROS `/select_target`으로 변환. **Jetson에 `pip3 install websocket-client paho-mqtt` 필요.** 순수 로직: fe_bridge_logic.py |
 
 노드 외 순수 모듈: **search_behavior.py** — 타겟 상실 시 탐색 거동 상태머신
 (마지막 위치 접근 → 사라진 방향 회전 → 실패 시 정지). ROS 무관, 테스트는

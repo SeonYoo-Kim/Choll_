@@ -72,6 +72,10 @@
 }
 
 .title {
+  // 제목·저자를 묶어서 5px 위로 — position: relative라 자리는 그대로 두고 보이는 위치만 옮긴다.
+  // (margin으로 올리면 .subtitle의 margin-bottom: auto와 물려 카드 안 배분이 어긋난다)
+  position: relative;
+  top: -5px;
   // 항상 정확히 2줄 높이로 고정 — 제목 길이가 카드 크기에 영향을 주지 않는다
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -102,6 +106,9 @@
 }
 
 .subtitle {
+  // .title과 같은 양만큼 올려 제목·저자 간격(4px)은 그대로 유지한다
+  position: relative;
+  top: -5px;
   margin: 4px 0 0;
   height: 16px;
   overflow: hidden;

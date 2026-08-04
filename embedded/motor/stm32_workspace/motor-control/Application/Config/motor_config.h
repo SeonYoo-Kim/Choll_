@@ -16,11 +16,12 @@
 /* =========================================================
  * Motor / Gearbox / Encoder 사양
  * - 모델: PM36-3657-2465E, 24V, 2채널 AB 인크리멘탈 엔코더
- * - 확인된 값: Encoder 380 CPR, Gear Ratio 100:1
+ * - 구매 사양: Encoder 380 CPR, Gear Ratio 51:1
+ *   (2026-08-03 정정: 이전에 100:1로 적혀 있었으나 실제 구매한 감속비 옵션은 51:1이다)
  * ========================================================= */
 
-/* 기어 감속비 (모터축 100회전 = 바퀴축 1회전) */
-#define MOTOR_GEAR_RATIO 100.0f
+/* 기어 감속비 (모터축 51회전 = 바퀴축 1회전). 구매 사양 기준값. */
+#define MOTOR_GEAR_RATIO 51.0f
 
 /* 모터 데이터시트 상 Encoder CPR(Counts Per Revolution) */
 #define MOTOR_ENCODER_CPR 380.0f
@@ -36,7 +37,31 @@
 
 /* 바퀴(출력축) 1회전당 누적 Encoder Count.
  * = Encoder CPR x Gear Ratio x Quadrature Multiplier
- * 위 세 매크로만 정정하면 이 값도 자동으로 갱신된다. */
+ * 위 세 매크로만 정정하면 이 값도 자동으로 갱신된다.
+ *
+ * ⚠️ 이 값은 **구매 사양 기준의 명목값**이며 실측 보정값이 아니다.
+ *    현재: 380 x 51 x 4 = 77520 count/wheel-rev
+ *
+ * === 2026-08-03 출력축 수동 회전 실측 (좌우 각 4회전, 총 8회전) ===
+ *   Left  평균 68107.75 count/rev
+ *   Right 평균 68217.25 count/rev
+ *   좌우 전체 평균 68162.5 count/rev
+ *
+ *   명목값 77520 대비 약 -12.1% (실측이 더 작다).
+ *   좌우 측정값은 서로 약 0.16% 차이로 매우 일관적이므로 측정 오차나 한쪽 하드웨어
+ *   이상이라기보다 사양/설정 쪽 원인일 가능성이 높다.
+ *
+ *   원인은 **아직 미확정**이다. 아래 중 어느 것인지 이 데이터만으로는 구분할 수 없다:
+ *     - CPR 380의 정의(채널당 라인 수인지, 이미 quadrature 적용된 값인지)
+ *     - Quadrature 배율(TI12 = x4 가정이 맞는지)
+ *     - 타이머 입력 필터(IC1Filter/IC2Filter = 8)로 인한 edge 누락
+ *     - 실제 하드웨어 사양이 구매 사양과 다름
+ *   참고로 실측을 정확히 맞추려면 유효 감속비 약 44.84:1 또는 유효 CPR 약 334.1이
+ *   필요하지만, 그 값들을 코드에 강제 적용하지 않았다 — 원인을 모른 채 숫자만 맞추면
+ *   다른 조건에서 다시 틀어진다.
+ *
+ *   → 후속 캘리브레이션 필요. 그때까지 STATUS의 LA/RA(actual_rad_s)는 실제보다
+ *     약 12% 작게 보고된다는 점을 전제로 해석해야 한다. */
 #define MOTOR_ENCODER_COUNTS_PER_WHEEL_REV \
     (MOTOR_ENCODER_CPR * MOTOR_GEAR_RATIO * MOTOR_ENCODER_QUADRATURE_MULTIPLIER)
 

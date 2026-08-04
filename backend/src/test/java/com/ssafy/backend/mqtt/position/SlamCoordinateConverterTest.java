@@ -68,4 +68,38 @@ class SlamCoordinateConverterTest {
 		// SLAM y가 커질수록(위로 갈수록) 이미지 y는 작아져야 한다
 		assertThat(high.y()).isLessThan(low.y());
 	}
+
+	@Test
+	void convertsImagePixelsToSlamMetersWithVerticalFlip() {
+		stubMap("0.05", "-10", "-10", 600);
+
+		// 픽셀 (775, 505) → SLAM (-10 + 775*0.05, -10 + (600-505)*0.05) = (28.75, -5.25)
+		SlamCoordinateConverter.SlamPosition result = converter.toSlamMeters(
+			new BigDecimal("775"),
+			new BigDecimal("505"),
+			map
+		);
+
+		assertThat(result.x()).isEqualByComparingTo("28.75");
+		assertThat(result.y()).isEqualByComparingTo("-5.25");
+	}
+
+	@Test
+	void pixelToMetersRoundTripsBackToSamePixel() {
+		stubMap("0.05", "-10", "-10", 600);
+		SlamCoordinateConverter.SlamPosition meters = converter.toSlamMeters(
+			new BigDecimal("200"),
+			new BigDecimal("400"),
+			map
+		);
+
+		SlamCoordinateConverter.ImagePosition pixels = converter.toImagePixels(
+			meters.x(),
+			meters.y(),
+			map
+		);
+
+		assertThat(pixels.x()).isEqualByComparingTo("200");
+		assertThat(pixels.y()).isEqualByComparingTo("400");
+	}
 }

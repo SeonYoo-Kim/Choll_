@@ -57,6 +57,17 @@ $stat-row-height: 128px;
   }
 }
 
+// 사서 추종 중 — 홈의 추종 배지와 같은 민트 톤, 점이 뛰어 진행 중임을 알린다
+.following {
+  background: $primary-bg;
+  color: #398c80;
+
+  .dot {
+    background: $primary;
+    animation: pulse 1.6s infinite;
+  }
+}
+
 .idle {
   background: $primary-bg;
   color: #398c80;

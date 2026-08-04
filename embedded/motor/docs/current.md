@@ -105,6 +105,73 @@ App_Run()
   PI 제어, Feedforward+PI 구조, Speed Profile(Direction Change Protection 포함), StopController
   (Normal Stop/ESTOP), Communication Timeout 모두 정상 동작 확인. Kp/Ki Runtime 변경(UART
   `SET_PI_GAINS`) 및 Python Tool/CSV Logger도 정상 동작 확인.
+- **ROS2 Serial Bridge 연동(Jetson cmd_vel → STM) 실기 검증 완료 (2026-08-02)**: Python Tool이 아니라
+  ROS2 노드가 `SET_WHEEL_VEL`을 보내는 경로가 실기에서 동작함을 확인. `/cmd_vel`(Twist) → 차동구동
+  좌우 rad/s 변환 → `SET_WHEEL_VEL,<left>,<right>` USB Serial 송신 → STM 수신 → 양쪽 모터 구동,
+  전진/후진/좌회전/우회전 정상. `/cmd_vel`이 끊기면 Bridge watchdog이 약 0.5초 후 `0.000,0.000`을
+  보내 자동 정지(STM 자체 Communication Timeout과는 별개의 상위 안전장치).
+  브리지 구현은 이 저장소의 `ros2_ws/`이며 STM 펌웨어는 변경되지 않았다
+  (Protocol v1 그대로). 상세: [../../../ros2_ws/CLAUDE.md](../../../ros2_ws/CLAUDE.md),
+  기록: [../../../tests/TEST_LOG.md](../../../tests/TEST_LOG.md).
+- **StatusReporter → ROS2 수신 경로 실기 검증 완료 (2026-08-03)**: `StatusReporter`가 10Hz로
+  보내는 STATUS Packet을 Python Tool이 아니라 **ROS2 Serial Bridge가 수신**해 상태 토픽으로
+  발행하는 경로가 실기에서 동작함을 확인(`/dev/ttyACM0`, 115200, 바퀴 공중). STM 펌웨어는
+  변경되지 않았다.
+  - 수신 주기: `/stm/wheel_actual_rad_s` 측정값 **약 9.995~9.999Hz** —
+    `STATUS_REPORTER_INTERVAL_MS`(10Hz) 설정과 일치
+  - **좌우 매핑 실측 확정**(그동안 코드 주석 기준이었고 실측 미확정이던 항목):
+    물리 왼쪽 바퀴 = STM 논리 Left = ROS2 인덱스 `[0]`,
+    물리 오른쪽 바퀴 = STM 논리 Right = ROS2 인덱스 `[1]`.
+    손으로 물리 왼쪽 바퀴를 돌리면 `encoder_total[0]`만, 오른쪽은 `[1]`만 변화했고,
+    `SET_WHEEL_VEL,2.000,0.000` / `0.000,2.000`으로 한쪽씩 구동했을 때도 같은 대응이 나왔다.
+    즉 **PWM 출력 채널과 엔코더 입력 채널의 좌우 짝이 정상**이다(엔코더만 교차된 상태가 아님).
+  - **Actual Wheel Velocity 부호 검증**: 전진 시 해당 쪽이 **양수**, 후진 시 **음수**,
+    반대쪽은 0 근처. 좌우 매핑과 부호가 모두 정상.
+  - ⚠️ 실기 중 왼쪽 모터/엔코더가 동작하지 않는 현상이 있었으나 **장비 이동 과정에서 배선이
+    빠진 하드웨어 문제**였고, 재연결 후 양쪽 모터·양쪽 엔코더·좌우 매핑 모두 정상 확인.
+    펌웨어/브리지 코드 결함이 아니었다.
+  - **엔코더 상태의 ROS2 연동은 이 경로로 이미 완결되어 있다**(2026-08-04 재확인, 신규 구현 불필요):
+    STATUS의 `LE`/`RE`(좌우 누적 encoder count) → `/stm/encoder_total`(`Int32MultiArray [left, right]`),
+    `LA`/`RA`(좌우 실측 각속도) → `/stm/wheel_actual_rad_s`(`Float32MultiArray [left, right]`).
+    별도의 엔코더 전용 패킷이나 추가 토픽을 만들 필요가 없다. 속도 단위는 **rad/s로 통일**되어
+    있고, RPM은 `motor.c`의 중간 계산 변수로만 존재해 패킷·토픽에는 나가지 않는다.
+  - 아직 검증되지 않은 것: STATUS 중단 시 연결 상태 전이, USB 강제 분리, 실제 Stall 발생 시
+    `FAULT`/`FAULT_CLEARED` 수신, `RESET_STALL` 송신,
+    `MOTOR_ENCODER_QUADRATURE_MULTIPLIER` 절대 배율(아래 "현재 개발 중인 기능" 참고).
+
+- **감속비 정정 + 엔코더 count/rev 실측 (2026-08-03)**: `MOTOR_GEAR_RATIO`를 **100.0f → 51.0f**로
+  수정했다. 구매한 모터의 감속비 옵션이 **51:1**임을 확인했고, 이전 값 100:1은 잘못된 기재였다.
+  `MOTOR_ENCODER_CPR`(380.0f)과 `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`(4.0f)는 **변경하지 않았고**,
+  `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`도 기존 파생식(CPR × Gear × Quadrature)을 그대로 유지한다.
+  - 명목값: 380 × 51 × 4 = **77520** count/wheel-rev (기존 100:1 기준 152000에서 변경)
+  - 출력축 수동 회전 실측: **바퀴 1회전당 count**를 좌우 각 4회전(합계 8회전) 측정해 평균했다.
+    Left 평균 **68107.75**, Right 평균 **68217.25**, 좌우 전체 평균 **68162.5** count/**wheel-rev**
+    → 명목값 대비 약 **-12.1%**
+    (⚠️ 68162.5는 **1회전당** 값이다. "8회전 누적 count"가 아니다.)
+  - 좌우 측정값이 서로 약 0.16% 차이로 매우 일관적이므로 측정 오차나 한쪽 하드웨어 이상보다는
+    사양/설정 쪽 원인일 가능성이 높다.
+  - ⚠️ **원인 미확정**: CPR 정의, Quadrature 배율, 타이머 입력 필터(IC1/IC2Filter=8), 실제 하드웨어
+    사양 중 어느 것인지 이 데이터만으로는 구분할 수 없다. **실측값 68162.5를 별도 상수로 강제
+    적용하지 않았다** — 감속비 1:45로 확정한 것도 아니다(구매 사양은 1:51).
+  - **영향**: `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`는 `motor.c`의 `Motor_UpdateActualVelocity()`
+    한 곳에서만 쓰이지만, 그 결과인 `motor_actual_*_rad_s`가 STATUS의 LA/RA, PI 오차 입력,
+    Speed Profile, Stall 판정으로 흘러간다. 같은 회전에서 보고되는 actual_rad_s가 **약 1.96배
+    커진다**(실제 대비 2.23배 과소 → 1.14배 과소로 개선). PI 게인이 기본 0.0f이므로 제어 동작
+    변화는 지금 당장 없다.
+  - **후속**: 재빌드·재플래시와 전진/후진 동작 확인은 **2026-08-04 완료**(바로 아래 항목).
+    다만 `actual_rad_s`의 **수치 정확도는 여전히 미검증**이다.
+
+- **기어비 51:1 반영 펌웨어 빌드·플래시 + 전진/후진 동작 확인 (2026-08-04)**: Windows STM32CubeIDE에서
+  `MOTOR_GEAR_RATIO 51.0f`가 반영된 펌웨어를 **빌드 성공 → 보드 플래시 성공**했고, 실기에서
+  **전진/후진 동작이 정상**임을 확인했다. 이번 빌드에서 바뀐 것은 상수 하나뿐이다.
+  - ✅ 확인된 것: CubeIDE **빌드 성공**, **플래시 성공**, **전진/후진 주행 동작 정상**(기존 동작 회귀 없음)
+  - ⚠️ **미검증**: `actual_rad_s`의 **수치 정확도**. "전진/후진이 동작한다"만 확인했고,
+    보고되는 rad/s가 실제 회전 속도와 얼마나 일치하는지는 **측정하지 않았다.**
+  - ⚠️ **미확정 유지**: count/rev 12.1% 차이의 **원인**. 이번 빌드로 해결된 것이 아니다 —
+    감속비 기재만 정정했을 뿐 명목 77520 vs 실측 68162.5 차이는 그대로 남아 있다.
+    따라서 STATUS의 LA/RA는 **여전히 실제보다 약 12% 작게 보고된다**는 전제로 해석해야 한다.
+  - 다음 정확도 검증은 목표 속도와 보고 속도를 비교하는 방식이 **아니라**, **바퀴를 정확히 1회전
+    돌린 전후 `encoder_total` 차이를 측정**하는 방식으로 한다(아래 "다음 개발 목표" 2번).
 
 ## 현재 개발 중인 기능
 
@@ -112,9 +179,16 @@ App_Run()
 - 코드 작성 완료(빌드 확인), 실기 테스트는 아직. `MOTOR_STALL_PWM_THRESHOLD`(80)/`MOTOR_STALL_TARGET_RAD_S`
   (0.2f)/`MOTOR_STALL_ACTUAL_RAD_S`(0.1f)/`MOTOR_STALL_DURATION_MS`(500u)는 모두 실기 미검증 잠정값
   (`motor_config.h`) — 실기에서 바퀴를 손으로 잡아 의도적으로 Stall을 유발해 튜닝 필요.
-- `MOTOR_ENCODER_QUADRATURE_MULTIPLIER = 4.0f`(motor_config.h)는 여전히 **임시 가정** — 바퀴 1바퀴 수동 회전 후
-  Encoder Count 절댓값이 152000(=380x100x4)에 가까운지, 38000(=380x100)에 가까운지로 검증 필요
-  ([docs/serial_protocol.md](serial_protocol.md) Actual Wheel Velocity 계산 절 참고)
+- **엔코더 count/rev 캘리브레이션 미완**(2026-08-03 실측 완료, 원인 미확정): 출력축 **1회전당**
+  실측 평균 **68162.5** count/wheel-rev(좌우 각 4회전 측정의 평균)가 감속비 51:1 기준 명목값
+  **77520**(=380×51×4)보다 약 12.1% 작다.
+  `MOTOR_ENCODER_QUADRATURE_MULTIPLIER = 4.0f`가 맞는지, CPR 380의 정의가 맞는지, 타이머 입력
+  필터(IC1/IC2Filter=8)로 edge가 누락되는지 중 어느 것이 원인인지 **아직 구분되지 않았다.**
+  실측값을 코드에 강제 적용하지 않았으므로 STATUS의 LA/RA는 현재 실제보다 약 12% 작게 보고된다.
+  (상세: `motor_config.h`의 `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV` 주석)
+- **`actual_rad_s` 수치 정확도 미검증**: `MOTOR_GEAR_RATIO` 100→51 변경으로 같은 회전에서 보고되는
+  actual_rad_s가 약 1.96배 커진다. 재빌드·재플래시와 전진/후진 동작 확인은 **2026-08-04 완료**했으나,
+  **보고값이 실제 회전 속도와 일치하는지는 아직 측정하지 않았다.**
 
 ## 다음 개발 목표
 
@@ -124,10 +198,28 @@ App_Run()
    재출발되는지 확인. ESTOP/Latched Safe Stop 중 `RESET_STALL`이 거부되는지도 함께 확인
    (안전 테스트 절차는 [docs/serial_protocol.md](serial_protocol.md) Stall Detection 절 참고).
    실기 데이터로 `MOTOR_STALL_*` Threshold 튜닝(오검출/미검출 여부 확인).
-2. `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`/`MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN` 실측 검증
-3. 하드웨어 실측(바퀴 반지름/최대 RPM) 후 `MOTION_CONTROLLER_MAX_WHEEL_RAD_S`와 `MOTOR_OPEN_LOOP_PWM_PER_RAD_S` 확정 및 clamp 적용 (`motion_controller.c`/`motor_config.h` TODO 참고)
-4. Python Tool의 FAULT/RESET_STALL 지원(별도 작업)
-5. (이후) ROS2 Serial Bridge, Jetson cmd_vel 연동
+2. **엔코더 스케일(count/rev) 실측 재확인** — 빌드·플래시·전진/후진 동작 확인은 2026-08-04 완료.
+   남은 것은 **스케일 정확도**이며, 검증 방법은 **바퀴를 정확히 1회전 돌린 전후 `encoder_total`
+   차이 측정**이다: 모터를 구동하지 않고(target 0) 손으로 출력축을 정확히 1회전시켜
+   `/stm/encoder_total`의 변화량을 읽고, 좌우 각각 여러 번 반복해 평균을 낸다.
+   - 판정: 변화량이 **68162.5 근처** → 기존 실측 재확인 / **77520 근처** → 명목값이 맞고 이전 측정에
+     오차가 있었음 / 둘 다 아님 → 추가 원인 조사(IC Filter 등, `.ioc` 변경은 사용자 승인 필요)
+   - ⚠️ **목표 속도(Target)와 보고 속도(Actual)의 비교는 합격 기준으로 쓰지 않는다.**
+     Actual은 모터 부하·마찰·제어 상태에 따라 달라지므로 "Target 2.0이면 Actual 1.76" 같은
+     기대값은 성립하지 않는다. 스케일 판정은 위 count/rev 측정으로만 한다.
+3. **엔코더 count/rev 캘리브레이션 원인 규명**: 68162.5 vs 명목 77520(-12.1%)의 원인이 CPR 정의 /
+   Quadrature 배율 / 타이머 입력 필터(IC1/IC2Filter=8) / 실제 하드웨어 사양 중 무엇인지 확정.
+   구분 방법 예: `.ioc`의 IC Filter를 낮춰 재측정, 모터축(감속 전) 1회전 카운트 측정,
+   데이터시트 재확인. 원인을 확정한 뒤에 해당 매크로 하나만 정정한다
+   (실측값을 별도 상수로 강제 적용하지 않는다).
+   `MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN`은 2026-08-03 실기에서
+   전진 양수/후진 음수로 확인됐다(위 "실제 검증 완료된 기능" 참고).
+4. 하드웨어 실측(바퀴 반지름/최대 RPM) 후 `MOTION_CONTROLLER_MAX_WHEEL_RAD_S`와 `MOTOR_OPEN_LOOP_PWM_PER_RAD_S` 확정 및 clamp 적용 (`motion_controller.c`/`motor_config.h` TODO 참고)
+5. Python Tool의 FAULT/RESET_STALL 지원(별도 작업)
+6. (STM 쪽 작업 아님, 참고) ROS2 Serial Bridge의 STATUS 수신 경로는 2026-08-03 실기 검증
+   완료(위 "실제 검증 완료된 기능" 참고). 남은 것은 Stall/`FAULT` 계열 실기 검증과
+   `RESET_STALL` 송신 지원이며, 이는 위 1번(Stall Detection 실기 검증)과 함께 다뤄야 한다.
+   Bridge 쪽 진행 상태는 [../../../ros2_ws/CLAUDE.md](../../../ros2_ws/CLAUDE.md) 참고.
 
 ## Claude가 다음 세션에서 가장 먼저 이해해야 하는 내용
 

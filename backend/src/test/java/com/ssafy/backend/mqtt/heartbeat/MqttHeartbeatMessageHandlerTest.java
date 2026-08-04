@@ -17,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 @ExtendWith(MockitoExtension.class)
 class MqttHeartbeatMessageHandlerTest {
 
-	private static final String TOPIC = "carts/status";
+	private static final String TOPIC = "status/cart";
 	private static final long CART_ID = 1L;
 
 	@Mock

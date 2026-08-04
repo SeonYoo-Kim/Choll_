@@ -3,6 +3,7 @@ package com.ssafy.backend.mqtt.position;
 import com.ssafy.backend.cart.domain.Cart;
 import com.ssafy.backend.cart.repository.CartRepository;
 import com.ssafy.backend.common.exception.ResourceNotFoundException;
+import com.ssafy.backend.led.service.SlotLedService;
 import com.ssafy.backend.map.domain.LibraryMap;
 import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.heartbeat.CartConnectionService;
@@ -37,6 +38,7 @@ public class CartPositionTelemetryService {
 	private final CartConnectionService connectionService;
 	private final LibraryMapRepository mapRepository;
 	private final SlamCoordinateConverter coordinateConverter;
+	private final SlotLedService slotLedService;
 	// EM 계약(2026-07-31 확정): 위치는 SLAM 미터 좌표 — meters면 BE가 이미지 픽셀로 변환.
 	// EM 발행 시작 전까지는 pixels(무변환)로 두고 수동 테스트 호환 유지.
 	private final String positionUnit;
@@ -51,6 +53,7 @@ public class CartPositionTelemetryService {
 		CartConnectionService connectionService,
 		LibraryMapRepository mapRepository,
 		SlamCoordinateConverter coordinateConverter,
+		SlotLedService slotLedService,
 		@Value("${mqtt.position-unit:pixels}") String positionUnit,
 		@Value("${mqtt.map-id:2}") long mapId
 	) {
@@ -62,6 +65,7 @@ public class CartPositionTelemetryService {
 		this.connectionService = connectionService;
 		this.mapRepository = mapRepository;
 		this.coordinateConverter = coordinateConverter;
+		this.slotLedService = slotLedService;
 		this.positionUnit = positionUnit;
 		this.mapId = mapId;
 	}
@@ -90,9 +94,10 @@ public class CartPositionTelemetryService {
 			position.cartId(),
 			detectedZone.map(Zone::getId).orElse(null)
 		);
+		Zone previousZone = cart.getCurrentZone();
 		Zone currentZone = decision.stable()
 			? detectedZone.orElse(null)
-			: cart.getCurrentZone();
+			: previousZone;
 		LocalDateTime measuredAt = LocalDateTime.ofInstant(
 			position.measuredAt(),
 			DATABASE_ZONE
@@ -113,6 +118,11 @@ public class CartPositionTelemetryService {
 			true
 		));
 
+		// 구역이 바뀐 순간에만 LED 발행 — 이탈이면 빈 목록으로 소등, 같은 구역 유지면 발행 없음
+		if (zoneChanged(previousZone, currentZone)) {
+			slotLedService.syncZoneLighting(position.cartId(), previousZone != null);
+		}
+
 		log.info(
 			"카트 위치 수신 cartId={}, raw=({}, {}), image=({}, {}), unit={}, detectedZoneId={}, stable={}",
 			position.cartId(),
@@ -124,6 +134,17 @@ public class CartPositionTelemetryService {
 			detectedZone.map(Zone::getId).orElse(null),
 			decision.stable()
 		);
+	}
+
+	/** 구역이 막 바뀌었는지 — 진입·이탈·구역 간 이동은 true, 같은 구역 유지는 false. */
+	private static boolean zoneChanged(Zone previous, Zone current) {
+		if (previous == null && current == null) {
+			return false;
+		}
+		if (previous == null || current == null) {
+			return true;
+		}
+		return !previous.getId().equals(current.getId());
 	}
 
 	// WS-FE-01 CART_POSITION_UPDATE 페이로드 (x·y는 지도 이미지 픽셀, mapId는 구역 미확정 시 null)
