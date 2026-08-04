@@ -105,6 +105,17 @@ public class FollowControlService {
 			.orElseThrow(() -> new ResourceNotFoundException("카트", cartId));
 		ActiveFollow active = activeByCartId.remove(cartId);
 		if (active == null) {
+			// 세션은 인메모리라 재시작하면 사라지는데 DB 상태만 FOLLOWING으로
+			// 남을 수 있다 — 종료 요청이 오면 그 고아 상태도 청소한다
+			if (cart.getOperationStatus() == CartOperationStatus.FOLLOWING) {
+				cart.updateStatus(
+					cart.getConnectionStatus(),
+					CartOperationStatus.IDLE,
+					cart.getLastCommunicationAt()
+				);
+				log.info("세션 없는 FOLLOWING 상태 정리 (재시작 잔재) cartId={}", cartId);
+				return;
+			}
 			log.info("종료할 진행 중 추종이 없습니다. cartId={} (무시)", cartId);
 			return;
 		}
