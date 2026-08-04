@@ -249,19 +249,50 @@ rad/s          = (RPM / 60) x 2π x ENCODER_DIRECTION_SIGN
 `ENCODER_COUNTS_PER_WHEEL_REV = MOTOR_ENCODER_CPR x MOTOR_GEAR_RATIO x MOTOR_ENCODER_QUADRATURE_MULTIPLIER`이며,
 모든 상수는 `Application/Config/motor_config.h`에서 관리한다(코드에 숫자를 직접 쓰지 않음).
 
-확인된 하드웨어 값(모터 PM36-3657-2465E, 24V, 2채널 AB 인크리멘탈 엔코더):
+현재 하드웨어 상수(모터 PM36-3657-2465E, 24V, 2채널 AB 인크리멘탈 엔코더):
 
 | 상수 | 값 | 비고 |
 |------|----|------|
 | `MOTOR_ENCODER_CPR` | 380 | 데이터시트 표기값 |
-| `MOTOR_GEAR_RATIO` | 100 | 100:1 |
-| `MOTOR_ENCODER_QUADRATURE_MULTIPLIER` | 4 (⚠️ 임시 가정) | TIM2/TIM8이 `.ioc`에서 `TIM_ENCODERMODE_TI12`(x4 디코딩)로 설정되어 있음을 근거로 "380 CPR = x4 디코딩 이전(채널 1개당 라인 수)"라고 가정. 실기 검증 전까지는 확정 아님 |
+| `MOTOR_GEAR_RATIO` | 51 | **구매 사양 51:1** (2026-08-03 정정 — 이전에 100:1로 기재돼 있었으나 오기였다) |
+| `MOTOR_ENCODER_QUADRATURE_MULTIPLIER` | 4 (⚠️ 미확정) | TIM2/TIM8이 `.ioc`에서 `TIM_ENCODERMODE_TI12`(x4 디코딩)로 설정되어 있음을 근거로 "380 CPR = x4 디코딩 이전(채널 1개당 라인 수)"라고 가정. 아래 실측 결과와 어긋나므로 확정 아님 |
 
-**⚠️ 380 CPR가 Quadrature 적용 전/후 값인지 아직 확정되지 않았다.** 실기에서 바퀴를
-정확히 1바퀴 수동 회전시킨 뒤 `motor1_encoder_total`(Encoder Count)의 절댓값이
-152000(=380x100x4)에 가까우면 현재 가정이 맞는 것이고, 38000(=380x100)에 가까우면
-`MOTOR_ENCODER_QUADRATURE_MULTIPLIER`를 `1.0f`로 바꿔야 한다. 이 상수 하나만 고치면
-되고 계산 로직/Protocol은 그대로 유지된다.
+따라서 명목 `ENCODER_COUNTS_PER_WHEEL_REV = 380 x 51 x 4 = **77520** count/wheel-rev`이다.
+**이 값은 구매 사양 기준 명목값이며 실측 보정값이 아니다.**
+
+#### ⚠️ 2026-08-03 출력축 Count 실측 — 명목값과 약 12.1% 차이 (원인 미확정)
+
+바퀴(출력축)를 손으로 회전시켜 `encoder_total` 변화량을 측정했다(좌우 각 4회전, 총 8회전).
+
+| 대상 | 평균 count/wheel-rev |
+|------|----------------------|
+| Left | 68107.75 |
+| Right | 68217.25 |
+| **좌우 전체 평균** | **68162.5** |
+
+- 명목값 77520 대비 약 **-12.1%** (실측이 더 작다)
+- 좌우 측정값은 서로 약 **0.16%** 차이로 매우 일관적이다 — 측정 오차나 한쪽 하드웨어 이상보다
+  사양/설정 쪽 원인일 가능성이 높다는 간접 근거다
+
+**원인은 아직 확정되지 않았다.** 아래 중 무엇인지 이 데이터만으로는 구분할 수 없다:
+
+1. `MOTOR_ENCODER_CPR` 380의 정의 (채널당 라인 수인지, 이미 quadrature가 적용된 값인지)
+2. Quadrature 해석 (`TIM_ENCODERMODE_TI12` = x4 가정이 맞는지)
+3. 타이머 입력 필터 (`.ioc`의 `IC1Filter`/`IC2Filter` = 8)로 인한 edge 누락
+4. 실제 감속비가 구매 사양(51:1)과 다름
+
+**실측값 68162.5를 코드의 보정 상수로 강제 적용하지 않았다.** `motor_config.h`의
+`MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`는 기존 파생식(`CPR x GEAR x QUADRATURE`)을 그대로
+유지한다 — 원인을 모른 채 숫자만 맞추면 다른 조건에서 다시 틀어진다.
+
+> 참고로 380 CPR와 x4 배율이 정확하다고 가정하면 역산 감속비가 약 **44.84:1**이 되지만,
+> 이는 **역산값일 뿐 실제 감속비로 확정한 것이 아니다.** 마찬가지로 감속비 51:1과 x4가
+> 정확하다고 가정하면 유효 CPR이 약 334.1이 된다. 어느 쪽도 근거가 확보되지 않았다.
+
+**후속 캘리브레이션이 필요하며, 그때까지 STATUS의 LA/RA(actual_rad_s)는 실제보다 약 12%
+작게 보고된다는 점을 전제로 해석해야 한다.** 원인을 확정한 뒤 해당 매크로 **하나만** 고치면
+되고 계산 로직/Protocol은 그대로 유지된다. 구분 방법 예: `.ioc`의 IC Filter를 낮춰 재측정,
+모터축(감속 전) 1회전 카운트 측정, 데이터시트·주문 내역 재확인.
 
 **엔코더 회전 방향**: `MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN`(`motor_config.h`,
 기본값 1)로 보정한다. PWM 출력 방향 보정(`MOTOR_LEFT_DIRECTION_SIGN` 등, 역시 `motor_config.h`)과는

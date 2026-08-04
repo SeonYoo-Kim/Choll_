@@ -5,6 +5,9 @@ import { useNavigate } from 'react-router';
 
 import { useCartMapStore } from '../model/cartMapStore';
 import { zoneLabel } from '../model/zones';
+import { zoneIdOf } from '../model/zoneStore';
+
+import { isSlotForZone } from '@/features/slot-board/model/slotTargeting';
 
 import { SlotStatus } from '@/shared/api/generated/model';
 import type { Slot } from '@/shared/api/generated/model';
@@ -41,9 +44,12 @@ function ArrivalNotice({ zone, slots }: { zone: number; slots: Slot[] }) {
   const queryClient = useQueryClient();
 
   const currentArea = zoneLabel(zone);
+  // 도착한 그 구역의 책을 묻는 것이므로, 카트 위치에 따라 변하는 isTarget이 아니라
+  // 구역 id로 직접 맞춘다 (모달을 열어둔 채 카트가 움직여도 목록이 흔들리지 않는다)
+  const arrivalZoneId = zoneIdOf(zone);
   // slots는 WS SLOT_UPDATED로 실시간 갱신되는 쿼리 캐시에서 온다 —
   // RFID로 책을 꺼낼 때마다 이 목록에서도 카드가 한 장씩 사라진다
-  const arrivalSlots = slots.filter((slot) => slot.book?.zoneName === currentArea);
+  const arrivalSlots = slots.filter((slot) => isSlotForZone(slot, arrivalZoneId));
 
   // 도착 시점(= 이 컴포넌트 마운트 시점)의 권수. 처음부터 꽂을 책이 없던 구역에서는
   // 완료 문구를 띄우지 않기 위해 필요하다
@@ -103,7 +109,7 @@ function ArrivalNotice({ zone, slots }: { zone: number; slots: Slot[] }) {
               // TODO: 구역 완료를 BE에 알릴지 명세 확정 필요 — 현재는 슬롯 캐시 갱신(데모)
               queryClient.setQueryData<Slot[]>(getListSlotsQueryKey(DEMO_CART_ID), (prev) =>
                 prev?.map((slot) =>
-                  slot.book?.zoneName === currentArea
+                  isSlotForZone(slot, arrivalZoneId)
                     ? { ...slot, status: SlotStatus.EMPTY, isTarget: false, book: undefined }
                     : slot,
                 ),

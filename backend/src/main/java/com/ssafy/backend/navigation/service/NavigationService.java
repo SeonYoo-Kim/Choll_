@@ -156,6 +156,17 @@ public class NavigationService {
 			.orElseThrow(() -> new ResourceNotFoundException("카트", cartId));
 		ActiveNavigation active = activeByCartId.remove(cartId);
 		if (active == null) {
+			// 세션은 인메모리라 재시작하면 사라지는데 DB 상태만 NAVIGATING으로
+			// 남을 수 있다 — 취소 요청이 오면 그 고아 상태도 청소한다
+			if (cart.getOperationStatus() == CartOperationStatus.NAVIGATING) {
+				cart.updateStatus(
+					cart.getConnectionStatus(),
+					CartOperationStatus.IDLE,
+					cart.getLastCommunicationAt()
+				);
+				log.info("세션 없는 NAVIGATING 상태 정리 (재시작 잔재) cartId={}", cartId);
+				return;
+			}
 			log.info("취소할 진행 중 이동이 없습니다. cartId={} (무시)", cartId);
 			return;
 		}

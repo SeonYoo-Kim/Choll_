@@ -27,6 +27,123 @@
   기존 4개는 시청자 있음 스텁으로 갱신)
 - **명령**: `backend/gradlew.bat -p backend test --console=plain`
 
+## 2026-08-04 09:35 — 🐛→✅ 배포 후 실기 연동: 추종 시작 400 원인 분석 + 재시작 잔재 상태 버그 수정 (Claude)
+
+- **증상**: 배포 서버에서 FE 추종 시작 → 사서 선택 시 `POST /follow` 400.
+  젯슨 로그엔 영상 WS 502 Bad Gateway 1회.
+- **진단** (배포 서버 읽기 전용 프로브):
+  - 400 본문 = "목적지 이동 중에는 추종을 시작할 수 없습니다" — 카트 상태 MOVING(=NAVIGATING)
+  - `DELETE /navigation`이 204인데 상태가 안 풀림 → **배포 재시작으로 인메모리 이동 세션은
+    사라졌는데 DB operationStatus만 NAVIGATING으로 남은 고아 상태** (cancel이 세션 없으면
+    상태 청소 없이 무시하는 버그). `POST /navigation`(202, navigationId=1로 재시작 확인) 후
+    `DELETE`로 응급 복구 → IDLE 확인
+  - 영상 502는 배포 재시작 순간의 일시 현상 — 뷰어 접속 검증 결과 **3초에 33프레임(≈11fps)
+    정상 스트리밍**, fe_bridge 자동 재접속 성공. SELECT_TARGET → `/select_target` 변환도 정상
+- **수정** (브랜치 `backend/fix/stale-operation-status`):
+  - `NavigationService.cancel` / `FollowControlService.stop`: 세션이 없어도 DB 상태가
+    NAVIGATING/FOLLOWING이면 IDLE로 청소 (MQTT·WS 발행 없이)
+  - `CartOperationStatusReconciler` 신규 (ApplicationRunner): **기동 시** NAVIGATING/FOLLOWING
+    잔재를 일괄 IDLE 리셋 — 기동 직후엔 어떤 인메모리 세션도 존재할 수 없으므로 안전
+- **결과**: 24 suites, **84 tests, 0 failures** (신규 3: cancel 고아 정리, stop 고아 정리,
+  기동 리컨실러)
+
+<details>
+<summary>배포 서버 프로브 원본 + gradle 집계</summary>
+
+```
+GET /api/carts/1 -> {"status":"MOVING","online":true,...}
+POST /follow -> 400 "목적지 이동 중에는 추종을 시작할 수 없습니다..."
+DELETE /navigation -> 204 (상태 그대로 MOVING — 버그)
+POST /navigation {"zoneId":1} -> 202 {"navigationId":1,...}  # id=1 → 재시작 후 첫 세션
+DELETE /navigation -> 204
+GET /api/carts/1 -> {"status":"IDLE",...}  # 복구 확인
+ws://.../ws/carts/1/video -> frames received in ~3s: 33
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=24 tests=84 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-03 22:00 — ✅ BE 로컬 E2E: 추종·이동 명령 전 시나리오 통과 (가짜 카트로 실브로커 검증) (Claude)
+
+- **목적**: main 배포 전에 FOLLOW-01/02/04 + MOVE 페이로드 개편을 실제 브로커·WS로 검증
+  (Jetson·RPi 부재 — 카트는 파이썬 가짜 카트로 대체)
+- **환경**: 로컬 BE(bootRun, localhost:8080) + 로컬 MySQL + **EC2 실브로커**(your-server:1883).
+  가짜 카트 = paho-mqtt(하트비트 5초 발행 + `cmd/move/cart` 구독), WS = websocket-client(`/ws/carts/1`)
+- **커밋**: develop `3756f6a` (MR 머지 후)
+- **결과**: 12 케이스 전부 기대값과 일치
+  | 케이스 | 결과 |
+  |---|---|
+  | 405 프로브 (GET /follow/pause) | ✅ 405 |
+  | 가짜 하트비트 → 카트 ONLINE 전환 | ✅ online:true (MQTT→BE→DB) |
+  | 추종 시작 | ✅ 202 FOLLOWING + MQTT FOLLOW_START + WS FOLLOWING |
+  | 중복 시작 | ✅ 400 "이미 추종 중" (발행 없음) |
+  | 일시정지 | ✅ 202 PAUSED + MQTT FOLLOW_PAUSE + WS PAUSED |
+  | 일시정지 멱등 | ✅ 202, MQTT 재발행 없음 |
+  | 재개 | ✅ 202, 같은 followId로 FOLLOW_START 재발행 |
+  | 종료 / 종료 멱등 | ✅ 204 + FOLLOW_STOP + WS STOPPED / 204 발행 없음 |
+  | 무세션 일시정지 | ✅ 400 |
+  | 이동 중 추종 시작 | ✅ 400 "목적지 이동 중" (취소 후 재시도 가능) |
+  | MOVE 페이로드 | ✅ 구역 중심 `pixel:{225,75}` / 클릭 픽셀 `{612.5,431}` 전달, `target:null`(pixels 모드 정상), CANCEL 좌표 null |
+  | 하트비트 중단 → 워치독 OFFLINE → 추종 시작 | ✅ ~18초 뒤 OFFLINE + WS CART_CONNECTION_UPDATED, 400 "오프라인" |
+- **미검증**: `target` 미터 변환 실값(지도 메타 입력 후), EM·AI의 FOLLOW_*/MOVE 수신(수신측 미구현),
+  FE 버튼 통합(BE 로컬 서버 살려둠 — FE dev 서버 붙여서 확인 가능)
+- **참고**: EC2 공용 브로커라 가짜 하트비트를 배포 BE도 수신 — 테스트 동안 배포 환경 카트가
+  잠시 ONLINE으로 표시됨 (중단 후 15초 뒤 OFFLINE 복귀, 실카트 전원 꺼짐 상태라 무해)
+
+<details>
+<summary>REST 응답 · MQTT 수신 · WS 수신 원본</summary>
+
+```
+GET  /api/carts/1/follow/pause -> 405 Method Not Allowed
+POST /api/carts/1/follow -> 202 {"followId":1,"status":"FOLLOWING"}
+POST /api/carts/1/follow -> 400 "이미 추종 중입니다."
+POST /api/carts/1/follow/pause -> 202 {"followId":1,"status":"PAUSED"}
+POST /api/carts/1/follow/pause -> 202 {"followId":1,"status":"PAUSED"}
+POST /api/carts/1/follow -> 202 {"followId":1,"status":"FOLLOWING"}
+DELETE /api/carts/1/follow -> 204
+DELETE /api/carts/1/follow -> 204
+POST /api/carts/1/follow/pause -> 400 "진행 중인 추종이 없어 일시정지할 수 없습니다."
+POST /api/carts/1/navigation {"zoneId":1} -> 202 {"navigationId":1,"status":"ACCEPTED",...}
+POST /api/carts/1/follow -> 400 "목적지 이동 중에는 추종을 시작할 수 없습니다..."
+DELETE /api/carts/1/navigation -> 204
+POST /api/carts/1/navigation {"zoneId":1,"x":612.5,"y":431.0} -> 202
+DELETE /api/carts/1/navigation -> 204
+(하트비트 중단, 워치독 전환 후)
+POST /api/carts/1/follow -> 400 "카트가 오프라인 상태라 추종을 시작할 수 없습니다."
+```
+
+```
+# cmd/move/cart 수신 (가짜 카트, EC2 브로커 경유)
+{"requestId":1,"command":"FOLLOW_START"}
+{"requestId":1,"command":"FOLLOW_PAUSE"}
+{"requestId":1,"command":"FOLLOW_START"}
+{"requestId":1,"command":"FOLLOW_STOP"}
+{"requestId":1,"command":"MOVE","zoneId":1,"target":null,"pixel":{"x":225.0,"y":75.0}}
+{"requestId":1,"command":"CANCEL","zoneId":1,"target":null,"pixel":null}
+{"requestId":2,"command":"MOVE","zoneId":1,"target":null,"pixel":{"x":612.5,"y":431.0}}
+{"requestId":2,"command":"CANCEL","zoneId":1,"target":null,"pixel":null}
+```
+
+```
+# /ws/carts/1 수신
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"FOLLOWING","failReason":null}}
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"PAUSED","failReason":null}}
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"FOLLOWING","failReason":null}}
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"STOPPED","failReason":null}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":1,"status":"ACCEPTED",...}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":1,"status":"CANCELLED",...}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":2,"status":"ACCEPTED",...}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":2,"status":"CANCELLED",...}}
+{"type":"CART_CONNECTION_UPDATED","payload":{"online":false,"lastSeenAt":"2026-08-03T21:57:03.29962"}}
+```
+
+</details>
+
+
 ## 2026-08-03 21:33 — ✅ BE: MOVE 하행에 SLAM 미터 target 추가 + NAV-01 픽셀 클릭 지원 (Claude)
 
 - **명령**: `backend/gradlew.bat -p backend test --console=plain`
@@ -169,6 +286,85 @@ tests=66 failures=0 errors=0 suites=22
 ```
 
 </details>
+
+## 2026-08-03 — ⚠️ EM 실기: 엔코더 count/rev 실측 → 감속비 100:1 오기재 정정(51:1), 12.1% 차이 원인 미확정 (relu 실측 / Claude 반영)
+
+- **대상**: `embedded/motor/stm32_workspace/motor-control/Application/Config/motor_config.h`
+- **실측자**: relu (출력축 수동 회전, 실기). **STM 펌웨어 재빌드·재플래시는 아직 하지 않았다.**
+- **방법**: 바퀴(출력축)를 손으로 정해진 횟수만큼 돌리고 `encoder_total` 누적값 변화를 읽음
+  (모터 구동 없음). ROS2 Bridge의 `/stm/encoder_total`로 관측.
+
+### 실측 원본 수치
+
+| 대상 | 구간 | 시작 → 끝 | 변화량 |
+|---|---|---|---|
+| Left | 1회전 | 136320 → 205017 | 68697 |
+| Left | 추가 3회전 | 205071 → 408805 | 203734 |
+| Right | 1회전 | 138 → 68603 | 68465 |
+| Right | 추가 3회전 | 68931 → 273335 | 204404 |
+
+- Left 4회전 평균: **68107.75** count/rev
+- Right 4회전 평균: **68217.25** count/rev
+- **좌우 전체 8회전 평균: 68162.5 count/wheel-rev**
+- 좌우 차이 약 **0.16%** — 매우 일관적
+
+### 판정 및 코드 변경
+
+구매 사양 확인 결과 감속비 옵션은 **51:1**이었고, 코드에 적혀 있던 **100:1은 오기재**였다.
+
+```
+MOTOR_GEAR_RATIO   100.0f → 51.0f          (변경)
+MOTOR_ENCODER_CPR                380.0f    (유지)
+MOTOR_ENCODER_QUADRATURE_MULTIPLIER 4.0f   (유지)
+MOTOR_ENCODER_COUNTS_PER_WHEEL_REV         (파생식 유지: CPR × Gear × Quadrature)
+  → 380 × 51 × 4 = 77520 count/wheel-rev  (기존 152000에서 변경)
+```
+
+- 명목값 77520 vs 실측 68162.5 → **약 -12.1%** (실측이 더 작음)
+- ⚠️ **실측값 68162.5를 별도 상수로 강제 적용하지 않았다.** 파생식을 그대로 유지했다.
+- ⚠️ **감속비를 1:45로 확정한 것이 아니다.** 구매 사양은 1:51이다.
+  (참고로 380×45×4 = 68400으로 실측과 -0.35%까지 근접하지만, 근거 없이 45로 바꾸지 않았다.)
+- ⚠️ **12.1% 차이의 원인은 미확정**이다. 아래 중 어느 것인지 이 데이터만으로 구분할 수 없다:
+  CPR 380의 정의(채널당 라인 수 vs 이미 quadrature 적용) / Quadrature 배율(TI12 = x4 가정) /
+  타이머 입력 필터(`IC1Filter`/`IC2Filter` = 8)로 인한 edge 누락 / 실제 하드웨어 사양이 구매 사양과 다름.
+  실측을 정확히 맞추려면 유효 감속비 약 44.84:1 또는 유효 CPR 약 334.1이 필요하다.
+
+### 영향 범위 (코드 분석 결과)
+
+`MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`는 `motor.c:406-407`
+(`Motor_UpdateActualVelocity()`) **한 곳에서만** 쓰이지만, 결과인 `motor_actual_*_rad_s`가
+STATUS의 LA/RA, PI 오차 입력(`:450,467,918,951`), Speed Profile(`:425,429`),
+Stall 판정(`:508,513`)으로 흘러간다.
+
+- 같은 회전에서 보고되는 `actual_rad_s`가 **약 1.9608배 커진다**
+  (실제 대비 2.23배 과소 → 1.14배 과소로 개선, 여전히 약 12% 과소)
+- PI 게인이 기본 `0.0f`이므로 **제어 동작 변화는 지금 당장 없다**
+- Stall 판정(`|actual| <= 0.1f`)은 actual이 커지므로 **오검출 가능성이 줄어드는 방향**.
+  실제 정지 시 actual≈0이므로 검출 능력 자체는 유지
+
+### 검증 결과
+
+- **STM32 펌웨어 빌드: 이 환경에서 수행 불가** — `arm-none-eabi-gcc`가 설치되어 있지 않다.
+  **CubeIDE에서 사용자가 빌드·플래시해야 한다.** 문법 검증은 `gcc -fsyntax-only`로만 확인.
+- ROS2 Serial Bridge 회귀: `python3 -m pytest src/stm_serial_bridge/test/ -q` → **298 passed**
+  (이번 변경은 STM 펌웨어 상수뿐이라 브리지 코드·테스트에 영향 없음)
+
+### 후속 필요 (미완료)
+
+1. **CubeIDE 재빌드 → 재플래시 → `actual_rad_s` 재검증** — 변경이 반영된 펌웨어로 실기 확인이 아직 없다
+2. 12.1% 차이의 **원인 규명** (IC Filter 낮춰 재측정 / 모터축 1회전 카운트 측정 / 데이터시트 재확인)
+3. 원인 확정 후 해당 매크로 **하나만** 정정
+4. ~~`serial_protocol.md`의 하드웨어 상수 표가 아직 옛 값~~ → **같은 날 정정 완료**:
+   `MOTOR_GEAR_RATIO` 51, 명목 `COUNTS_PER_WHEEL_REV` 77520, 실측 68162.5·원인 미확정 기록으로
+   교체했고, `152000 vs 38000`으로 Quadrature를 판정하던 과거 기준도 폐기했다.
+   `ros2_ws/CLAUDE.md`의 "엔코더 1회전당 Count 미측정" 서술도 "실측 완료 / 원인 미확정"으로 분리했다.
+
+### ⚠️ 이 기록의 한계
+
+- 실측 원본 수치는 사용자 보고값이며, **콘솔 원본 출력은 확보되지 않았다**
+- 회전 각도 정밀도(손으로 정확히 1회전을 맞췄는지)는 정량화되지 않았다 —
+  좌우 0.16% 일관성은 이 오차가 크지 않다는 간접 근거일 뿐이다
+- 모터축(감속 전) 카운트는 측정하지 않았으므로 감속비 자체를 독립 검증하지 못했다
 
 ## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
 

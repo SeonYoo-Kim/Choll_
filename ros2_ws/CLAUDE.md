@@ -164,7 +164,31 @@ source install/setup.bash
 - USB 강제 분리 시 RX fatal error 처리(종료 코드 1, 타이머 취소)
 - 실제 Stall 발생 시 `/stm/fault` 전이(`STALL_LEFT`/`RIGHT`/`BOTH`)와 `FAULT_CLEARED` 수신
 - `RESET_STALL` 송신 (미구현)
-- 엔코더 1회전당 카운트 수 및 `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`(현재 4.0f) 검증
+- **엔코더 스케일 확정** — 출력축 Count 실측 자체는 완료됐으나(아래) **명목값과의 차이 원인은 미확정**
+- **`actual_rad_s` 재검증** — STM 감속비 정정(100:1 → 51:1)을 반영한 펌웨어로 **재빌드·재플래시 후**
+  다시 확인해야 한다. `/stm/wheel_actual_rad_s` 보고값이 이전보다 약 1.96배 커진다
 - `wheel_separation_m=0.30` 실측 확정 (여전히 플레이스홀더)
 - 실제 바닥 주행
 - STATUS 수신이 끊겼을 때 주행 명령을 강제로 0으로 만드는 추가 안전 정책(8d)
+
+### 엔코더 스케일: 실측 완료 / 원인 미확정 (2026-08-03)
+
+`/stm/encoder_total`로 출력축 수동 회전 Count를 측정했다(좌우 각 4회전, 총 8회전).
+
+| 대상 | 평균 count/wheel-rev |
+|---|---|
+| Left | 68107.75 |
+| Right | 68217.25 |
+| **좌우 전체 평균** | **68162.5** |
+
+- **완료**: 출력축 1회전당 Count 실측, 좌우 일관성 확인(서로 약 0.16% 차이)
+- **완료**: STM 감속비 오기재 발견 → `MOTOR_GEAR_RATIO` 100.0f → **51.0f**(구매 사양)로 정정.
+  명목값이 152000 → **77520**(= 380 × 51 × 4)으로 바뀌었다
+- **미완료**: 실측 68162.5가 명목 77520보다 약 **12.1% 작은 원인**이 CPR 380의 정의 /
+  Quadrature 해석(x4) / 타이머 입력 필터(`IC1Filter`/`IC2Filter`=8) / 실제 감속비 중
+  무엇인지 **확정되지 않았다**
+- **미완료**: `MOTOR_ENCODER_CPR`·`MOTOR_ENCODER_QUADRATURE_MULTIPLIER`·실제 감속비 확정
+- 실측값을 코드 보정 상수로 강제 적용하지 않았다(파생식 유지). 따라서 **현재
+  `/stm/wheel_actual_rad_s`는 실제보다 약 12% 작게 보고된다**는 전제로 해석해야 한다
+- 상세: `embedded/motor/docs/serial_protocol.md`의 "Actual Wheel Velocity 계산" 절,
+  `motor_config.h`의 `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV` 주석

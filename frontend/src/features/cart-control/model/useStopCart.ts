@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+
 import { useStopFollow } from '../api/followCommands';
 import { useCartControlStore } from './cartControlStore';
 
@@ -30,6 +32,17 @@ export function useStopCart(cartId: number): StopCart {
   // 일시정지도 추종 세션이 살아 있는 상태라 종료 대상이다
   const isFollowing = runState === 'FOLLOWING' || runState === 'PAUSED';
 
+  // 추종과 이동이 동시에 걸려 있으면 명령을 두 개 보내지만, 사서에게는 한 번만 알린다.
+  // (예전에는 두 성공 콜백이 같은 문구를 각각 띄워 토스트가 두 번 떴다)
+  const stopNotifiedRef = useRef(false);
+  const notifyStoppedOnce = () => {
+    if (stopNotifiedRef.current) {
+      return;
+    }
+    stopNotifiedRef.current = true;
+    notify('카트를 멈추라고 전달했어요');
+  };
+
   const stopFollow = useStopFollow({
     mutation: {
       onSuccess: () => {
@@ -38,7 +51,7 @@ export function useStopCart(cartId: number): StopCart {
         // 그냥 두면 정지 감지(3초)가 걸릴 때까지 지도에 '카트 이동 중'이 남고
         // 구역 버튼도 잠긴 채라, 멈추라고 눌렀는데 반응이 없어 보인다.
         useCartMapStore.getState().markStationary();
-        notify('카트를 멈추라고 전달했어요');
+        notifyStoppedOnce();
       },
       onError: () => notify('추종 종료에 실패했어요'),
     },
@@ -47,7 +60,7 @@ export function useStopCart(cartId: number): StopCart {
   // 취소 완료(CANCELLED) 반영은 WS NAVIGATION_STATUS_UPDATED 수신으로 일어난다
   const cancelNavigation = useCancelNavigation({
     mutation: {
-      onSuccess: () => notify('카트를 멈추라고 전달했어요'),
+      onSuccess: () => notifyStoppedOnce(),
       onError: () => notify('이동 중지에 실패했어요'),
     },
   });
@@ -58,6 +71,7 @@ export function useStopCart(cartId: number): StopCart {
     canStop,
     isPending: stopFollow.isPending || cancelNavigation.isPending,
     stop: () => {
+      stopNotifiedRef.current = false; // 이번 정지에 대해 다시 한 번 알릴 수 있게 초기화
       // 추종과 목적지 이동이 동시에 걸려 있을 수 있어 각각 확인해 보낸다
       if (isFollowing) {
         stopFollow.mutate({ cartId });

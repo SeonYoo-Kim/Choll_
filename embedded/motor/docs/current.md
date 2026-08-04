@@ -134,15 +134,39 @@ App_Run()
     `FAULT`/`FAULT_CLEARED` 수신, `RESET_STALL` 송신,
     `MOTOR_ENCODER_QUADRATURE_MULTIPLIER` 절대 배율(아래 "현재 개발 중인 기능" 참고).
 
+- **감속비 정정 + 엔코더 count/rev 실측 (2026-08-03)**: `MOTOR_GEAR_RATIO`를 **100.0f → 51.0f**로
+  수정했다. 구매한 모터의 감속비 옵션이 **51:1**임을 확인했고, 이전 값 100:1은 잘못된 기재였다.
+  `MOTOR_ENCODER_CPR`(380.0f)과 `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`(4.0f)는 **변경하지 않았고**,
+  `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`도 기존 파생식(CPR × Gear × Quadrature)을 그대로 유지한다.
+  - 명목값: 380 × 51 × 4 = **77520** count/wheel-rev (기존 100:1 기준 152000에서 변경)
+  - 출력축 수동 회전 실측(좌우 각 4회전, 총 8회전): Left 평균 **68107.75**, Right 평균 **68217.25**,
+    전체 평균 **68162.5** count/rev → 명목값 대비 약 **-12.1%**
+  - 좌우 측정값이 서로 약 0.16% 차이로 매우 일관적이므로 측정 오차나 한쪽 하드웨어 이상보다는
+    사양/설정 쪽 원인일 가능성이 높다.
+  - ⚠️ **원인 미확정**: CPR 정의, Quadrature 배율, 타이머 입력 필터(IC1/IC2Filter=8), 실제 하드웨어
+    사양 중 어느 것인지 이 데이터만으로는 구분할 수 없다. **실측값 68162.5를 별도 상수로 강제
+    적용하지 않았다** — 감속비 1:45로 확정한 것도 아니다(구매 사양은 1:51).
+  - **영향**: `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`는 `motor.c`의 `Motor_UpdateActualVelocity()`
+    한 곳에서만 쓰이지만, 그 결과인 `motor_actual_*_rad_s`가 STATUS의 LA/RA, PI 오차 입력,
+    Speed Profile, Stall 판정으로 흘러간다. 같은 회전에서 보고되는 actual_rad_s가 **약 1.96배
+    커진다**(실제 대비 2.23배 과소 → 1.14배 과소로 개선). PI 게인이 기본 0.0f이므로 제어 동작
+    변화는 지금 당장 없다.
+  - **후속 필요**: 재빌드·재플래시 후 actual_rad_s 재검증 (아래 "다음 개발 목표" 참고).
+
 ## 현재 개발 중인 기능
 
 **Stall Detection + Fault Recovery(`RESET_STALL`)가 방금 구현되었고 아직 실기 검증 전이다.**
 - 코드 작성 완료(빌드 확인), 실기 테스트는 아직. `MOTOR_STALL_PWM_THRESHOLD`(80)/`MOTOR_STALL_TARGET_RAD_S`
   (0.2f)/`MOTOR_STALL_ACTUAL_RAD_S`(0.1f)/`MOTOR_STALL_DURATION_MS`(500u)는 모두 실기 미검증 잠정값
   (`motor_config.h`) — 실기에서 바퀴를 손으로 잡아 의도적으로 Stall을 유발해 튜닝 필요.
-- `MOTOR_ENCODER_QUADRATURE_MULTIPLIER = 4.0f`(motor_config.h)는 여전히 **임시 가정** — 바퀴 1바퀴 수동 회전 후
-  Encoder Count 절댓값이 152000(=380x100x4)에 가까운지, 38000(=380x100)에 가까운지로 검증 필요
-  ([docs/serial_protocol.md](serial_protocol.md) Actual Wheel Velocity 계산 절 참고)
+- **엔코더 count/rev 캘리브레이션 미완**(2026-08-03 실측 완료, 원인 미확정): 출력축 수동 8회전
+  실측 평균 **68162.5** count/rev가 감속비 51:1 기준 명목값 **77520**(=380×51×4)보다 약 12.1% 작다.
+  `MOTOR_ENCODER_QUADRATURE_MULTIPLIER = 4.0f`가 맞는지, CPR 380의 정의가 맞는지, 타이머 입력
+  필터(IC1/IC2Filter=8)로 edge가 누락되는지 중 어느 것이 원인인지 **아직 구분되지 않았다.**
+  실측값을 코드에 강제 적용하지 않았으므로 STATUS의 LA/RA는 현재 실제보다 약 12% 작게 보고된다.
+  (상세: `motor_config.h`의 `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV` 주석)
+- **재빌드·재플래시 후 actual_rad_s 재검증 필요**: `MOTOR_GEAR_RATIO` 100→51 변경으로 같은 회전에서
+  보고되는 actual_rad_s가 약 1.96배 커진다. 아직 이 변경이 적용된 펌웨어로 실기 확인을 하지 않았다.
 
 ## 다음 개발 목표
 
@@ -152,10 +176,20 @@ App_Run()
    재출발되는지 확인. ESTOP/Latched Safe Stop 중 `RESET_STALL`이 거부되는지도 함께 확인
    (안전 테스트 절차는 [docs/serial_protocol.md](serial_protocol.md) Stall Detection 절 참고).
    실기 데이터로 `MOTOR_STALL_*` Threshold 튜닝(오검출/미검출 여부 확인).
-2. `MOTOR_ENCODER_QUADRATURE_MULTIPLIER`/`MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN` 실측 검증
-3. 하드웨어 실측(바퀴 반지름/최대 RPM) 후 `MOTION_CONTROLLER_MAX_WHEEL_RAD_S`와 `MOTOR_OPEN_LOOP_PWM_PER_RAD_S` 확정 및 clamp 적용 (`motion_controller.c`/`motor_config.h` TODO 참고)
-4. Python Tool의 FAULT/RESET_STALL 지원(별도 작업)
-5. (STM 쪽 작업 아님, 참고) ROS2 Serial Bridge의 STATUS 수신 경로는 2026-08-03 실기 검증
+2. **`MOTOR_GEAR_RATIO` 51:1 반영 펌웨어 재빌드 → 재플래시 → actual_rad_s 재검증**(최우선 중 하나).
+   CubeIDE에서 빌드한 뒤 플래시하고, Target을 알려진 값(예: 2.0 rad/s)으로 주었을 때 STATUS의
+   LA/RA가 이전보다 약 1.96배 커지는지, 그리고 실제 회전과 비교해 약 12% 과소 보고되는지 확인.
+   `/stm/wheel_actual_rad_s`(ROS2 Serial Bridge)로도 함께 관측 가능.
+3. **엔코더 count/rev 캘리브레이션 원인 규명**: 68162.5 vs 명목 77520(-12.1%)의 원인이 CPR 정의 /
+   Quadrature 배율 / 타이머 입력 필터(IC1/IC2Filter=8) / 실제 하드웨어 사양 중 무엇인지 확정.
+   구분 방법 예: `.ioc`의 IC Filter를 낮춰 재측정, 모터축(감속 전) 1회전 카운트 측정,
+   데이터시트 재확인. 원인을 확정한 뒤에 해당 매크로 하나만 정정한다
+   (실측값을 별도 상수로 강제 적용하지 않는다).
+   `MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN`은 2026-08-03 실기에서
+   전진 양수/후진 음수로 확인됐다(위 "실제 검증 완료된 기능" 참고).
+4. 하드웨어 실측(바퀴 반지름/최대 RPM) 후 `MOTION_CONTROLLER_MAX_WHEEL_RAD_S`와 `MOTOR_OPEN_LOOP_PWM_PER_RAD_S` 확정 및 clamp 적용 (`motion_controller.c`/`motor_config.h` TODO 참고)
+5. Python Tool의 FAULT/RESET_STALL 지원(별도 작업)
+6. (STM 쪽 작업 아님, 참고) ROS2 Serial Bridge의 STATUS 수신 경로는 2026-08-03 실기 검증
    완료(위 "실제 검증 완료된 기능" 참고). 남은 것은 Stall/`FAULT` 계열 실기 검증과
    `RESET_STALL` 송신 지원이며, 이는 위 1번(Stall Detection 실기 검증)과 함께 다뤄야 한다.
    Bridge 쪽 진행 상태는 [../../../ros2_ws/CLAUDE.md](../../../ros2_ws/CLAUDE.md) 참고.

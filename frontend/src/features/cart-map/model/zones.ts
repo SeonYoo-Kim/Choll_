@@ -1,7 +1,11 @@
 /**
- * 도서관 구역 정보 (SLAM 지도 연동 전 데모용 — assets/map.png 평면도 기준 7개 구역 Z1~Z7)
+ * 도서관 구역 정보 (assets/map.png 평면도 기준 7개 구역 Z1~Z7).
  * 구역 이름은 평면도의 인접 서가 KDC 분류를 따른다.
  * (Z1|000·100|Z2|200·300|Z3|400·500|Z4 / Z5|600·700|Z6|800·900|Z7)
+ *
+ * 여기 있는 좌표·이름은 **MAP-02 응답을 받기 전까지 쓰는 데모 값**이다.
+ * 실제 구역은 useShelfZones가 서버에서 받아 zoneStore에 넣으며,
+ * 구역을 조회하는 코드는 이 파일이 아니라 zoneStore의 함수를 쓴다.
  */
 export const ZONE_NAMES = [
   '총류', // Z1 (하단 좌) — 000 총류
@@ -59,18 +63,6 @@ export const ZONE_BOOKSHELVES: readonly (readonly string[])[] = [
   ['900'], // Z7 역사
 ];
 
-/** 지도 % 좌표가 속한 구역 인덱스(0-base). 어느 구역 영역에도 없으면(통로·출발 지점 등) null */
-export function zoneIndexOfPoint(point: { x: number; y: number }): number | null {
-  const index = ZONE_RECTS.findIndex(
-    (rect) =>
-      point.x >= rect.left &&
-      point.x <= rect.left + rect.width &&
-      point.y >= rect.top &&
-      point.y <= rect.top + rect.height,
-  );
-  return index === -1 ? null : index;
-}
-
 /** 책장 번호(예: "300") → 담당 구역 인덱스(0-base). 목록에 없으면 null */
 export function zoneIndexOfBookshelf(bookshelfNumber: string): number | null {
   const index = ZONE_BOOKSHELVES.findIndex((shelves) => shelves.includes(bookshelfNumber));
@@ -80,15 +72,4 @@ export function zoneIndexOfBookshelf(bookshelfNumber: string): number | null {
 /** 구역 인덱스(0-base) → 표시명: "3구역" */
 export function zoneLabel(zoneIndex: number): string {
   return `${zoneIndex + 1}구역`;
-}
-
-/** 구역 인덱스(0-base) → shelf_zone.id (초안 스펙·MSW 픽스처는 1-base id를 쓴다) */
-export function zoneIdOf(zoneIndex: number): number {
-  return zoneIndex + 1;
-}
-
-/** shelf_zone.id → 구역 인덱스(0-base). 범위 밖 id는 null */
-export function zoneIndexOf(zoneId: number): number | null {
-  const index = zoneId - 1;
-  return index >= 0 && index < ZONE_NAMES.length ? index : null;
 }

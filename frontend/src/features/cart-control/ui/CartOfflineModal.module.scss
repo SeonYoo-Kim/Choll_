@@ -1,0 +1,90 @@
+@use '@/shared/styles/variables' as *;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  // 도착 모달(30)보다 위 — 카트가 끊기면 다른 알림보다 먼저 보여야 한다
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: $spacing-md;
+  background: rgba(69, 65, 57, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 28px;
+  background: $bg-card;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+
+  @media (min-width: $bp-md) {
+    padding: 32px;
+  }
+}
+
+.close {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f7f0e4;
+  color: #887e71;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: $danger-bg;
+  color: $danger-text;
+}
+
+.overline {
+  margin: 20px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $danger-text;
+}
+
+.title {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.desc {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #7a7165;
+
+  strong {
+    color: $danger-text;
+  }
+}
+
+.primary {
+  margin-top: 28px;
+  border-radius: 12px;
+  background: $primary;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 4px 0 $primary-dark;
+}

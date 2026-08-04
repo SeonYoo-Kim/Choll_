@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { Loader2, X } from 'lucide-react';
 
-import { useSelectFollowTarget } from '../api/followTarget';
+import { isTargetCommandSent, useSelectFollowTarget } from '../api/followTarget';
 import { useCartVideo } from '../model/useCartVideo';
 import { useTracks } from '../model/useTracks';
 
@@ -33,7 +33,16 @@ export function FollowTargetModal({ cartId, onClose, onSelected }: FollowTargetM
 
   const selectTarget = useSelectFollowTarget({
     mutation: {
-      onSuccess: (_response, { data }) => onSelected(data.trackId),
+      onSuccess: (response, { data }) => {
+        // HTTP 202라도 본문의 status가 "보냄"이 아니면 카트가 대상을 받지 못한 것이다.
+        // 여기서 멈추지 않으면 거절당한 채로 추종 시작(FOLLOW-04)까지 진행된다.
+        if (!isTargetCommandSent(response)) {
+          notify('카트가 추종 대상을 받지 못했어요. 다시 선택해주세요');
+          return;
+        }
+        // 서버가 대상을 정정해 줄 수 있으므로 응답의 trackId를 우선한다
+        onSelected(response?.trackId ?? data.trackId);
+      },
       onError: () => notify('추종 대상 지정에 실패했어요'),
     },
   });

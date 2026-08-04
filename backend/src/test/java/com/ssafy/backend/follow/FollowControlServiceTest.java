@@ -222,6 +222,19 @@ class FollowControlServiceTest {
 	}
 
 	@Test
+	void stopClearsStaleFollowingStatusWithoutSession() {
+		// 재시작으로 세션은 사라지고 DB 상태만 FOLLOWING으로 남은 경우
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.FOLLOWING);
+
+		service.stop(1L);
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		verify(commandPublisher, never()).publish(any());
+		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
 	void startsWithoutMqttWhenPublisherIsAbsent() {
 		givenOnlineIdleCart();
 		when(commandPublisherProvider.getIfAvailable()).thenReturn(null);
