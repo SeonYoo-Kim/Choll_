@@ -223,6 +223,128 @@ ros2 launch stm_serial_bridge stm_serial_bridge.launch.py max_wheel_rad_s:=3.5  
 - ⚠️ Nav2 쪽 `max_vel_x`/`max_vel_theta` 도 `TODO-팀확인` 표기가 붙어 있다. 봉투 정합의
   **최종 결정은 팀 합의 사항**이며, 이 워크스페이스는 브리지 쪽 상한만 다룬다.
 
+### 수동 지도 작성 모드 — `cart_teleop` (2026-08-04 추가)
+
+LiDAR + slam_toolbox 를 띄운 상태에서 **SSH 터미널의 WASD 로 직접 주행**하며 지도를
+만드는 모드다. 경로는 다음과 같고, teleop 은 **Serial 포트를 열지 않는다** —
+포트 소유자는 여전히 `stm_serial_bridge` 하나다.
+
+```
+SSH 키보드 → cart_teleop → /cmd_vel → stm_serial_bridge → STM32
+```
+
+**패키지**: `src/cart_teleop/` (`ament_python`). 의존성은 `rclpy`·`geometry_msgs` 뿐이다.
+
+#### 실행
+
+```bash
+export ROS_LOCALHOST_ONLY=1      # 다른 머신의 /cmd_vel 차단 (필수)
+cd ros2_ws
+source /opt/ros/humble/setup.bash && source install/setup.bash
+
+# 터미널 1 — LiDAR + rf2o + slam_toolbox (embedded/Lidar 워크스페이스)
+ros2 launch choll_slam_bringup bringup.launch.py
+
+# 터미널 2 — Serial Bridge (검증된 slow 프로파일)
+ros2 launch stm_serial_bridge stm_serial_bridge.launch.py speed_profile:=slow \
+  2>&1 | tee ~/stm_$(date +%Y%m%d_%H%M%S).log
+
+# 터미널 3 — ★ /cmd_vel 발행자가 teleop 하나뿐인지 확인 (teleop 실행 전/후 모두)
+ros2 topic info /cmd_vel -v
+
+# 터미널 4 — teleop. ros2 launch 가 아니라 ros2 run 이다
+ros2 run cart_teleop keyboard_teleop
+```
+
+⚠️ **`ros2 launch` 로 실행하지 않는다.** launch 는 stdin 을 tty 로 넘겨주지 않아 키
+입력을 받을 수 없다. 그래서 이 패키지에는 launch 파일이 없다. stdin 이 TTY 가 아니면
+teleop 은 명확한 오류를 찍고 종료 코드 1 로 끝난다.
+
+#### 키
+
+| 키 | 동작 | 값 (최대 단계) |
+|---|---|---|
+| `W` | 전진 | `linear.x = +0.13 m/s` |
+| `S` | 후진 | `linear.x = -0.13 m/s` |
+| `A` | 제자리 좌회전 | `angular.z = +0.60 rad/s` (REP 103 반시계) |
+| `D` | 제자리 우회전 | `angular.z = -0.60 rad/s` |
+| `Space` | **정지 명령**(zero Twist) | `0, 0` |
+| `+` 또는 `=` / `-` | 속도 단계 증가/감소 | 5단계, 기본 5(=최대) |
+| `q` / `Esc` | 정지 후 종료 | — |
+
+선속도와 각속도를 **동시에 섞지 않는다**(직진은 `angular.z=0`, 제자리 회전은
+`linear.x=0`). 곡선 주행이 필요하면 Nav2 경로로 전환한다.
+
+`=` 는 `+` 의 별칭이다 — 대부분의 배열에서 `+` 는 Shift 가 필요해 주행 중 조작이
+번거롭기 때문이다. 동작은 완전히 같다.
+
+기본값 `0.13 m/s` / `0.60 rad/s` 는 2026-08-04 실기에서 확인한 범위이며, 각각 바퀴
+`2.0` / `±1.754 rad/s` — **`speed_profile:=slow` 상한 이내**다. 최종 상한 방어선은
+teleop 이 아니라 **Bridge 의 `speed_profile`** 이다.
+
+#### ⚠️ 터미널은 키 릴리즈를 감지할 수 없다 — command lease 방식
+
+터미널(cbreak/raw)에서 얻는 것은 키 *누름* 문자뿐이다. 그래서 "키를 놓으면 정지"를
+**command lease** 로 근사한다:
+
+- W/S/A/D 입력마다 유효시간(`input_timeout_sec`, 기본 **1.0초**)을 갱신한다
+- 키를 누르고 있으면 OS 자동반복이 lease 를 계속 갱신해 주행이 이어진다
+- 손을 떼면 자동반복이 끊기고 **1.0초 뒤 zero Twist** 로 전환한다(`TIMEOUT`)
+- lease 가 만료되면 동작을 폐기하므로 **다시 움직이려면 새 키가 필요하다**
+
+⚠️ 자동반복 초기 지연(약 0.5초)보다 timeout 이 짧으면 "움직임→정지→움직임" 끊김이
+생긴다. 1.0초는 그보다 크게 잡은 값이다.
+
+#### `/cmd_vel` 발행자 충돌 방지
+
+teleop 은 **시작 시와 실행 중 주기적으로**(기본 2Hz) `/cmd_vel` 의 외부 Publisher 수를
+센다. 하나라도 있으면 **`DISARMED`** 로 전환해 non-zero 명령을 발행하지 않고 화면에
+충돌을 표시한다.
+
+- 충돌이 사라져도 **자동으로 재가동하지 않는다** — 사용자가 새 W/S/A/D 를 눌러야 한다
+  (누르지 않은 명령으로 갑자기 출발하는 것을 막기 위함)
+- 상태 표시: `ARMED` / `STOPPED` / `TIMEOUT` / `DISARMED` / `QUIT`
+
+#### 실기 검증 상태 (2026-08-04)
+
+**확인됨** — `mode:=hardware`, `speed_profile:=slow`, 실제 STM32·모터 연결:
+
+- Linux 터미널에서 **W/S/A/D 입력에 따라 실제 로봇이 동작**한다
+- 키를 **짧게 한 번** 누르면 잠시 주행한 뒤 **command lease 만료로 자동 정지**한다
+  — `input_timeout_sec` 기반의 **의도된 안전 동작**이다
+- teleop 키 조작이 전반적으로 정상 동작한다
+
+**확인 필요** — 실기에서 사용한 `input_timeout_sec` 실제 값. 코드 기본값은 **1.0초**지만,
+실행 시 `-p input_timeout_sec:=...` 로 덮어썼는지는 확인할 수 없다. teleop 노드는
+Bridge 의 `_log_parameters()` 와 달리 **파라미터를 로그에 남기지 않아** 실행 기록으로
+역추적이 불가능하다(후속 개선 대상).
+
+**미검증** — 아래는 이번 실기로 확인되지 않았다:
+
+- **낮은 속도 단계의 바닥 데드밴드** — 단계 4 이하는 바퀴 ≤1.6 rad/s → 개루프 PWM ≤16.
+  PWM<20 은 비선형(데드존)으로 기록돼 있어 안 움직일 수 있다
+- **실제 주행 속도·회전각 수치 정확도** — 측정하지 않았다
+- **LiDAR/slam_toolbox 동시 실행** 및 **실제 지도 작성 품질**
+- **장시간 SSH 세션에서의 입력 지연·안정성**
+
+#### ⚠️ 경고
+
+- **지도 작성 중에는 Nav2 와 AI launch(`follow_robot_launch.py`)를 실행하지 않는다.**
+  AI 의 `control_node` 는 조건 없이 `/cmd_vel` 을 15Hz 로 발행하고, Nav2 는
+  `velocity_smoother` 로 20Hz 로 발행한다 — 어느 쪽이든 teleop 과 이중 발행이 된다.
+- **Nav2 P2P 로 전환하기 전에 teleop 을 반드시 종료한다**(`q`/`Esc`). 종료 후
+  `ros2 topic info /cmd_vel -v` 로 Publisher 수를 다시 확인한다.
+- `Space` 는 **정지 명령(zero Twist)** 이다. **ESTOP 이 아니다** — 현재 Bridge 에는 STM
+  `ESTOP`/`STOP` 명령 송신 인터페이스가 없다.
+  **실제 비상정지는 물리 전원 차단이 필요하다.**
+- 종료 경로(`q`/`Esc`/`Ctrl+C`/예외/`ExternalShutdownException`)는 모두 **zero Twist 를
+  20ms 간격 5회 발행 → 터미널 설정 복원** 을 거친다. `tty.setcbreak()` 를 쓰므로
+  **Ctrl+C 가 SIGINT 로 계속 동작**한다(`tty.setraw()` 면 문자로 삼켜져 종료되지 않는다).
+- ⚠️ **다른 셸에서 `kill -INT <ros2 run PID>` 로 죽이지 말 것.** 그 신호는 노드에 닿지
+  않아 종료되지 않고 **터미널이 cbreak 로 남는다**(에코가 안 보이는 상태). 정상 종료는
+  터미널에서 `q`/`Esc`/`Ctrl+C` 다. 부득이하면 프로세스 그룹으로 보낸다:
+  `kill -INT -<PGID>`. 터미널이 망가졌으면 `stty sane` 으로 복구한다.
+
 ### mock 으로 검증되는 것 / 안 되는 것
 
 **검증됨** (2026-08-04, mock): 6개 토픽 발행과 원소 수, `connected` true 전이,
@@ -237,6 +359,12 @@ STATUS 중단 시 `status_timeout_sec`(0.5s)로 `connected=false` 전이.
   `nav2→2.862,6.369` (**제한 없이 통과**) / `slow→0.899,2.000` (비례 축소,
   좌우 비율 `0.449275362` 가 원본과 **정확히 동일**)
 - `speed_profile:=turbo` 는 실패. `slow`+`max_wheel_rad_s` 동시 지정 시 인자가 이김.
+
+**검증됨** (2026-08-04, mock): `cart_teleop` 경로 —
+`teleop → /cmd_vel → Bridge(mock, slow) → SET_WHEEL_VEL` 왕복.
+`W→2.000,2.000` / `A→-1.754,1.754` / `D→1.754,-1.754` / `Space·timeout→0.000,0.000`.
+상태 전이 `ARMED→DISARMED→STOPPED→ARMED→QUIT` 와 외부 Publisher 감지·자동 재가동 금지,
+비-TTY 실행 시 종료 코드 1 확인. **실제 모터로는 미검증.**
 
 **검증됨** (2026-08-04, **실기**): `speed_profile:=slow` 로 hardware 모드 실행 —
 `serial_port` 는 STLink **by-id 경로** 사용, 바퀴 공중. `check_stm_topics` 통과(6개 토픽),

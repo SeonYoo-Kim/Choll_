@@ -15,6 +15,189 @@
 
 ---
 
+## 2026-08-04 — ✅ EM+ROS2 실기: `cart_teleop` WASD 수동 주행 동작 확인 / ⚠️ 수치 정확도는 미검증 (relu 실기 / Claude 문서 반영)
+
+- **환경**: 실제 STM32 + 모터 연결. `cart_teleop → /cmd_vel → stm_serial_bridge`,
+  Bridge `mode:=hardware` + `speed_profile:=slow`
+- **커밋**: 브랜치 `em/feature/motor-control`. 이번 실기에서 **코드는 변경하지 않았다**
+- **대상**: 바로 아래 항목(`cart_teleop` 패키지 추가)의 실기 검증
+
+### 확인된 것
+
+| 항목 | 결과 |
+|---|---|
+| Linux 터미널 WASD 입력 → 실제 로봇 동작 | ✅ 동작함 |
+| 키를 **짧게 한 번** 입력 | ✅ 잠시 주행 후 **command lease 만료로 자동 정지** |
+| 위 자동 정지의 성격 | ✅ `input_timeout_sec` 기반의 **의도된 안전 동작** (결함 아님) |
+| teleop 키 조작 전반 | ✅ 정상 작동 |
+
+즉 `SSH 키보드 → cart_teleop → /cmd_vel → stm_serial_bridge → STM32 → 모터` 전 구간이
+실기에서 동작하고, **command lease 설계(키를 놓으면 timeout 후 정지)가 실제 하드웨어에서
+의도대로 작동**함을 확인했다.
+
+### ⚠️ 확인 필요 — 실기에서 쓴 `input_timeout_sec` 값
+
+**코드 기본값은 1.0초**(`teleop_keys.DEFAULT_INPUT_TIMEOUT_SEC`,
+`teleop_node.declare_parameter("input_timeout_sec", ...)`)다. 그러나 실행 시
+`-p input_timeout_sec:=...` 로 덮어썼는지는 **확인할 수 없어 1.0초로 단정하지 않는다.**
+
+역추적이 불가능한 이유: **teleop 노드는 파라미터를 로그에 남기지 않는다**
+(`teleop_node.py` 에 `get_logger().info` 0건). Bridge 는 `_log_parameters()` 로 시작 시
+전체 파라미터를 찍지만 teleop 에는 그 경로가 없다.
+→ **후속 개선 대상**: teleop 시작 시 파라미터 로그 추가(이번 범위 밖 — 코드 미변경 지시).
+
+### ⚠️ 이번 실기로 검증되지 **않은** 것
+
+- **낮은 속도 단계의 실제 바닥 데드밴드** — 단계 4 이하는 바퀴 ≤1.6 rad/s → 개루프
+  PWM ≤16. PWM<20 은 비선형(데드존) 구간으로 기록돼 있어 **바닥에서 안 움직일 가능성**이
+  남아 있다. 어떤 단계로 주행했는지도 기록되지 않았다
+- **실제 주행 속도·회전각 수치 정확도** — 측정하지 않았다. 주행거리·속도·회전각을
+  **수치 검증 완료로 표시하지 않는다**
+- **LiDAR/slam_toolbox 동시 실행**
+- **실제 지도 작성 품질**
+- **장시간 SSH 세션에서의 입력 지연·안정성** (자동반복 초기 지연이 실제 SSH 환경에서
+  `input_timeout_sec` 보다 짧은지도 미확인)
+- `Space` 정지·`DISARMED` 충돌 차단의 **실기** 동작 (mock 에서만 확인)
+
+### ⚠️ 안전 표현
+
+`Space` 는 **정지 명령(zero Twist)** 이며 **ESTOP 이 아니다.** 현재 Bridge 에는 STM
+`ESTOP`/`STOP` 명령 송신 인터페이스가 없다. **실제 비상정지는 물리 전원 차단이 필요하다.**
+
+### ⚠️ 이 기록의 한계
+
+결과는 **사용자 보고값**이며 teleop 화면·브리지 로그 **원본은 확보되지 않았다.**
+"짧게 한 번 입력 후 자동 정지"의 주행 시간·거리도 측정값이 아니다.
+
+## 2026-08-04 — ✅ ROS2: `cart_teleop` 수동 주행 패키지 추가 (WASD→/cmd_vel), 64 + 349 tests 통과 (Claude)
+
+- **환경**: Ubuntu 22.04, ROS2 Humble, Python 3.10. **하드웨어 미연결** — mock/PTY 만 사용
+- **커밋**: 브랜치 `em/feature/motor-control` (`5a3ca3c` 위에 미커밋)
+- **목적**: LiDAR + slam_toolbox 를 띄운 상태에서 SSH 터미널 WASD 로 주행하며 **수동 지도
+  작성**. 이후 teleop 을 끄고 Nav2 P2P 로 전환한다.
+- **경로**: `SSH 키보드 → cart_teleop → /cmd_vel → stm_serial_bridge → STM32`
+
+### 신규 패키지 `ros2_ws/src/cart_teleop/` (ament_python)
+
+| 파일 | 역할 |
+|---|---|
+`cart_teleop/teleop_keys.py` | **순수 로직** — 키→명령, 속도 단계, command lease 판정. `rclpy`·`termios`·`select`·`serial`·`stm_serial_bridge` 를 import 하지 않음(AST 테스트로 고정) |
+`cart_teleop/teleop_node.py` | `rclpy` + `termios`/`select` 입력, 20Hz Twist 발행, ANSI UI, Publisher 충돌 검사, 안전 종료 |
+`test/test_teleop_keys.py` | 순수 로직 단위 테스트 69개 |
+`package.xml`·`setup.py`·`setup.cfg`·`resource/cart_teleop` | 패키지 골격. 의존성은 `rclpy`·`geometry_msgs` 뿐 |
+
+**launch 파일은 만들지 않았다** — teleop 은 stdin(tty)을 점유해야 하므로
+`ros2 run cart_teleop keyboard_teleop` 이 표준 실행 방법이다.
+
+**Serial 포트를 열지 않는다.** 포트 소유자는 `stm_serial_bridge` 하나이며, 이 계약을
+두 파일 모두에 대해 AST import 검사 테스트로 고정했다.
+
+### 핵심 설계: command lease (latch 아님)
+
+터미널은 **키 릴리즈를 감지할 수 없다.** 그래서 W/S/A/D 입력마다 유효시간
+(`input_timeout_sec`, 기본 1.0초)을 갱신하고, 만료되면 zero Twist 로 전환하며 **동작을
+폐기**한다(다시 움직이려면 새 키 필요). 키를 누르고 있으면 OS 자동반복이 lease 를
+갱신한다. 1.0초는 자동반복 초기 지연(약 0.5초)보다 크게 잡아 끊김을 피한 값이다.
+
+### `=` 속도 증가 별칭 추가 (같은 날 후속)
+
+`+` 는 대부분의 배열에서 Shift 가 필요해 주행 중 조작이 번거롭다. 같은 물리 키의
+Shift 없는 문자 `=` 를 **`+` 의 별칭**으로 받아들이도록 추가했다. `+` 동작·기본 속도·
+`input_timeout_sec`·나머지 키 매핑은 **변경하지 않았다.**
+
+- `SPEED_UP_KEYS = {"+", "="}` 로 판정. `=` 는 자신의 라벨(`= 속도 단계 증가 (+ 별칭)`)을
+  표시해 사용자가 실제로 누른 키를 알 수 있다
+- UI 안내: `+ 속도↑` → **`+/= 속도↑`**
+- 신규 테스트 5개: `=` 가 단계를 올리는지 / `+` 만 쓴 상태와 **완전히 동일한 상태·발행값**
+  인지 / `=` 로도 최대 clamp / `=` 는 lease 를 갱신하지 않는지(속도 키이므로) / 라벨 표시
+
+**실제 노드 확인 (PTY)**: 시작 `5/5` → `-`×3 → `2/5` → **`=`** → `3/5` → `+` → `4/5` →
+`=`×4 → **`5/5`(clamp)**. `= 속도 단계 증가` 라벨과 `+/= 속도↑` 안내가 화면에 표시되고
+`q` 종료코드 0.
+
+경계값 `elapsed >= timeout` 을 TIMEOUT 으로 두는 것은 의도적이다 —
+`command_watchdog.select_wheel_command()` 와 같은 규칙(애매하면 정지).
+
+### 명령과 결과
+
+```bash
+cd ros2_ws
+colcon build --symlink-install                      # 2 packages, 경고 0
+python3 -m pytest src/cart_teleop/test/ -q          # 69 passed in 0.06s
+python3 -m pytest src/stm_serial_bridge/test/ -q    # 349 passed in 1.12s  (회귀 0)
+bash scripts/verify_bridge_mock.sh                  # 3/3 통과, 잔존 프로세스 없음
+git diff --check                                    # exit 0
+ros2 run cart_teleop keyboard_teleop < /dev/null    # 비-TTY -> 명확한 오류 + exit 1
+```
+
+### ★ mock 왕복 검증 (PTY 로 가짜 터미널을 붙여 키 주입)
+
+Bridge `mode:=mock speed_profile:=slow` + teleop 실행 후 실제 송신값:
+
+| 입력 | 기대 | 실제 `SET_WHEEL_VEL` | 결과 |
+|---|---|---|---|
+`W` (전진) | `2.000,2.000` | `2.000,2.000` | ✅ |
+`A` (좌회전) | `-1.754,1.754` | `-1.754,1.754` | ✅ |
+`D` (우회전) | `1.754,-1.754` | `1.754,-1.754` | ✅ |
+`Space` / lease timeout | `0.000,0.000` | `0.000,0.000` | ✅ |
+
+`W → 0.13 m/s → 바퀴 2.0 rad/s`, `A → 0.60 rad/s → 바퀴 ±1.754`(L=0.38 기준) —
+**둘 다 slow 상한(2.0) 이내라 Bridge 에서 축소되지 않았다.**
+
+### ★ 상태 전이 검증
+
+| 시나리오 | 관측 상태 | 결과 |
+|---|---|---|
+teleop 단독 + W | `ARMED` | ✅ |
+외부 `/cmd_vel` Publisher 기동 | `ARMED → DISARMED` (외부 1개 표시) | ✅ |
+DISARMED 중 W 입력 | 상태 변화 없음(DISARMED 유지, non-zero 미발행) | ✅ |
+외부 Publisher 종료 | **`STOPPED`** (`ARMED` 로 자동 복귀하지 **않음**) | ✅ |
+해제 후 키 없이 대기 | 상태 변화 없음 | ✅ **자동 재가동 금지 확인** |
+새 W 입력 | `ARMED` | ✅ |
+무입력 2.5초 | `TIMEOUT` 1회 → `STOPPED` | ✅ |
+`q` | `QUIT`, 종료 코드 0 | ✅ |
+
+### ★ 종료 경로 검증 (`q` / 실제 Ctrl+C)
+
+| 경로 | 방법 | 결과 |
+|---|---|---|
+`q` | PTY 로 `q` 주입 | ✅ 종료코드 0, 정지·복원 메시지 출력 |
+**실제 Ctrl+C** | `pty.fork()` 로 제어 터미널을 붙이고 **`0x03` 문자를 tty 에 주입** → 드라이버가 foreground 프로세스 그룹에 SIGINT | ✅ 종료코드 0, 0.0초 내 종료, 정지·복원 메시지 출력, 잔존 프로세스 없음 |
+비-TTY | `< /dev/null` | ✅ 명확한 오류 + 종료코드 1 |
+
+`tty.setcbreak()` 를 쓴 덕분에 ISIG 가 유지되어 Ctrl+C 가 SIGINT 로 동작한다
+(`tty.setraw()` 면 그냥 문자가 되어 종료되지 않는다).
+
+### ⚠️ 검증 과정에서 있었던 정정 (3건 — 전부 검증 하네스 문제였다)
+
+1. **`TIMEOUT`·`QUIT` 미관측** — 1차 PTY 검증에서 두 상태가 화면 로그에 없었다. 원인은
+   **하네스가 PTY master 를 2.5초간 읽지 않아 버퍼가 포화**된 것이고 **노드 결함이
+   아니었다.** 읽기 스레드로 계속 비우도록 고쳐 재실행하니 `TIMEOUT` 1회·`QUIT` 1회가
+   정상 관측됐다. (`TIMEOUT` 이 1회만 나오는 것은 설계대로다 — 만료 tick 에서만
+   `TIMEOUT` 이고 이후는 `STOPPED` 다.)
+2. **Bridge 잔존 프로세스** — 하네스가 **정리 전에 잔존 검사를 출력**하는 순서 문제였다.
+   수동 정리 후 재확인해 잔존 0 을 확인했다.
+3. **Ctrl+C 로 종료되지 않음(오판)** — 1차 시도에서 15초 내 종료되지 않고 터미널이
+   cbreak 로 남았다. 그러나 원인은 하네스가 **`ros2 run` 래퍼 PID 하나에만** SIGINT 를
+   보낸 것이었다. 실제 Ctrl+C 는 tty 드라이버가 **foreground 프로세스 그룹 전체**에
+   보내므로 상황이 다르다. `pty.fork()` + `0x03` 주입으로 다시 검증해 **정상 종료**를
+   확인했다.
+   → ⚠️ 다만 여기서 **운영상 주의점**이 하나 드러났다: 다른 셸에서 종료시킬 때
+   `kill -INT <ros2 run PID>` 는 노드에 닿지 않아 터미널이 cbreak 로 남을 수 있다.
+   프로세스 그룹으로 보내야 한다(`kill -INT -<PGID>`). 정상 종료 수단은 **터미널에서
+   `q`/`Esc`/`Ctrl+C`** 다.
+
+### ⚠️ 실기에서 검증하지 않은 것
+
+- **실제 모터로 teleop 주행** — mock 송신값까지만 확인했다
+- **속도 단계를 내렸을 때 실제로 움직이는지** — 단계 4 이하는 바퀴 1.6 rad/s 이하 →
+  개루프 PWM 16 이하다. PWM<20 은 비선형(데드존) 구간으로 기록돼 있어 **바닥에서 안
+  움직일 가능성**이 있다. 기본값을 최대 단계로 둔 이유다
+- **자동반복 초기 지연이 실제 SSH 환경에서 1.0초 이내인지** — 터미널·SSH 설정에 따라
+  다르다. 끊김이 있으면 `input_timeout_sec` 을 올려야 한다
+- LiDAR/slam_toolbox 와 동시 실행, 실제 지도 작성 품질
+- 실제 SSH 세션(네트워크 지연 포함)에서의 키 응답성
+
 ## 2026-08-04 — ✅ EM+ROS2 실기: `L=0.38` 반영 확인 — `slow` 프로파일 **바닥 제자리 회전** 성공 / ⚠️ 회전각 수치는 미검증 (relu 실기 / Claude 문서 반영)
 
 - **환경**: 실제 STM32 + 모터. `stm_serial_bridge` hardware 모드, `speed_profile:=slow`
