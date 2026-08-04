@@ -142,9 +142,11 @@ class StmSerialBridgeNode(Node):
         self.declare_parameter("serial_port", "/dev/ttyACM0")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("wheel_radius_m", 0.065)
-        # ⚠️ 임시값: 좌우 바퀴 중심 간 거리는 조립 후 실측이 필요하다.
+        # 2026-08-04 실측값(좌우 구동 바퀴 트레드 중심선 간 거리 0.38m).
         # 이 값이 틀리면 angular.z -> 좌우 속도 차 변환이 어긋나 회전량이 맞지 않는다.
-        self.declare_parameter("wheel_separation_m", 0.30)
+        # config/stm_serial_bridge.yaml 과 같은 값을 유지할 것 — launch 를 거치지 않고
+        # `ros2 run` 으로 직접 띄우면 이 기본값이 쓰인다.
+        self.declare_parameter("wheel_separation_m", 0.38)
         self.declare_parameter("tx_rate_hz", 20.0)
         self.declare_parameter("cmd_vel_timeout_sec", 0.5)
         self.declare_parameter("dry_run", True)
@@ -425,7 +427,7 @@ class StmSerialBridgeNode(Node):
         logger.info(f"  wheel_radius_m      = {self._param_value('wheel_radius_m')}")
         logger.info(
             f"  wheel_separation_m  = {self._param_value('wheel_separation_m')}"
-            "  <-- ⚠️ 조립 후 실측 필요한 임시값"
+            "  <-- 2026-08-04 좌우 구동 바퀴 트레드 중심선 간 실측값"
         )
         logger.info(f"  tx_rate_hz          = {self._param_value('tx_rate_hz')}")
         logger.info(

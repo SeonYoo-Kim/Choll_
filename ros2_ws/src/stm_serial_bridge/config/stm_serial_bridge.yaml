@@ -18,8 +18,10 @@ stm_serial_bridge:
 
     # --- 차동구동 기하 ---
     wheel_radius_m: 0.065
-    # ⚠️ 미실측 플레이스홀더. 실측 후 확정해야 한다 (docs 참고).
-    wheel_separation_m: 0.30
+    # 2026-08-04 실측값. 좌우 구동 바퀴 **트레드 중심선 사이 거리** 38cm.
+    # (이전 0.30 은 미실측 플레이스홀더였다. 이 값은 회전 성분에만 들어가므로
+    #  직진 명령의 변환 결과는 변경 전후가 같다.)
+    wheel_separation_m: 0.38
 
     # --- 송신(TX) ---
     tx_rate_hz: 20.0
@@ -27,6 +29,25 @@ stm_serial_bridge:
     # false = 실제 Serial 송신. true 면 로그만 찍고 포트에 쓰지 않는다.
     dry_run: false
     # ⚠️ 벤치 테스트용 잠정 상한. 바퀴 최대 RPM 실측 후 확정해야 한다.
+    #
+    # 이 값을 넘는 목표는 `limit_wheel_rad_s()`가 좌우 비율을 유지한 채 비례 축소한다
+    # (제한이 걸리면 노드가 경고 로그를 남긴다). 궤적은 유지되고 속도만 느려진다.
+    #
+    # 상위 주행 스택(Nav2)의 봉투와 이 상한의 관계
+    # — r=0.065, L=0.38(2026-08-04 실측) 기준:
+    #
+    #   Nav2 명령              필요 상한      1.0 일 때
+    #   직진 v=0.3            4.615 rad/s   0.065 m/s 로 축소 (21.7%)
+    #   제자리 회전 ω=0.6     1.754 rad/s   0.57 배로 축소
+    #   직진+회전 (최악)      6.369 rad/s   0.157 배로 축소
+    #
+    # 계산 근거는 주석이 아니라 코드에 있다:
+    #   `differential_drive.required_max_wheel_rad_s()` + test_differential_drive.py
+    #
+    # 이 기본값은 **바꾸지 않는다**. 올릴 때는 launch 프로파일/인자를 쓴다:
+    #   speed_profile:=slow   -> 2.0 (config/speed_profile_slow.yaml)
+    #   speed_profile:=nav2   -> 6.4 (config/speed_profile_nav2.yaml, ⚠️ 실기 미검증)
+    #   max_wheel_rad_s:=3.5  -> 임의값 (프로파일보다 우선)
     max_wheel_rad_s: 1.0
 
     # --- 수신(RX) ---
