@@ -24,7 +24,9 @@
   노트북(Ubuntu 22.04+Humble)에서 검증 완료된 것을 Jetson에 이식한 것.
 - 구성: `src/choll_slam_bringup`(라이다+rf2o+slam_toolbox 설정/런치),
   `src/choll_nav`(cart_pose_publisher + goal_forwarder), `src/choll_nav2`
-  (Nav2 파라미터·후진 제거 BT·런치). upstream 2종은 setup_jetson.sh가 클론.
+  (Nav2 파라미터·후진 제거 BT·런치), `src/choll_mqtt_bridge`(MQTT↔ROS2
+  브릿지 — BE 브로커 연동, python3-paho-mqtt 필요). upstream 2종은
+  setup_jetson.sh가 클론.
 - 카트 3보드 분산 제어 중 **Jetson 담당**: AI 추종 연산 + LiDAR/SLAM/Nav2 처리.
   `/cmd_vel` → (예정) 시리얼 브릿지 → STM32 차동구동. RPi는 RFID/LED/MQTT.
 
@@ -67,6 +69,12 @@
 TF: `map→(slam_toolbox|AMCL 중 하나만)→odom→(rf2o)→base_link→(정적, z=0.20
 TODO-실측)→laser_frame`. odom→base_link 발행자는 항상 하나. 카메라 장착 시
 `base_link→camera_frame` 정적 TF 추가.
+
+MQTT 연동(`choll_mqtt_bridge`, 정본: 패키지 README): 브로커
+`your-server.example.com:1883`(CHANGE_ME/CHANGE_ME). `cmd/move/cart`의 MOVE→
+`/cart/target_pose`, CANCEL→`/cart/cancel` 변환 + `/robot_pose`→
+`status/position`(`{"x","y","yaw","timestamp"}`, BE 파서 실측 계약) 발행.
+SELECT_TARGET은 AI `fe_bridge_node` 담당 — 이 브릿지에서 처리 금지.
 
 ## 5. 절대 규칙
 
