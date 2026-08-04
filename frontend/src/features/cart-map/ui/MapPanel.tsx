@@ -1,17 +1,19 @@
 import { ShoppingCart } from 'lucide-react';
+import { useRef, useState } from 'react';
 
 import { useStartNavigation } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
-import { ZONE_NAMES, ZONE_RECTS, zoneIdOf, zoneLabel } from '../model/zones';
+import { clientPointToDisplay } from '../model/mapTransform';
+import { zoneLabel } from '../model/zones';
+import { useZoneStore, zoneIndexOf } from '../model/zoneStore';
 
-import mapImage from '@/assets/map.png';
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { DEMO_CART_ID } from '@/shared/config/cart';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
 import styles from './MapPanel.module.scss';
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 
 /** SLAM 지도 패널 — 평면도 위 구역을 눌러 카트 목적지를 지정한다. */
 export function MapPanel() {
@@ -24,6 +26,15 @@ export function MapPanel() {
   const isMoving = useCartMapStore((state) => state.isMoving);
   const cartStatus = useCartMapStore((state) => state.cartStatus);
   const startMove = useCartMapStore((state) => state.startMove);
+  // 서버 구역(MAP-02)을 받기 전에는 데모 구역이 들어 있다 — 어느 쪽이든 그리는 방식은 같다
+  const zones = useZoneStore((state) => state.zones);
+  const mapInfo = useCartMapStore((state) => state.mapInfo);
+  const mapUnavailable = useCartMapStore((state) => state.mapUnavailable);
+  const mapImageUrl = mapInfo?.imageUrl ?? null;
+  // 불러오기에 실패한 주소를 기억한다 (주소가 바뀌면 다시 시도한다)
+  const [failedMapUrl, setFailedMapUrl] = useState<string | null>(null);
+  // 누른 지점을 지도 픽셀로 되돌리려면 화면에 그려진 지도 영역의 크기가 필요하다
+  const canvasRef = useRef<HTMLDivElement>(null);
   const runState = useCartControlStore((state) => state.runState);
   const notify = useToastStore((state) => state.show);
 
@@ -35,7 +46,11 @@ export function MapPanel() {
     mutation: {
       onSuccess: (_, { data }) => {
         startMove();
-        notify(`${data.zoneId}구역으로 카트가 이동을 시작해요`);
+        // 서버 zoneId는 구역 번호가 아니므로(DB id) 화면 순서로 되돌려 표시한다
+        const zoneIndex = zoneIndexOf(data.zoneId);
+        notify(
+          `${zoneIndex === null ? '해당 구역' : zoneLabel(zoneIndex)}으로 카트가 이동을 시작해요`,
+        );
       },
       onError: () => {
         notify('이동 명령을 보내지 못했어요. 잠시 후 다시 시도해주세요');
@@ -43,31 +58,83 @@ export function MapPanel() {
     },
   });
 
-  const handleZoneClick = (zoneIndex: number) => {
+  // 지도를 못 그리면 예시 평면도로 때우지 않고 에러 화면으로 넘긴다.
+  // 잘못된 그림 위에 카트 위치와 구역을 얹으면 사서가 틀린 위치를 사실로 믿게 된다.
+  // (라우트 errorElement가 "지도를 불러오지 못했어요"를 띄운다 — 사이드바는 남는다)
+  if (mapUnavailable || (mapImageUrl !== null && mapImageUrl === failedMapUrl)) {
+    throw new Error(`지도 이미지를 불러오지 못했습니다 (imageUrl: ${mapImageUrl ?? '없음'})`);
+  }
+
+  /**
+   * 누른 지점을 지도 픽셀 좌표로 바꾼다 — 구역 한가운데가 아니라 사서가 찍은 자리로 보내기 위함.
+   * 키보드로 버튼을 누르면 좌표가 없으므로(detail 0) null을 주고, BE가 구역 중심을 쓰게 한다.
+   */
+  const clickedPoint = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0 || canvasRef.current === null || mapInfo === null) {
+      return null;
+    }
+    return clientPointToDisplay(
+      { x: event.clientX, y: event.clientY },
+      canvasRef.current.getBoundingClientRect(),
+      mapInfo,
+    );
+  };
+
+  const handleZoneClick = (zoneIndex: number, event: MouseEvent<HTMLButtonElement>) => {
     if (zoneIndex === cartZone) {
       notify(`${zoneLabel(zoneIndex)}에 이미 카트가 있어요`);
       return;
     }
-    startNavigation({ cartId: DEMO_CART_ID, data: { zoneId: zoneIdOf(zoneIndex) } });
+    const zoneId = zones[zoneIndex]?.id;
+    if (zoneId === undefined) {
+      return;
+    }
+    const point = clickedPoint(event);
+    startNavigation({
+      cartId: DEMO_CART_ID,
+      data: point === null ? { zoneId } : { zoneId, x: point.x, y: point.y },
+    });
   };
+
+  // 아직 지도 정보를 받는 중 — 카트·구역을 얹을 바탕이 없으니 자리만 잡아 둔다
+  if (mapInfo === null || mapImageUrl === null) {
+    return (
+      <div className={styles.panel}>
+        <div className={styles.canvas}>
+          <p className={styles.loading}>지도를 불러오는 중이에요…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.panel}>
       {/* 패널 제목은 제거 — MapPage의 h1("도서관 지도")과 중복이라 지도만 남긴다 */}
-      <div className={styles.canvas}>
-        <img src={mapImage} alt="" className={styles.mapImage} />
-        {ZONE_RECTS.map((rect, i) => (
+      {/* 비율을 서버 지도 크기에 맞춘다 — 어긋나면 cover 크롭 때문에 클릭 지점이 실제와 달라진다 */}
+      <div
+        className={styles.canvas}
+        ref={canvasRef}
+        style={{ aspectRatio: `${mapInfo.imageWidth} / ${mapInfo.imageHeight}` }}
+      >
+        {/* 서버가 준 지도만 그린다 — 못 그리면 위에서 에러 화면으로 넘어간다 */}
+        <img
+          src={mapImageUrl}
+          onError={() => setFailedMapUrl(mapImageUrl)}
+          alt=""
+          className={styles.mapImage}
+        />
+        {zones.map((zone, i) => (
           <button
-            key={ZONE_NAMES[i]}
+            key={zone.id}
             disabled={cartStatus !== 'IDLE' || following || isPending}
-            onClick={() => handleZoneClick(i)}
-            aria-label={`${zoneLabel(i)} ${ZONE_NAMES[i]}로 카트 이동`}
+            onClick={(event) => handleZoneClick(i, event)}
+            aria-label={`${zoneLabel(i)} ${zone.name}로 카트 이동`}
             className={`${styles.zone} ${i === cartZone ? styles.zoneActive : ''}`}
             style={{
-              left: `${rect.left}%`,
-              top: `${rect.top}%`,
-              width: `${rect.width}%`,
-              height: `${rect.height}%`,
+              left: `${zone.rect.left}%`,
+              top: `${zone.rect.top}%`,
+              width: `${zone.rect.width}%`,
+              height: `${zone.rect.height}%`,
             }}
           />
         ))}

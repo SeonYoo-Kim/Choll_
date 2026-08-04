@@ -15,6 +15,83 @@
 
 ---
 
+## 2026-08-03 21:33 — ✅ BE: MOVE 하행에 SLAM 미터 target 추가 + NAV-01 픽셀 클릭 지원 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21. 단위 테스트만 (외부 의존 모킹)
+- **커밋**: 브랜치 `backend/feature/follow-control` (d27affe 위에 추가)
+- **변경**:
+  - `SlamCoordinateConverter.toSlamMeters()` 신규 — 픽셀→미터 역변환 (세로축 뒤집기 포함)
+  - `MoveCommand` 페이로드 개편: `{"requestId","command":"MOVE","zoneId","target":{x,y},"pixel":{x,y}}`
+    — target은 SLAM 미터(EM nav goal). `mqtt.position-unit=meters`일 때만 변환·포함,
+    pixels 모드(지도 메타 미입력)에선 null. pixel은 항상 포함(참고용)
+  - NAV-01 요청에 선택 필드 x·y(지도 픽셀) 추가 — 주면 클릭 지점, 없으면 구역 bbox 중심 (기존 FE 무영향)
+  - FOLLOW_* 명령은 좌표를 싣지 않기로 확정 — 사서 좌표는 로봇 내부에서 AI `/target_position`이
+    데이터 플레인 (BE 경유 왕복은 지연만 추가)
+- **결과**: 23 suites, **81 tests, 0 failures, 0 errors** (신규 4: 픽셀→미터 변환/왕복,
+  meters 모드 target 포함, 클릭 픽셀 우선. 기존 MOVE 테스트는 target=null(pixels 모드) 검증으로 갱신)
+- **미검증**: 실지도 메타 기반 변환 정확도 — EM이 map.yaml 값(`library_maps` id=2) 입력 후
+  실기 좌표로 재검증 필요
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+> Task :compileJava
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 32s
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=23 tests=81 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-03 20:22 — ✅ BE: 추종 시작·일시정지·종료(FOLLOW-01/02/04) 단위 테스트 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test --console=plain` (backend/ 에서)
+- **환경**: Windows 11, OpenJDK 21. 브로커·DB 실연동 없이 단위 테스트만 (외부 의존 Mockito 모킹)
+- **커밋**: develop `4751ba4` 기준 — 브랜치 `backend/feature/follow-control`
+- **신규 기능**: FE가 완료해 둔 추종 제어 3종의 BE 구현
+  - `FollowControlService` 신규 — `POST /follow`(FOLLOW-04, 202)·`POST /follow/pause`(FOLLOW-01, 202)·
+    `DELETE /follow`(FOLLOW-02, 204·멱등). NavigationService 패턴 준용 (인메모리 세션, 카트당 1건)
+  - MQTT `cmd/move/cart`로 `{"requestId","command":"FOLLOW_START|FOLLOW_PAUSE|FOLLOW_STOP"}` 하행
+    — ⚠️ **EM·AI 수신측 미구현, 임시 계약** (API 명세서 MQTT-04 데이터란에 반영)
+  - WS `FOLLOW_STATUS_UPDATED`(WS-FE-07) 발행 — FOLLOWING/PAUSED/STOPPED (REST 접수 기준.
+    대상 인식 여부·거리·대상 상실은 카트 상행 결과 토픽 확정 후)
+  - 가드: 오프라인 400, NAVIGATING 중 시작 400, 중복 시작 400. 일시정지 재시작은 같은 followId 재개.
+    일시정지 중 카트 동작 상태는 FOLLOWING 유지, 종료 시 IDLE 복귀
+- **결과**: 23 suites, **77 tests, 0 failures, 0 errors** (신규 11: FollowControlServiceTest —
+  시작/오프라인 거부/이동 중 거부/중복 거부/재개/일시정지/일시정지 멱등/무세션 일시정지 거부/종료/종료 멱등/MQTT 부재)
+- **미검증**: 브로커 실연동, EM·AI의 FOLLOW_* 명령 수신 (수신측 코드 자체가 아직 없음)
+
+<details>
+<summary>gradle test 출력 + JUnit XML 집계</summary>
+
+```
+> Task :compileJava
+> Task :processResources UP-TO-DATE
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 33s
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=23 tests=77 failures=0 errors=0
+```
+
+</details>
+
 ## 2026-08-03 16:05 — ✅ main 승격 리허설: 로컬 가상 머지 + Jenkins Test 단계 재현 통과 (Claude)
 
 - **목적**: develop(+슬롯 LED 브랜치)을 main에 머지·배포했을 때 파이프라인이 깨지는지 사전 확인
@@ -80,6 +157,85 @@ tests=66 failures=0 errors=0 suites=22
 ```
 
 </details>
+
+## 2026-08-03 — ⚠️ EM 실기: 엔코더 count/rev 실측 → 감속비 100:1 오기재 정정(51:1), 12.1% 차이 원인 미확정 (relu 실측 / Claude 반영)
+
+- **대상**: `embedded/motor/stm32_workspace/motor-control/Application/Config/motor_config.h`
+- **실측자**: relu (출력축 수동 회전, 실기). **STM 펌웨어 재빌드·재플래시는 아직 하지 않았다.**
+- **방법**: 바퀴(출력축)를 손으로 정해진 횟수만큼 돌리고 `encoder_total` 누적값 변화를 읽음
+  (모터 구동 없음). ROS2 Bridge의 `/stm/encoder_total`로 관측.
+
+### 실측 원본 수치
+
+| 대상 | 구간 | 시작 → 끝 | 변화량 |
+|---|---|---|---|
+| Left | 1회전 | 136320 → 205017 | 68697 |
+| Left | 추가 3회전 | 205071 → 408805 | 203734 |
+| Right | 1회전 | 138 → 68603 | 68465 |
+| Right | 추가 3회전 | 68931 → 273335 | 204404 |
+
+- Left 4회전 평균: **68107.75** count/rev
+- Right 4회전 평균: **68217.25** count/rev
+- **좌우 전체 8회전 평균: 68162.5 count/wheel-rev**
+- 좌우 차이 약 **0.16%** — 매우 일관적
+
+### 판정 및 코드 변경
+
+구매 사양 확인 결과 감속비 옵션은 **51:1**이었고, 코드에 적혀 있던 **100:1은 오기재**였다.
+
+```
+MOTOR_GEAR_RATIO   100.0f → 51.0f          (변경)
+MOTOR_ENCODER_CPR                380.0f    (유지)
+MOTOR_ENCODER_QUADRATURE_MULTIPLIER 4.0f   (유지)
+MOTOR_ENCODER_COUNTS_PER_WHEEL_REV         (파생식 유지: CPR × Gear × Quadrature)
+  → 380 × 51 × 4 = 77520 count/wheel-rev  (기존 152000에서 변경)
+```
+
+- 명목값 77520 vs 실측 68162.5 → **약 -12.1%** (실측이 더 작음)
+- ⚠️ **실측값 68162.5를 별도 상수로 강제 적용하지 않았다.** 파생식을 그대로 유지했다.
+- ⚠️ **감속비를 1:45로 확정한 것이 아니다.** 구매 사양은 1:51이다.
+  (참고로 380×45×4 = 68400으로 실측과 -0.35%까지 근접하지만, 근거 없이 45로 바꾸지 않았다.)
+- ⚠️ **12.1% 차이의 원인은 미확정**이다. 아래 중 어느 것인지 이 데이터만으로 구분할 수 없다:
+  CPR 380의 정의(채널당 라인 수 vs 이미 quadrature 적용) / Quadrature 배율(TI12 = x4 가정) /
+  타이머 입력 필터(`IC1Filter`/`IC2Filter` = 8)로 인한 edge 누락 / 실제 하드웨어 사양이 구매 사양과 다름.
+  실측을 정확히 맞추려면 유효 감속비 약 44.84:1 또는 유효 CPR 약 334.1이 필요하다.
+
+### 영향 범위 (코드 분석 결과)
+
+`MOTOR_ENCODER_COUNTS_PER_WHEEL_REV`는 `motor.c:406-407`
+(`Motor_UpdateActualVelocity()`) **한 곳에서만** 쓰이지만, 결과인 `motor_actual_*_rad_s`가
+STATUS의 LA/RA, PI 오차 입력(`:450,467,918,951`), Speed Profile(`:425,429`),
+Stall 판정(`:508,513`)으로 흘러간다.
+
+- 같은 회전에서 보고되는 `actual_rad_s`가 **약 1.9608배 커진다**
+  (실제 대비 2.23배 과소 → 1.14배 과소로 개선, 여전히 약 12% 과소)
+- PI 게인이 기본 `0.0f`이므로 **제어 동작 변화는 지금 당장 없다**
+- Stall 판정(`|actual| <= 0.1f`)은 actual이 커지므로 **오검출 가능성이 줄어드는 방향**.
+  실제 정지 시 actual≈0이므로 검출 능력 자체는 유지
+
+### 검증 결과
+
+- **STM32 펌웨어 빌드: 이 환경에서 수행 불가** — `arm-none-eabi-gcc`가 설치되어 있지 않다.
+  **CubeIDE에서 사용자가 빌드·플래시해야 한다.** 문법 검증은 `gcc -fsyntax-only`로만 확인.
+- ROS2 Serial Bridge 회귀: `python3 -m pytest src/stm_serial_bridge/test/ -q` → **298 passed**
+  (이번 변경은 STM 펌웨어 상수뿐이라 브리지 코드·테스트에 영향 없음)
+
+### 후속 필요 (미완료)
+
+1. **CubeIDE 재빌드 → 재플래시 → `actual_rad_s` 재검증** — 변경이 반영된 펌웨어로 실기 확인이 아직 없다
+2. 12.1% 차이의 **원인 규명** (IC Filter 낮춰 재측정 / 모터축 1회전 카운트 측정 / 데이터시트 재확인)
+3. 원인 확정 후 해당 매크로 **하나만** 정정
+4. ~~`serial_protocol.md`의 하드웨어 상수 표가 아직 옛 값~~ → **같은 날 정정 완료**:
+   `MOTOR_GEAR_RATIO` 51, 명목 `COUNTS_PER_WHEEL_REV` 77520, 실측 68162.5·원인 미확정 기록으로
+   교체했고, `152000 vs 38000`으로 Quadrature를 판정하던 과거 기준도 폐기했다.
+   `ros2_ws/CLAUDE.md`의 "엔코더 1회전당 Count 미측정" 서술도 "실측 완료 / 원인 미확정"으로 분리했다.
+
+### ⚠️ 이 기록의 한계
+
+- 실측 원본 수치는 사용자 보고값이며, **콘솔 원본 출력은 확보되지 않았다**
+- 회전 각도 정밀도(손으로 정확히 1회전을 맞췄는지)는 정량화되지 않았다 —
+  좌우 0.16% 일관성은 이 오차가 크지 않다는 간접 근거일 뿐이다
+- 모터축(감속 전) 카운트는 측정하지 않았으므로 감속비 자체를 독립 검증하지 못했다
 
 ## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
 

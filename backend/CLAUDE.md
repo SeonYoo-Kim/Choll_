@@ -34,11 +34,15 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 
 - **REST**: `/api/carts/{cartId}/...`, `/api/maps/{mapId}/...` (CART/SLOT/MAP/TASK/NAV/FOLLOW)
   — NAV-01/02 구현됨: `POST/DELETE /api/carts/{cartId}/navigation` (202/204, 오프라인·중복 시작은 400)
+  — FOLLOW-01/02/04 구현됨 (`FollowControlService`): `POST /follow`(시작, 202)·`POST /follow/pause`(일시정지, 202)·
+  `DELETE /follow`(종료, 204·멱등). 오프라인·이동 중·중복 시작은 400. 일시정지 후 재시작은 같은 followId로 재개.
+  추종 세션은 인메모리(카트당 1건) — 카트 상행 결과 토픽 확정 시 대상 상실·거리 전환을 붙일 자리
 - **WebSocket**: `/ws/carts/{cartId}`, JSON, BE→FE 이벤트 13종 (WS-FE-01~13)
-  — 실구현 6종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
+  — 실구현 7종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
   `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED —
   STARTED/ARRIVED/FAILED는 카트 상행 결과 토픽 확정 후), `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
-  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용)
+  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용),
+  `FOLLOW_STATUS_UPDATED`(FOLLOWING/PAUSED/STOPPED — REST 접수 기준. 대상 인식 여부·거리는 카트 상행 확정 후)
 - **WebSocket 영상**: `/ws/carts/{cartId}/video` (FE 시청, 바이너리 JPEG 1메시지=1프레임)
   ← `/ws/carts/{cartId}/video/publish` (Jetson 발행, 10fps/품질70 기준 ~4Mbps)
 - **MQTT 토픽 네이밍 규칙**: 카트·AI→BE **상행은 `status/*`**, BE→카트 **하행은 `cmd/*`**.
@@ -56,9 +60,18 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
     (x,y=bbox 좌상단 픽셀) → WS `TRACKS_UPDATED`로 원형 그대로 중계
   - ⚠️ 수신 토픽 4종 모두 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 재협의 필요
 - **MQTT** (BE→카트 명령): `cmd/move/cart`
-  - `{"requestId","command":"MOVE|CANCEL","zoneId","x","y"}` (구역 bbox 중심 좌표)
+  - `{"requestId","command":"MOVE","zoneId","target":{"x","y"},"pixel":{"x","y"}}` —
+    **target은 SLAM 미터**(EM SLAM Nav의 goal 좌표. BE가 지도 메타로 픽셀→미터 역변환,
+    `mqtt.position-unit=meters`일 때만 — pixels 모드에선 null), pixel은 지도 이미지 픽셀(참고용).
+    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 그 지점, 없으면 구역 bbox 중심
+  - `{"requestId","command":"CANCEL","zoneId"}` — 좌표 없음
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환
+  - `{"requestId","command":"FOLLOW_START|FOLLOW_PAUSE|FOLLOW_STOP"}` — FOLLOW-04/01/02에서 발행.
+    **좌표를 싣지 않는다**: 사서 좌표는 BE가 알 수 없고, Jetson 안에서 AI가 `/target_position`
+    (PointStamped, frame=map, 미터)으로 5~10Hz 연속 발행 → EM SLAM Nav가 직접 구독(ROS2-09).
+    FOLLOW_START는 "그 토픽을 nav 목표로 소비 시작하라"는 모드 전환, PAUSE/STOP은 해제
+    (2026-08-03 신규 — **EM·AI 수신측 미구현**, 계약 합의 필요)
   ⚠️ EM 미확정 임시 계약 — 추종·RFID 재인식 포함 확정 시 EM·API 명세서와 동시 갱신할 것
 - **MQTT** (BE→라즈베리파이 슬롯 LED): `cmd/lit/led` — `{"slot_id":[1,3,5]}`
   - **카트의 구역이 바뀌는 순간에만** 발행 (`SlotLedService`). 같은 구역에 머무는 동안은 발행하지 않는다.

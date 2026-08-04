@@ -23,6 +23,16 @@
   object-fit: cover;
 }
 
+// 지도 정보를 받는 동안의 자리 표시 — 바탕이 없으면 카트·구역을 얹을 수 없다
+.loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  font-size: 14px;
+  color: $text-muted;
+}
+
 .zone {
   position: absolute;
   border: 2px dashed transparent;

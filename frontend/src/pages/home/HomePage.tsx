@@ -4,7 +4,9 @@ import { useNavigate } from 'react-router';
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { CartControlCard } from '@/features/cart-control/ui/CartControlCard';
 import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
-import { ZONE_NAMES, zoneLabel } from '@/features/cart-map/model/zones';
+import { zoneLabel } from '@/features/cart-map/model/zones';
+import { useZoneName, zoneIdOf } from '@/features/cart-map/model/zoneStore';
+import { isSlotForZone } from '@/features/slot-board/model/slotTargeting';
 import { TaskProgressCard } from '@/features/sorting-task/ui/TaskProgressCard';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
 import { DEMO_CART_ID } from '@/shared/config/cart';
@@ -27,6 +29,7 @@ export function HomePage() {
   const runState = useCartControlStore((state) => state.runState);
   // 지도 좌표는 홈에서 쓰지 않으므로, 좌표 갱신이 홈 전체 리렌더로 번지지 않게 필요한 값만 고른다
   const cartZone = useCartMapStore((state) => state.cartZone);
+  const zoneName = useZoneName(cartZone);
   const isMoving = useCartMapStore((state) => state.isMoving);
   const cartStatus = useCartMapStore((state) => state.cartStatus);
   const { data: slots } = useListSlots(DEMO_CART_ID);
@@ -37,10 +40,9 @@ export function HomePage() {
   const badge = CART_BADGE[following ? 'following' : cartActive ? 'moving' : 'idle'];
   // 이동 중(구역 밖)이면 null — 구역 표시 대신 이동 중 문구를 쓴다
   const currentArea = cartZone === null ? null : zoneLabel(cartZone);
-  const areaBookCount =
-    currentArea === null
-      ? 0
-      : (slots?.filter((slot) => slot.book?.zoneName === currentArea).length ?? 0);
+  // 구역 이름이 아니라 구역 id로 맞춘다 (slotTargeting 참고)
+  const currentZoneId = cartZone === null ? null : zoneIdOf(cartZone);
+  const areaBookCount = slots?.filter((slot) => isSlotForZone(slot, currentZoneId)).length ?? 0;
 
   return (
     <>
@@ -73,7 +75,7 @@ export function HomePage() {
                 ) : (
                   <>
                     {currentArea}
-                    <span className={styles.heroZoneName}>{ZONE_NAMES[cartZone]}</span>
+                    <span className={styles.heroZoneName}>{zoneName}</span>
                   </>
                 )}
               </h2>
