@@ -21,6 +21,9 @@ export function SearchPage() {
   const [selected, setSelected] = useState<Slot | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 검색어를 아직 안 쳤으면 "없어요"는 거짓말이다 — 안 찾아본 것과 찾았는데 없는 것은 다르다
+  const searching = query.trim() !== '';
+
   const results = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     return (slots ?? []).filter((slot) => {
@@ -91,7 +94,7 @@ export function SearchPage() {
             </button>
           ))
         ) : (
-          <div className={styles.emptyResult}>찾으시는 책이 카트에 없어요.</div>
+          searching && <div className={styles.emptyResult}>찾으시는 책이 카트에 없어요.</div>
         )}
       </div>
       {selected && <SlotDetailModal slot={selected} onClose={() => setSelected(null)} />}
