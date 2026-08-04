@@ -71,6 +71,17 @@
   }
 }
 
+// 카트와 연결이 끊김 — 다른 상태와 달리 사서가 조치해야 하는 상황이라 경고 톤을 쓴다
+.offline {
+  background: $danger-bg;
+  color: $danger-text;
+
+  .dot {
+    background: #d08278;
+    animation: pulse 1.6s infinite;
+  }
+}
+
 .dot {
   margin-right: $spacing-sm;
   display: inline-block;
