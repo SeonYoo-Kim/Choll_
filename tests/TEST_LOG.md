@@ -15,6 +15,192 @@
 
 ---
 
+## 2026-08-04 18:20 — ⏸ EM Phase 2(AI 카메라 추종) Stage 0 중단: AI 조회창 ±29° 라이다 유효율 8.6% 실측 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `04fd0be`(origin 푸시됨). 워킹트리 변경 없음.
+- **범위**: Phase 2(AI 카메라 추종) **Stage 0 사전점검만.**
+  **브릿지·teleop·AI 스택은 한 번도 기동하지 않았다** → `/cmd_vel` 구독자 0,
+  **모터 경로는 이번 세션에 열린 적이 없다**(전 구간 모터 위험 0).
+- **중단 사유**: 사용자가 라이다 장착 위치를 변경 → 아래 섹터 측정치는 **구 위치 기준이며 무효**.
+  재개 시 재측정 필요.
+
+### ✅ 통과한 것
+
+| 항목 | 명령 | 결과 |
+|---|---|---|
+| 권한(재부팅 후 네이티브) | `id -nG` | `dialout` · `video` 포함 ✅ |
+| 장치 | `ls /dev/serial/by-id/`, `ls /dev/video*` | X4Pro(CP2102→ttyUSB0), STM32(ST-LINK→ttyACM0), Brio 100(video0/1) ✅ |
+| systemd 경합 | `systemctl is-enabled/is-active ydlidar.service` | `disabled` / `inactive` ✅ (이전 세션 무력화 유지) |
+| 패키지 shadow | `ros2 pkg prefix` ×4 | 드라이버·bringup = `embedded/Lidar/install`, 브릿지 = `ros2_ws/install`, **AI = `~/Choll/ai/install`** (stale `~/Choll/ros2_ws` 아님) ✅ |
+| 라이다 기동 | `ros2 launch choll_slam_bringup lidar.launch.py` | 노드 2개(`ydlidar_ros2_driver_node`, `base_link_to_laser_frame`) ✅ |
+| `/scan` 주기 | `ros2 topic hz /scan` | **11.445 / 11.462 / 11.449 Hz** (규격 6~12) ✅ |
+| `/scan` 헤더 | `ros2 topic echo /scan --once --no-arr` | `frame_id=laser_frame`, `angle_min/max=∓π`, 430빔, `inc=0.8392°`, `range_min=0.12`, `range_max=10.0` ✅ |
+| TF | `tf2_echo base_link laser_frame` | `[0, 0, 0.20]`, RPY 0 ✅ (z=0.20은 TODO-실측 placeholder — Phase 3-1 대상. control_node는 TF를 쓰지 않으므로 Phase 2에는 무영향) |
+| 정리 | `kill -INT` → `pgrep` | 라이다·static TF 종료, `ttyUSB0` 점유자 **0** ✅ |
+
+### 🔴 새로 실측한 것 — AI 조회창의 라이다 유효율 (구 라이다 위치 기준)
+
+`control_node`는 `camera_fov_deg=58.0` → 방위각 **±29° 창**에서만 거리를 조회한다
+(`min_valid_range_in_span`, `control_node.py:319`). 40스캔 · 빔별 유효율(유효=finite ∧ 0.12≤r≤10.0)로 실측:
+
+| 구간 | 유효율>0.6 빔 | 유효 거리 중앙값 (최소/중간/최대) |
+|---|---|---|
+| **AI 조회창 ±29°** | **6 / 70 = 8.6%** | 0.598 / 0.745 / 1.029 m |
+| 전방 180° | 47 / 214 = 22% | 0.300 / 0.932 / 6.606 m |
+| 후방 좌 (−180..−90°) | 39 / 107 = 36% | 0.333 / 6.316 / 7.083 m |
+| 후방 우 (+90..+180°) | 60 / 109 = 55% | 0.253 / 3.691 / 6.395 m |
+
+0.5 m 미만 **상시 빔**(자기 구조물 후보, std ≤ 0.003 m로 매우 안정):
+
+```
+전방:  -57.48°  0.300 m (유효율 0.70)      -53.29°  0.431 m (0.97)
+후방좌: -134.69° 0.334 / -133.85° 0.333 / -133.01° 0.340 m
+후방우: +93.57° 0.253 / +94.41° 0.254 / +95.24° 0.255 / +96.08° 0.256 / +96.92° 0.260 m
+```
+
+조회창 5° 빈 프로파일 — **정면 `−5..0°`와 `0..+5°`에 유효 빔 0개**:
+
+```
+ -30..-25° 없음   -25..-20° 없음   -20..-15° n=1 0.982
+ -15..-10° n=2 1.029~3.013        -10.. -5° n=1 1.742
+  -5.. +0° 없음  ← 정면            +0.. +5° 없음  ← 정면
+  +5..+10° n=2 0.598~0.669        +10..+15° n=1 0.681
+ +15..+20° 없음                   +20..+25° n=2 0.661~0.688
+ +25..+30° n=2 0.745~0.930
+```
+
+**의미**: 이 상태로 Phase 2를 돌리면 사람이 정면에 서도 거리 조회가 `None`을 반환하고
+`control_node.py:344`가 `linear_vel = 0.0`으로 고정한다 → **전진 없이 제자리 회전만 하는 상태.**
+Phase 2 실패 플레이북 1행과 정확히 일치하는 증상을, 모터를 켜기 전에 잡아냈다.
+
+**⚠️ 미판별 (중단 지점)**: 무효 빔이 ①카트 구조물 차폐(`range=0.0`) ②`>range_max`(그 방향이 빈 공간)
+③NaN 중 무엇인지 **원시값으로 구분하는 단계에서 중단**됐다. 판별 결과에 따라 대응이 갈린다.
+- `0.0` 다수 → 구조물 차폐 → **라이다 장착 위치·높이 변경**이 필요(파라미터로 해결 불가)
+- `>max` 다수 → 그 방향이 비어 있을 뿐 → 사람을 1.5 m 정면에 세워 재측정하면 정상일 수 있음
+
+또한 `x4pro.yaml:54 ignore_array: ""`가 비어 있어 위 상시 빔들이 그대로 통과한다
+(`range_min: 0.12`를 넘으므로). **매핑(Phase 3) 전에는 반드시 마스킹**해야 카트 구조물이
+지도·costmap에 영구 장애물로 박히지 않는다.
+
+### 미검증 (이번 세션에 손대지 않음)
+
+AI 스택 8노드 기동 · 타겟 등록(FE/REST/CLI 3경로) · `lidar_mirrored`·`lidar_yaw_offset_deg`
+캘리브레이션 · `/cmd_vel` 실측 · 브릿지 연결 · 바퀴 회전 · 바닥 추종 주행 · AI Ctrl+C 정지 지연.
+
+<details>
+<summary>원본 출력 (Stage 0 전체)</summary>
+
+증거 파일: `ros2_ws/log/phase2_20260804/` — `S0_env.log`, `S0_prefix.log`, `S0_scan_hz.log`,
+`S0_sector.log`, `S0_lidar.log`, `env_lidar.sh`, `launch_lidar.sh`
+(`.gitignore`의 `log/`로 커밋 제외 — Jetson 로컬에만 존재)
+
+```
+== date: 2026-08-04T18:06:58+09:00
+== branch: em/feature/motor-Lidar-integrated @ 04fd0be
+== id: ssafy adm dialout cdrom sudo audio dip video plugdev render i2c lpadmin gdm sambashare weston-launch gpio jtop
+== ROS_DOMAIN_ID: '<unset=0>'
+
+== ydlidar.service ==
+disabled
+inactive
+
+== devices ==
+crw-rw----+ 1 root video 81, 0 Jan  1  1970 /dev/video0
+crw-rw----+ 1 root video 81, 1 Jan  1  1970 /dev/video1
+lrwxrwxrwx 1 root root 13 Jan  1  1970 usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0 -> ../../ttyUSB0
+lrwxrwxrwx 1 root root 13 Jan  1  1970 usb-STMicroelectronics_STM32_STLink_066FFF525771555067235049-if02 -> ../../ttyACM0
+lrwxrwxrwx 1 root root 7 Jan  1  1970 /dev/ydlidar -> ttyUSB0
+
+== running ROS procs ==   (기동 전)
+(none)
+== free ==
+               total        used        free      shared  buff/cache   available
+Mem:           7.4Gi       2.0Gi       2.4Gi        37Mi       3.1Gi       5.2Gi
+== nvpmodel ==
+pmode:0002
+
+== pkg prefix ==
+ydlidar_ros2_driver : /home/ssafy/S15P11C101/embedded/Lidar/install/ydlidar_ros2_driver
+choll_slam_bringup  : /home/ssafy/S15P11C101/embedded/Lidar/install/choll_slam_bringup
+stm_serial_bridge   : /home/ssafy/S15P11C101/ros2_ws/install/stm_serial_bridge
+person_follow_robot : /home/ssafy/Choll/ai/install/person_follow_robot
+
+== ros2 node list ==
+/base_link_to_laser_frame
+/ydlidar_ros2_driver_node
+
+== /scan hz (10s) ==
+average rate: 11.445   min: 0.076s max: 0.101s std dev: 0.00595s window: 85
+average rate: 11.462   min: 0.076s max: 0.101s std dev: 0.00598s window: 97
+average rate: 11.449   min: 0.073s max: 0.101s std dev: 0.00619s window: 109
+
+== /scan 헤더 ==
+frame_id: laser_frame
+angle_min: -3.1415927410125732     angle_max: 3.1415927410125732
+angle_increment: 0.014646119438111782   scan_time: 0.09201499819755554
+range_min: 0.11999999731779099     range_max: 10.0
+ranges: length 430
+
+== TF base_link -> laser_frame ==
+- Translation: [0.000, 0.000, 0.200]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.000]
+
+== 섹터 분석 (40 스캔, 430 빔, inc=0.8392°) ==
+=== AI 조회창 (camera_fov 58° → ±29°): -29° ~ 29°  (70 빔) ===
+  유효율>0.6 빔: 6/70
+  거리 중앙값 최소 0.598 m / 중간 0.745 m / 최대 1.029 m
+  ✅ 0.5 m 미만 상시 빔 없음
+=== 전방 180°: -90° ~ 90°  (214 빔) ===
+  유효율>0.6 빔: 47/214
+  거리 중앙값 최소 0.300 m / 중간 0.932 m / 최대 6.606 m
+  🔴 0.5 m 미만 상시 빔 2개:
+      -57.48°  중앙값 0.300 m  유효율 0.70  std 0.0017
+      -53.29°  중앙값 0.431 m  유효율 0.97  std 0.0025
+=== 후방 좌: -180° ~ -90°  (107 빔) ===
+  유효율>0.6 빔: 39/107
+  거리 중앙값 최소 0.333 m / 중간 6.316 m / 최대 7.083 m
+  🔴 0.5 m 미만 상시 빔 3개:
+     -134.69°  중앙값 0.334 m  유효율 0.85  std 0.0019
+     -133.85°  중앙값 0.333 m  유효율 0.82  std 0.0019
+     -133.01°  중앙값 0.340 m  유효율 0.68  std 0.0022
+=== 후방 우: 90° ~ 180°  (109 빔) ===
+  유효율>0.6 빔: 60/109
+  거리 중앙값 최소 0.253 m / 중간 3.691 m / 최대 6.395 m
+  🔴 0.5 m 미만 상시 빔 5개:
+      +93.57°  중앙값 0.253 m  유효율 0.93  std 0.0008
+      +94.41°  중앙값 0.254 m  유효율 1.00  std 0.0012
+      +95.24°  중앙값 0.255 m  유효율 1.00  std 0.0010
+      +96.08°  중앙값 0.256 m  유효율 1.00  std 0.0014
+      +96.92°  중앙값 0.260 m  유효율 0.78  std 0.0020
+
+=== 조회창 5° 빈 프로파일 ===
+   -30.. -25°  유효 빔 없음
+   -25.. -20°  유효 빔 없음
+   -20.. -15°  n= 1  최소 0.982  중앙 0.982  최대 0.982
+   -15.. -10°  n= 2  최소 1.029  중앙 3.013  최대 3.013
+   -10..  -5°  n= 1  최소 1.742  중앙 1.742  최대 1.742
+    -5..  +0°  유효 빔 없음
+    +0..  +5°  유효 빔 없음
+    +5.. +10°  n= 2  최소 0.598  중앙 0.669  최대 0.669
+   +10.. +15°  n= 1  최소 0.681  중앙 0.681  최대 0.681
+   +15.. +20°  유효 빔 없음
+   +20.. +25°  n= 2  최소 0.661  중앙 0.688  최대 0.688
+   +25.. +30°  n= 2  최소 0.745  중앙 0.930  최대 0.930
+
+== 종료 확인 ==
+--- 브릿지/teleop (있어선 안 됨) ---
+  (없음 — 모터 경로는 한 번도 열리지 않았음)
+✅ 9667(static_tf) 종료
+--- 남은 ROS 프로세스 ---
+  없음
+ttyUSB0 점유자 수: 0
+```
+
+</details>
+
+---
+
 ## 2026-08-04 — ✅ EM 통합브랜치 실기: WASD 수동주행 재검증 + 펌웨어 통신 타임아웃 5초 실측 + 데드존 실측 (relu 실기 / Claude 실행·기록)
 
 - **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.

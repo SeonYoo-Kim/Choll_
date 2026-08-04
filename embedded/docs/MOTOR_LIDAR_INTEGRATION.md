@@ -252,15 +252,63 @@ ros2 run cart_teleop keyboard_teleop
 
 ### Phase 2 — AI 카메라 추종 (지도 없이)
 
+> **⏸ 2026-08-04 Stage 0에서 중단** (사용자가 라이다 위치 변경). 상세 실행 계획·재개 지점은
+> `~/.claude/plans/readme-step-validated-breeze.md`, 실측 기록은 `tests/TEST_LOG.md` 18:20 항목.
+>
+> 🔴 **Stage 0에서 블로커 발견**: AI는 `camera_fov_deg=58°` → **±29° 창**에서만 거리를 조회하는데,
+> 그 창의 라이다 유효율이 **6/70 = 8.6%**이고 **정면 −5°~+5°에 유효 빔이 0개**였다(구 위치 기준).
+> 이 상태면 사람이 정면에 서도 `linear_vel=0.0`으로 고정돼 **전진 없이 회전만** 한다.
+> 무효 빔이 구조물 차폐(`0.0`)인지 range 초과(`>10 m`)인지 **판별 미완** — 재개 시 이것부터.
+
 **목표**: 사람을 카메라로 인식·추종해 카트가 따라온다.
 
 ```
 카메라 → YOLO/ByteTrack/Re-ID → control_node → /cmd_vel → stm_serial_bridge → STM32
                                       ↑
-                            /scan (거리 추정용, AI가 구독)
+                            /scan (AI가 구독 — 선속도의 필수 입력)
 ```
 
 **선행**: Phase 1 통과(같은 `/cmd_vel` 경로를 그대로 재사용) · **teleop 종료** · SLAM/Nav2 미실행.
+
+#### 🔴 조사로 확정된 정정 사항 (2026-08-04, 코드 근거 있음)
+
+| # | 기존 서술 | 실제 |
+|---|---|---|
+| 1 | `/scan`은 "거리 추정용" 보조 입력 | **필수.** 거리 실패 시 `linear_vel=0.0`인데 **각속도는 계속 발행** → 라이다 없으면 **제자리 회전만** (`control_node.py:339-357`) |
+| 2 | `choll-fe`로 띄우면 추종 시작 | 별칭이 `auto_select:=false` → **`/select_target` 수신 전까지 절대 안 움직인다** (`reid_node.py:343-346`). 등록 입구는 `/select_target`(std_msgs/Int32) **단 하나**, 서비스·액션 없음 |
+| 3 | 속도는 AI가 관리 | AI 상한 `max_linear_vel=0.5 / max_angular_vel=1.0`이 **런치 dict에 하드코딩**. 런치 인자에 없고 파라미터 콜백도 없어 `ros2 param set`도 무효 → **브릿지 cap이 유일한 속도 방어선** |
+
+**속도 봉투**: `wheel_speed_limiter.py:62-67`이 좌우 **비율을 보존한 채 비례 축소**하므로
+`speed_profile:=slow`(cap 2.0)에서 실효 **직진 0.130 m/s · 회전 0.684 rad/s**
+= Phase 1 실기 검증 봉투와 사실상 동일. **속도 안전은 브릿지 하나로 봉인된다.**
+
+**예측 거동** (PWM = 10 × rad/s, PWM<20 데드존, linear kp=0.5):
+거리 ≥1.26 m → 0.130 m/s 전진 / 1.00~1.26 m → 데드존(안 움직임) /
+**<0.74 m → 0.130 m/s 후진**(사용자 결정: 코드가 아니라 절차로 막는다 — 1.2 m 이상 유지, 후방 2 m 확보).
+순수 회전은 화면 중심 85% 이탈 전엔 데드존 → **매끄러운 추종이 아니라 계단식(bang-bang) 추종**이 정상.
+
+**등록 3경로** (모두 `/select_target`으로 수렴 — FE가 안 되면 즉시 대체):
+① FE 웹 클릭 ② `curl -X POST http://your-server.example.com/api/carts/1/follow/target -d '{"trackId":N}'`
+③ `ros2 topic pub --once /select_target std_msgs/msg/Int32 "{data: N}"`
+track id는 `ros2 topic echo /person_tracks --once`로 확인.
+등록 성공 판정 2줄: `Memory Bank initialized (N features)` → `Switched to normal tracking mode`.
+등록 시 **2~3 m 거리·전신·화면 중앙** — bbox가 화면 면적 50% 초과 또는 좌우 4 px 이내로 잘리면
+크롭 게이트에 걸려 `Memory Bank initialization failed`.
+
+**🔴 ROS 비상정지는 존재하지 않는다**
+- `cart_teleop`은 외부 `/cmd_vel` 발행자를 감지해 **DISARMED**가 되어 non-zero를 못 낸다.
+  게다가 DISARMED 상태에서도 20 Hz로 zero를 계속 발행해 AI 명령과 경합한다 → **동시 실행 금지.**
+- `ros2 param set stm_serial_bridge max_wheel_rad_s ...`는 **성공을 반환하지만 효과가 없다**
+  (`stm_serial_bridge_node.py:167-176` 값 캐시, 콜백 미구현). 안전 조치로 착각 금지.
+- 유효한 정지는 **AI 종료 → 브릿지 watchdog 0.5 s** 하나뿐.
+  **종료 순서: ① AI Ctrl+C → ② `/stm/pwm` 0 확인 → ③ 브릿지 Ctrl+C → ④ 라이다.**
+  브릿지를 먼저 끄면 STM32가 최대 5초간 마지막 속도를 유지한다(약 0.65 m).
+
+**무해하지만 알아둘 것**: `motor_node`가 함께 떠서 `/wheel_speed_cmd`를 10 Hz로 발행하지만
+구독자 0이라 무해. 단 이 경로는 브릿지 cap을 우회하고 `wheel_separation_m: 0.30`(실측 0.38과 불일치)
+→ **micro-ROS agent를 절대 함께 띄우지 말 것.**
+`~/Choll/ros2_ws/install`에 stale `person_follow_robot`이 있으니 **소싱 금지**
+(`ros2 pkg prefix person_follow_robot`이 `~/Choll/ai/install`인지 확인).
 
 ```bash
 # [터미널 1] 라이다 드라이버만 (AI가 /scan을 구독한다 — SLAM은 불필요)
