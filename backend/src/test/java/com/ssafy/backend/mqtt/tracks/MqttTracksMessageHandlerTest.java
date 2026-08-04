@@ -7,7 +7,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import static org.mockito.Mockito.when;
+
 import com.ssafy.backend.websocket.CartEventPublisher;
+import com.ssafy.backend.websocket.VideoRelayHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,11 +28,23 @@ class MqttTracksMessageHandlerTest {
 	@Mock
 	private CartEventPublisher eventPublisher;
 
+	@Mock
+	private VideoRelayHandler videoRelayHandler;
+
 	private MqttTracksMessageHandler handler;
 
 	@BeforeEach
 	void setUp() {
-		handler = new MqttTracksMessageHandler(new ObjectMapper(), eventPublisher, 1L);
+		handler = new MqttTracksMessageHandler(
+			new ObjectMapper(),
+			eventPublisher,
+			videoRelayHandler,
+			1L
+		);
+	}
+
+	private void givenViewersWatching() {
+		when(videoRelayHandler.hasViewers(1L)).thenReturn(true);
 	}
 
 	private Message<String> message(String payload) {
@@ -39,8 +54,22 @@ class MqttTracksMessageHandlerTest {
 	}
 
 	@Test
+	@DisplayName("영상 시청자가 없으면 중계하지 않는다 (선택 모달 밖 스팸 차단)")
+	void skipsRelayWhenNoVideoViewers() {
+		when(videoRelayHandler.hasViewers(1L)).thenReturn(false);
+
+		handler.handle(message(
+			"{\"image_width\":640,\"image_height\":480,"
+				+ "\"tracks\":[{\"id\":3,\"x\":120,\"y\":40,\"w\":180,\"h\":360}]}"
+		));
+
+		verify(eventPublisher, never()).publish(anyLong(), anyString(), any());
+	}
+
+	@Test
 	@DisplayName("정상 tracks 페이로드는 TRACKS_UPDATED 이벤트로 중계된다")
 	void relaysValidTracks() {
+		givenViewersWatching();
 		handler.handle(message(
 			"{\"image_width\":640,\"image_height\":480,"
 				+ "\"tracks\":[{\"id\":3,\"x\":120,\"y\":40,\"w\":180,\"h\":360}]}"
@@ -52,6 +81,7 @@ class MqttTracksMessageHandlerTest {
 	@Test
 	@DisplayName("tracks가 빈 배열이어도 중계된다 (검출 없음 상태 표현)")
 	void relaysEmptyTracks() {
+		givenViewersWatching();
 		handler.handle(message("{\"image_width\":640,\"image_height\":480,\"tracks\":[]}"));
 
 		verify(eventPublisher).publish(eq(1L), eq("TRACKS_UPDATED"), any());
@@ -60,6 +90,7 @@ class MqttTracksMessageHandlerTest {
 	@Test
 	@DisplayName("tracks 배열이 없으면 무시한다")
 	void ignoresMissingTracks() {
+		givenViewersWatching();
 		handler.handle(message("{\"image_width\":640}"));
 
 		verify(eventPublisher, never()).publish(anyLong(), anyString(), any());
@@ -68,6 +99,7 @@ class MqttTracksMessageHandlerTest {
 	@Test
 	@DisplayName("JSON이 아니면 무시한다")
 	void ignoresMalformedJson() {
+		givenViewersWatching();
 		handler.handle(message("not-json"));
 
 		verify(eventPublisher, never()).publish(anyLong(), anyString(), any());
