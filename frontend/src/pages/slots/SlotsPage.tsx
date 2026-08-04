@@ -12,7 +12,7 @@ import { DEMO_CART_ID } from '@/shared/config/cart';
 
 import styles from './SlotsPage.module.scss';
 
-type SlotFilter = 'all' | 'book' | 'empty' | 'error' | 'currentArea';
+type SlotFilter = 'all' | 'book' | 'empty' | 'currentArea';
 
 /** 슬롯 관리 — 12개 슬롯 보드 + 상태 필터 + 슬롯 상세. */
 export function SlotsPage() {
@@ -36,7 +36,6 @@ export function SlotsPage() {
       all: allSlots.length,
       book: allSlots.filter((s) => s.status === SlotStatus.OCCUPIED).length,
       empty: allSlots.filter((s) => s.status === SlotStatus.EMPTY).length,
-      error: allSlots.filter((s) => s.status === SlotStatus.RECOGNITION_FAILED).length,
     }),
     [allSlots],
   );
@@ -47,8 +46,6 @@ export function SlotsPage() {
         return allSlots.filter((s) => s.status === SlotStatus.OCCUPIED);
       case 'empty':
         return allSlots.filter((s) => s.status === SlotStatus.EMPTY);
-      case 'error':
-        return allSlots.filter((s) => s.status === SlotStatus.RECOGNITION_FAILED);
       case 'currentArea':
         // 구역 밖이면 이 필터가 성립하지 않는다(위 effectiveFilter에서 이미 걸러지지만 방어).
         // 구역 이름이 아니라 구역 id로 맞춘다 (slotTargeting 참고)
@@ -64,7 +61,6 @@ export function SlotsPage() {
     { id: 'all', label: `전체 ${counts.all}` },
     { id: 'book', label: `책 있음 ${counts.book}` },
     { id: 'empty', label: `비어 있음 ${counts.empty}` },
-    { id: 'error', label: `인식 실패 ${counts.error}` },
     // 구역 밖에서는 현재 구역 필터가 의미 없으므로 칩을 감춘다
     ...(currentArea === null ? [] : [{ id: 'currentArea' as const, label: currentArea }]),
   ];

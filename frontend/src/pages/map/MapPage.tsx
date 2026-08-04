@@ -42,13 +42,7 @@ export function MapPage() {
   // 홈의 '이동 취소'와 같은 동작 — 추종·목적지 이동을 가리지 않고 멈춘다
   const stopCart = useStopCart(DEMO_CART_ID);
 
-  // 홈 배지와 같은 우선순위 — 사서를 따라가는 중이면 좌표가 움직이는지와 무관하게 추종으로 표시한다
-  const badge = following
-    ? { label: '사서를 따라가는 중', tone: styles.following }
-    : cartActive
-      ? { label: '카트 이동 중', tone: styles.moving }
-      : { label: '카트 정지', tone: styles.idle };
-
+  // 상단 배지는 두지 않는다 — 바로 아래 '이동 안내' 카드가 같은 내용을 더 자세히 말한다
   const guide = following
     ? '사서를 따라가는 중'
     : followPaused
@@ -66,10 +60,6 @@ export function MapPage() {
           <p className={styles.overline}>LIVE CART LOCATION</p>
           <h1 className={styles.pageTitle}>도서관 지도</h1>
           <p className={styles.pageDesc}>구역을 선택해 카트의 다음 목적지를 정해보세요.</p>
-        </div>
-        <div className={`${styles.statusBadge} ${badge.tone}`}>
-          <span className={styles.dot} />
-          {badge.label}
         </div>
       </div>
       <div className={styles.mapArea}>
