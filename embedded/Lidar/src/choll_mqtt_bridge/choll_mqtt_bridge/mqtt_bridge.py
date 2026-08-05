@@ -73,8 +73,19 @@ class MqttBridge(Node):
     # ── MQTT 측 (paho 네트워크 스레드에서 콜백 실행) ──────────────────
 
     def _make_mqtt_client(self) -> mqtt.Client:
-        """Paho 클라이언트를 만들고 백그라운드 접속 루프를 시작한다."""
-        client = mqtt.Client(client_id=str(self.get_parameter("client_id").value))
+        """Paho 클라이언트를 만들고 백그라운드 접속 루프를 시작한다.
+
+        paho 2.x는 첫 인자로 ``callback_api_version``을 받는다. 기본값이
+        ``VERSION1``이라 인자를 생략해도 지금은 동작하지만 DeprecationWarning이
+        뜨고 향후 제거될 수 있으므로 명시한다. 이 노드의 콜백 시그니처는
+        VERSION1 규약(``rc``/``flags``)이므로 VERSION1을 고정한다.
+        paho 1.x에는 ``CallbackAPIVersion``이 없어 인자를 넘기면 실패한다.
+        """
+        client_id = str(self.get_parameter("client_id").value)
+        if hasattr(mqtt, "CallbackAPIVersion"):  # paho 2.x
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id)
+        else:  # paho 1.x
+            client = mqtt.Client(client_id=client_id)
         client.username_pw_set(
             str(self.get_parameter("username").value),
             str(self.get_parameter("password").value),

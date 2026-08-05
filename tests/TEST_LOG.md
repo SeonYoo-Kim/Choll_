@@ -15,6 +15,217 @@
 
 ---
 
+## 2026-08-05 09:10 — ✅ EM Jetson 실기: choll_mqtt_bridge 실브로커 E2E + Phase 2 조회창 재측정으로 어제 블로커 반증 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `d8f2583`(노트북 커밋 2개 머지 직후).
+  라이다는 **쫄래쫄래 선반카트에 장착된 실제 위치** (오링카 아님).
+- **범위**: 머지·빌드 → MQTT 브릿지 실브로커 검증 → Phase 2 Stage 0 재측정.
+  **브릿지(STM)·teleop·AI 스택 미기동** → `/cmd_vel` 구독자 0, **모터 경로 열린 적 없음**(모터 위험 0).
+
+### 🔴 어제(2026-08-04 18:20) 항목의 측정치는 무효 — 다른 위치에서 측정됨
+
+사용자 확인: 어제 측정 시 팀원들이 카트를 다른 곳으로 옮긴 상태였다. **라이다 장착 위치는 바뀌지 않았다.**
+같은 측정을 실제 카트 위치에서 재실행한 결과가 정반대다.
+
+| 구간 | 어제 (다른 장소) | **오늘 (실제 카트 위치)** |
+|---|---|---|
+| **AI 조회창 ±29°** | 유효율>0.6 빔 6/70 = **8.6%** | **valid 71.4%** (2800 샘플 중) |
+| 정면 −5°~+5° | 유효 빔 **0개** | **전 빔 valid, 약 5.37 m** |
+| 전방 180° | 22% | **61.5%** |
+| 전체 360° | — | **65.5%** |
+
+원시값 분류(40스캔): **`above_max`·`inf`·`NaN` 0건.** 전부 `valid` 아니면 `zero`(산발적 드롭아웃).
+즉 "그 방향이 비어서 range_max를 넘었다"가 아니고, "구조물이 창을 막았다"도 아니다.
+→ **어제 기록한 블로커는 카트 위치 문제였고, 실제 장착 형상에서는 존재하지 않는다.**
+
+### ✅ 카트 자기 구조물(기둥) 위치 확정 — 조회창 밖
+
+```
+-75.85..-72.57deg   0.130 m  (5~6 빔, 3회 측정 모두 재현)
++75.03..+75.85deg   0.150 m  (2 빔)
+```
+
+메모리 실측(2026-08-03: −80..−70° 0.130 m / +76..+83° 0.140 m)과 일치.
+**AI 조회창 ±29°에서 46° 이상 이격** → Phase 2 무영향.
+단 `x4pro.yaml:54 ignore_array: ""`가 비어 있어 `range_min: 0.12`를 통과하므로
+**매핑(Phase 3) 전에는 반드시 마스킹**해야 지도·costmap에 영구 장애물로 박히지 않는다.
+
+### 🔴 새로 실측 확정 — 카메라↔라이다 각도 정합 (`lidar_mirrored`)
+
+사람을 세워 3회 측정. 기준 상태 대비 **새로 생긴 클러스터**로 사람을 식별했다.
+
+| 시나리오 | 측정 클러스터 | 중심 | 거리 |
+|---|---|---|---|
+| 사람 없음(기준) | 해당 구간 4.0~5.4 m | — | — |
+| 카메라 정면 1.5 m | `−7.79..+2.87°` (14빔) | **≈ −2.5°** | **1.571 m** |
+| 카메라 오른쪽 1 m 이동 | `+20.91..+31.57°` (14빔) | **≈ +26.2°** | **1.94 m** |
+
+**판정 1 — `lidar_yaw_offset_deg = 0.0`이 맞다.** 정면 클러스터 중심이 −2.5°
+(1.5 m에서 측면 6.5 cm = 사람이 정확히 중앙에 서지 않은 정도). 라이다 0° ≈ 카메라 광축.
+클러스터 폭 11.5°(14빔×0.82°)는 1.571 m에서 몸통 0.31 m에 해당(`2·atan(0.155/1.571)=11.3°`) — 계산과 일치.
+
+**판정 2 — `lidar_mirrored = True`가 맞다 (현재 런치값 유지).**
+`control_node.camera_bearing_to_lidar_angle`은 `bearing = -center_x_norm·(fov/2)` 후
+`mirrored`면 부호 반전. 화면 오른쪽(`center_x_norm=+1`) → `mirrored=True`면 **+29°**.
+실측은 카메라 오른쪽 사람이 **+26.2°** → 부호 일치. `mirrored=False`면 −29°로 반대편을 조회하게 된다.
+
+⚠️ **정정**: 나(Claude)는 드라이버가 `inverted: false`·`reversion: false`인 것만 보고
+"`lidar_mirrored=True`는 오링카 기준이라 틀렸을 것"이라고 추론해 AI 파트 협의가 필요하다고 적었다.
+**실측이 이를 반증했다** — 협의 불필요, 현재 값이 정답이다. 스캔이 REP 103 대비 좌우 반전인 이유는
+라이다 장착 방향(뒤집힘)으로 추정되나 원인은 미확정이며, Phase 2 진행에는 무관하다.
+
+기하 자기일관성 교차검증: +26.2°·1.94 m → 측면 0.86 m·전방 1.74 m("1 m 이동"과 일치),
+화면 정규화 0.90 → `0.90×29° = +26.1°`.
+
+→ **Phase 2의 블로커 2건(조회창 차폐·각도 정합) 모두 해소.** Stage 1(AI 스택 단독 관측) 진행 가능.
+
+### ✅ choll_mqtt_bridge 실브로커 E2E (README 검증 절차 + 확장)
+
+노트북 항목(바로 아래)에 "엔드투엔드 스모크는 Jetson STEP에서 예정"으로 남아 있던 항목을 닫았다.
+
+| 경로 | MQTT 입력 | 결과 |
+|---|---|---|
+| 접속 | — | `MQTT 접속·구독 완료: cmd/move/cart (QoS1)` ✅ |
+| CANCEL | `{"requestId":"test-1","command":"CANCEL"}` | `/cart/cancel` → `data: test-1` ✅ |
+| MOVE(미터) | `{"requestId":"move-1","command":"MOVE","target":{"x":1.5,"y":-0.8}}` | `/cart/target_pose` frame=map, (1.5, −0.8, 0), w=1 ✅ |
+| MOVE(픽셀만) | `{"target":{"pixelX":120,"pixelY":88}}` | `명령 무시: target.x/y가 숫자가 아님` ✅ 의도된 거부 |
+| FOLLOW_START | `{"command":"FOLLOW_START"}` | `FOLLOW 명령 수신 — 계약 미확정이라 보류` ✅ |
+| SELECT_TARGET | `{"command":"SELECT_TARGET","trackId":7}` | `AI fe_bridge_node가 담당하므로 이 브릿지는 무시` ✅ 이중 처리 없음 |
+
+Nav2 미실행 상태라 `/cart/target_pose` 구독자 0 → 발행만 확인, 카트는 움직이지 않음.
+
+### 🔧 paho 2.x 호환 — 코드 1곳 수정
+
+Jetson에는 **PyPI paho-mqtt 2.1.0**이 이미 설치돼 있었다(apt 미설치). apt 후보는 1.5.1이며
+**추가 설치하지 않았다** — 두 버전 공존 시 import 우선순위 혼란.
+paho 2.1.0은 `callback_api_version` 기본값이 `VERSION1`이라 기존 코드도 동작하지만
+DeprecationWarning이 뜨고 향후 제거될 수 있어 `_make_mqtt_client`를 분기로 명시했다
+(`hasattr(mqtt, "CallbackAPIVersion")` → 2.x는 `VERSION1` 명시, 1.x는 기존 호출).
+콜백 시그니처(`rc`/`flags`)가 VERSION1 규약이므로 다른 코드는 무변경. README 의존성 절도 정정.
+
+### ✅ 머지·빌드·회귀
+
+- `git pull` 머지 `d8f2583` — `tests/TEST_LOG.md` 충돌 1건: **양쪽 항목 모두 보존 + 날짜 내림차순**.
+  항목 사이 `---`를 쓰지 않는 파일 관례에 맞춰 어제 내 항목이 넣었던 구분자도 제거.
+- `colcon build --symlink-install` → **6 packages finished [5.30s]**
+- `ruff check` 통과 / `pytest` **52 passed** (choll_nav 31 + choll_mqtt_bridge 21)
+- ⚠️ `bridge_logic.py`·`setup.py`·`test_bridge_logic.py` 3개가 `ruff format --check` 미통과
+  (동일 ruff 0.6.9). 노트북 커밋 원본 상태이므로 대량 재포맷하지 않고 남겨둠 — 노트북에서 처리 권장.
+- 사전 커밋 `00afd31`: `scripts/scan_analyze.py` ruff 23건(ANN/E501/F541/E741) 정리 후 추가.
+
+### 미검증 (다음 단계)
+
+AI 스택 8노드 기동 · 타겟 등록(FE/REST/CLI) · `/target_person`·`/cmd_vel` 실측 ·
+STM 브릿지 연결 · 바퀴 회전 · 바닥 추종 · AI Ctrl+C 정지 지연 · `camera_fov_deg=58.0` 진위.
+
+<details>
+<summary>원본 출력</summary>
+
+증거 파일: `ros2_ws/log/phase2_20260805/` — `S0_probe_baseline.log`,
+`S0_probe_person_center.log`, `S0_probe_person_side.log`, `S0_scan_hz.log`,
+`S1_mqtt_bridge.log`, `S1_cancel_echo.log`, `S1_target_pose_echo.log`,
+`env_lidar.sh`, `launch_lidar.sh`, `launch_mqtt_bridge.sh`
+(`.gitignore`의 `log/`로 커밋 제외 — Jetson 로컬에만 존재)
+
+```
+=== paho ===
+$ python3 -c "import paho.mqtt; print(paho.mqtt.__version__)"
+2.1.0
+$ apt-cache policy python3-paho-mqtt
+  Installed: (none)      Candidate: 1.5.1-1        ← 설치하지 않음
+
+=== colcon build ===
+Summary: 6 packages finished [5.30s]
+$ ros2 pkg executables choll_mqtt_bridge
+choll_mqtt_bridge mqtt_bridge
+
+=== pytest ===
+52 passed in 0.15s      (choll_nav/test_nav_logic.py 31 + choll_mqtt_bridge 21)
+
+=== MQTT 브릿지 (실브로커 your-server.example.com:1883) ===
+== paho: 2.1.0
+[INFO] [mqtt_bridge]: MQTT 브로커 접속 시도: your-server.example.com:1883
+[INFO] [mqtt_bridge]: MQTT 접속·구독 완료: cmd/move/cart (QoS1)
+[INFO] [mqtt_bridge]: CANCEL → /cart/cancel requestId='test-1'
+[INFO] [mqtt_bridge]: MOVE → /cart/target_pose (1.50, -0.80) requestId='move-1' zoneId=None
+[WARN] [mqtt_bridge]: 명령 무시: target.x/y가 숫자가 아님
+[WARN] [mqtt_bridge]: FOLLOW 명령 수신 — EM/AI 수신측 계약 미확정이라 보류: {'kind': 'follow', 'action': 'FOLLOW_START'}
+[INFO] [mqtt_bridge]: SELECT_TARGET 수신 — AI fe_bridge_node가 /select_target 변환을 담당하므로 이 브릿지는 무시
+
+$ ros2 topic echo /cart/cancel --once
+data: test-1
+---
+$ ros2 topic echo /cart/target_pose --once
+header:
+  frame_id: map
+pose:
+  position: {x: 1.5, y: -0.8, z: 0.0}
+  orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+---
+
+=== 라이다 /scan ===
+average rate: 11.364   min: 0.079s max: 0.097s std dev: 0.00357s window: 109
+440 빔, inc=0.8200deg, range=[0.12, 10.00], intensities 전부 0 (X4 Pro 싱글채널)
+※ 어제는 430빔/0.8392deg — 드라이버의 고정 포인트 리샘플링이 세션마다 약간 달라진다
+  ("Real points 434 > fixed points 430" 경고와 동일 원인). 각도 해석에는 영향 없음.
+
+=== [baseline] 사람 없음 — 원시값 분류 ===
+-- AI 조회창 +-29deg (70 빔 x 40 스캔 = 2800 샘플)
+     valid        1999   71.4%
+     zero          801   28.6%
+-- 전방 180deg (220 빔 x 40 스캔 = 8800 샘플)
+     valid        5410   61.5%
+     zero         3390   38.5%
+-- 전체 360deg (440 빔 x 40 스캔 = 17600 샘플)
+     valid       11531   65.5%
+     zero         6069   34.5%
+   (above_max / inf / NaN = 0건)
+
+조회창 정면부 빔별 (유효/40, 중앙값):
+       -5.33deg  4.029m  40/40      -0.41deg  5.366m  40/40
+       -4.51deg  4.047m  38/40      +0.41deg  5.368m  40/40
+       -3.69deg  5.065m   3/40      +1.23deg  5.354m  37/40
+       -2.87deg  5.054m  34/40      +2.05deg  5.073m  31/40
+       -2.05deg  5.357m  39/40      +2.87deg  4.978m  31/40
+       -1.23deg  5.365m  39/40
+
+근거리 클러스터 (기준):
+     -75.85.. -72.57deg  (5 빔)  최근 0.130m   ← 기둥
+     +75.03.. +75.85deg  (2 빔)  최근 0.150m   ← 기둥
+     -43.87.. -33.21deg  (14 빔) 최근 2.141m   ← 주변 물체
+     +38.95.. +44.69deg  (8 빔)  최근 2.735m
+     (그 외 |angle|>112deg 후방 다수)
+
+=== [person_center] 카메라 정면 1.5 m ===
+-- AI 조회창 +-29deg : valid 2146 (76.6%) / zero 654 (23.4%)
+근거리 클러스터에 신규 등장:
+      -7.79..  +2.87deg  (14 빔)  최근 1.562m  중앙 1.571m   ← 사람
+      (기준 상태에서 이 구간은 4.0~5.4 m)
+
+=== [person_camera_right] 본인 왼손 방향(=카메라 오른쪽) 1 m 이동 ===
+근거리 클러스터:
+     +20.91.. +31.57deg  (14 빔)  최근 1.937m  중앙 1.966m   ← 사람
+      -7.79..  +2.87deg  구간은 근거리에서 사라짐 (사람이 빠짐)
+
+±50deg 빔별 상세:
+   +20.91deg  1.946m  21/40        +26.65deg  1.956m  40/40
+   +21.73deg  1.927m  38/40        +27.47deg  1.951m  40/40
+   +22.55deg  1.925m  40/40        +28.29deg  1.952m  40/40
+   +23.37deg  1.935m  40/40        +29.11deg  1.950m  40/40
+   +24.19deg  1.939m  40/40        +29.93deg  1.959m  40/40
+   +25.01deg  1.942m  40/40        +30.75deg  1.980m  38/40
+   +25.83deg  1.948m  40/40        +31.57deg  2.051m  19/40
+
+=== 설정 교차확인 ===
+x4pro.yaml:41  reversion: false
+x4pro.yaml:42  inverted: false
+follow_robot_launch.py:147  lidar_yaw_offset_deg: 0.0    → 실측 -2.5deg, 유지 타당
+follow_robot_launch.py:148  lidar_mirrored: True         → 실측으로 확인, 유지 타당
+```
+
+</details>
+
 ## 2026-08-05 — ✅ EM choll_mqtt_bridge 이관: ruff·pytest 21 통과 (Claude, 노트북)
 
 - **명령**: `~/.local/bin/ruff check --config pyproject.toml embedded/Lidar/src/choll_mqtt_bridge/` + `python3 -m pytest embedded/Lidar/src/choll_mqtt_bridge/test/test_bridge_logic.py -q`
@@ -45,8 +256,13 @@ $ python3 -m pytest embedded/Lidar/src/choll_mqtt_bridge/test/test_bridge_logic.
 - **범위**: Phase 2(AI 카메라 추종) **Stage 0 사전점검만.**
   **브릿지·teleop·AI 스택은 한 번도 기동하지 않았다** → `/cmd_vel` 구독자 0,
   **모터 경로는 이번 세션에 열린 적이 없다**(전 구간 모터 위험 0).
-- **중단 사유**: 사용자가 라이다 장착 위치를 변경 → 아래 섹터 측정치는 **구 위치 기준이며 무효**.
-  재개 시 재측정 필요.
+- **중단 사유**: 아래 섹터 측정치는 **무효**.
+- 🔴 **2026-08-05 정정 — 이 항목의 섹터 측정치는 폐기한다.** 중단 시점에는 "사용자가 라이다 장착 위치를
+  변경했다"고 적었으나, 실제로는 **라이다 장착 위치는 바뀌지 않았고 팀원들이 카트 자체를 다른 장소로
+  옮긴 상태**에서 측정한 것이었다. 실제 카트 위치에서 재측정한 결과는 정반대다
+  (조회창 ±29° valid 8.6% → **71.4%**, 정면 유효 빔 0개 → **전 빔 유효**).
+  아래의 "전진 없이 제자리 회전만" 블로커는 **실재하지 않는다.** 정본은 2026-08-05 09:10 항목.
+  기둥 위치(±75° 부근 0.13/0.15 m)만 재측정에서도 재현되었다.
 
 ### ✅ 통과한 것
 

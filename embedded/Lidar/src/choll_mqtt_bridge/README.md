@@ -40,8 +40,17 @@ ros2 launch choll_mqtt_bridge bridge.launch.py client_id:=choll-laptop-bridge  #
 
 ## 의존성
 
-`python3-paho-mqtt` (1.x). Jetson: `sudo apt install python3-paho-mqtt`.
-노트북은 PyPI 1.6.1 소스를 `~/.local/lib/python3.10/site-packages`에 설치함.
+`paho-mqtt` **1.x / 2.x 모두 동작**한다 (`_make_mqtt_client`가 분기).
+paho 2.x는 첫 인자로 `callback_api_version`을 받는데 기본값이 `VERSION1`이라
+생략해도 지금은 동작하지만 DeprecationWarning이 뜨고 향후 제거될 수 있으므로
+`hasattr(mqtt, "CallbackAPIVersion")`로 분기해 `VERSION1`을 명시한다.
+콜백 시그니처(`rc`/`flags`)가 VERSION1 규약이므로 VERSION2로 올리려면
+`_on_mqtt_connect`·`_on_mqtt_disconnect`를 함께 고쳐야 한다.
+
+- **Jetson(현재)**: PyPI **2.1.0**이 `~/.local/lib/python3.10/site-packages`에 이미 설치됨.
+  ⚠️ `sudo apt install python3-paho-mqtt`(1.5.1)를 추가로 깔지 말 것 —
+  두 버전이 공존하며 import 우선순위 혼란을 만든다.
+- 노트북: PyPI 1.6.1 소스를 `~/.local/lib/python3.10/site-packages`에 설치함.
 
 ## 검증 (Nav2 없이)
 
