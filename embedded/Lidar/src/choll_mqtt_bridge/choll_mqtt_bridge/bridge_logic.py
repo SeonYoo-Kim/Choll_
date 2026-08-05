@@ -73,9 +73,7 @@ def parse_cart_command(payload: "str | bytes") -> dict:
     return {"kind": "error", "reason": f"알 수 없는 command: {command!r}"}
 
 
-def build_position_payload(
-    x: float, y: float, yaw_rad: float, stamp_sec: float
-) -> str:
+def build_position_payload(x: float, y: float, yaw_rad: float, stamp_sec: float) -> str:
     """MQTT-01 ``status/position`` 페이로드(JSON 문자열)를 생성한다.
 
     키 계약은 BE 파서 실측 기준 (backend MqttPositionMessageHandler의

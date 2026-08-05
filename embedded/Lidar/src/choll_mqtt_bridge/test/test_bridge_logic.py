@@ -64,9 +64,7 @@ def test_parse_move_bytes_payload() -> None:
 
 def test_parse_move_pixel_only_rejected() -> None:
     """Pixel 좌표만 오면 오류로 분류 (BE meters 모드 필요)."""
-    payload = json.dumps(
-        {"command": "MOVE", "pixel": {"x": 120, "y": 88}}
-    )
+    payload = json.dumps({"command": "MOVE", "pixel": {"x": 120, "y": 88}})
     result = parse_cart_command(payload)
     assert result["kind"] == "error"
     assert "pixel" in result["reason"]
@@ -107,9 +105,9 @@ def test_parse_select_target() -> None:
 
 def test_parse_select_target_missing_track_id() -> None:
     """TrackId 없는 SELECT_TARGET은 오류."""
-    assert parse_cart_command(json.dumps({"command": "SELECT_TARGET"}))[
-        "kind"
-    ] == "error"
+    assert (
+        parse_cart_command(json.dumps({"command": "SELECT_TARGET"}))["kind"] == "error"
+    )
 
 
 def test_parse_follow_actions() -> None:

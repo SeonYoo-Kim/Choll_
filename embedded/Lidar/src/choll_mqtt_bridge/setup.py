@@ -20,9 +20,7 @@ setup(
     zip_safe=True,
     maintainer="c101",
     maintainer_email="c101@ssafy.local",
-    description=(
-        "쫄래쫄래 MQTT↔ROS2 브릿지: BE 명령 수신 + 위치 텔레메트리 발행"
-    ),
+    description=("쫄래쫄래 MQTT↔ROS2 브릿지: BE 명령 수신 + 위치 텔레메트리 발행"),
     license="MIT",
     tests_require=["pytest"],
     entry_points={
