@@ -9,8 +9,9 @@
 .canvas {
   position: relative;
   overflow: hidden;
-  // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다
-  aspect-ratio: 1174 / 631;
+  // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다.
+  // 실제 값은 MapPanel이 FLOOR_PLAN_SIZE로 덮어쓴다 (그림을 바꿔도 한 곳만 고치도록)
+  aspect-ratio: 1707 / 921;
   border: 1px solid $border-panel;
   border-radius: 22px;
   background: #fffdf8;
@@ -35,6 +36,7 @@
 
 .zone {
   position: absolute;
+  cursor: pointer; // 통로가 눌러서 목적지를 정하는 영역임을 커서로 알린다
   border: 2px dashed transparent;
   border-radius: 16px;
   background: transparent;

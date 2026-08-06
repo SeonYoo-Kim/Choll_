@@ -29,6 +29,10 @@
 ## BE 통신 계약
 
 - **REST**: `/api/carts/{cartId}/...` — 카트·슬롯·지도·작업·이동·추종 조회/명령. 정본: API 명세서(노션)
+- **지도 그림은 FE 것을 쓴다** (2026-08-06): MAP-01의 `imageUrl`(SLAM 렌더)은 사서가 읽기 어려워
+  번들 평면도(`assets/map.png`)로 대체. 구역이 그림 위 어디인지도 MAP-02 폴리곤이 아니라
+  `features/cart-map/model/zones.ts`가 정하고, 서버에서는 **구역 id만** 코드(Z1·Z2…)로 조인해 받는다.
+  좌표 계약은 그대로 BE 지도 이미지 픽셀 — 자세한 전제는 `model/floorPlanImage.ts` 주석 참조
 - **WebSocket(이벤트)**: `/ws/carts/{cartId}` — 카트 관리 화면 진입 시 연결, JSON, BE→FE 단방향 이벤트
   (CART_POSITION_UPDATE, SLOT_UPDATED 등 명세서상 13종 + AI 사람 탐지 박스 `TRACKS_UPDATED`)
 - **WebSocket(영상)**: `/ws/carts/{cartId}/video` — 바이너리 1메시지 = JPEG 1프레임.

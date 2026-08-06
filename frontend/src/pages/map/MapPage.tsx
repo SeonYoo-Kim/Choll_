@@ -59,7 +59,7 @@ export function MapPage() {
         <div>
           <p className={styles.overline}>LIVE CART LOCATION</p>
           <h1 className={styles.pageTitle}>도서관 지도</h1>
-          <p className={styles.pageDesc}>구역을 선택해 카트의 다음 목적지를 정해보세요.</p>
+          <p className={styles.pageDesc}>평면도에서 카트를 보낼 통로를 눌러 목적지를 정해보세요.</p>
         </div>
       </div>
       <div className={styles.mapArea}>

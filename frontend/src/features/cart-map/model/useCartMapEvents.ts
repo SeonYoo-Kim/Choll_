@@ -5,7 +5,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCartMapStore } from './cartMapStore';
 import { displayToPercent } from './mapTransform';
 import { useShelfZones } from './useShelfZones';
-import { zoneLabel } from './zones';
 
 import { getGetCartQueryKey, useGetCart } from '@/shared/api/generated/carts/carts';
 import { useGetMap } from '@/shared/api/generated/maps/maps';
@@ -46,8 +45,8 @@ export function useCartMapEvents(cartId: number): void {
   const { data: mapInfo, isError: isMapError } = useGetMap(mapId ?? 0, {
     query: { enabled: mapId != null, throwOnError: false },
   });
-  // 책장 구역 목록(MAP-02) — 지도 메타가 있어야 픽셀 경계를 %로 바꿀 수 있다
-  useShelfZones(mapId, mapInfo);
+  // 책장 구역 목록(MAP-02) — 평면도 구역에 서버 id를 채워 목적지를 지정할 수 있게 한다
+  useShelfZones(mapId);
 
   // 던지지 않는 대신 조용히 넘어가지도 않게 한 번 알린다
   useEffect(() => {
@@ -65,8 +64,8 @@ export function useCartMapEvents(cartId: number): void {
   const syncFromCart = useCartMapStore((state) => state.syncFromCart);
   const applyMapInfo = useCartMapStore((state) => state.applyMapInfo);
 
-  // 지도 그림도 서버 것을 쓴다 — 실제 SLAM 지도로 바뀌었는데 옛 평면도를 그리면
-  // 좌표(새 지도 기준)와 그림이 어긋나 틀린 위치를 보여주게 된다
+  // 바탕 그림은 번들 평면도를 쓰지만(floorPlanImage.ts) 좌표 기준은 서버 지도 메타를 따른다 —
+  // WS 위치와 NAV-01 클릭 지점이 모두 BE 지도 픽셀이라 imageWidth·imageHeight가 필요하다
   useEffect(() => {
     // mapId를 아직 모르면 조회 자체가 시작되지 않은 것이므로 실패로 보지 않는다
     applyMapInfo(mapId === null ? undefined : mapInfo, isMapError);
@@ -135,12 +134,9 @@ export function useCartMapEvents(cartId: number): void {
         if (!payload.valid || !mapInfo) {
           return;
         }
-        const { moved, enteredZone } = useCartMapStore
+        const moved = useCartMapStore
           .getState()
           .applyPosition(displayToPercent(payload, mapInfo), payload.yaw);
-        if (enteredZone !== null) {
-          useToastStore.getState().show(`카트가 ${zoneLabel(enteredZone)}에 진입했어요`);
-        }
         if (moved) {
           feedStillness();
         }
@@ -149,10 +145,7 @@ export function useCartMapEvents(cartId: number): void {
 
     const offZone = socket.on<CurrentZoneUpdatedPayload>('CURRENT_ZONE_UPDATED', ({ payload }) => {
       feedWatchdog();
-      const enteredZone = useCartMapStore.getState().applyZone(payload.currentZoneId);
-      if (enteredZone !== null) {
-        useToastStore.getState().show(`카트가 ${zoneLabel(enteredZone)}에 진입했어요`);
-      }
+      useCartMapStore.getState().applyZone(payload.currentZoneId);
     });
 
     const offNavigation = socket.on<NavigationStatusUpdatedPayload>(
