@@ -15,6 +15,201 @@
 
 ---
 
+## 2026-08-05 12:15 — ✅ EM Phase 2(AI 카메라 추종) 완료: 바닥 실주행 추종 유지율 100% / 🔴 거리 진동 ±0.41 m·후진 37% (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble. 브랜치 `em/feature/motor-Lidar-integrated` @ `50a938b`.
+  라이다·카메라는 쫄래쫄래 선반 카트 실제 장착 위치. AI 스택은 `~/Choll/ai/install`(별개 클론).
+- **범위**: Phase 2 Stage 1(AI 단독 관측) → Stage 2(첫 통전) → Stage 3(바닥 추종 주행).
+- **기록 시점**: 2026-08-07. 주행 직후 보조배터리 방전으로 Jetson이 강제 종료되어 당시 기록을 못 남겼고,
+  증거 파일(`ros2_ws/log/phase2_20260805/`)이 디스크에 남아 있어 이를 근거로 사후 작성했다.
+
+### ✅ Stage 1 — AI 스택 단독 관측 (STM 브릿지 미기동 = `/cmd_vel` 구독자 0 = 모터 위험 0)
+
+AI 9노드 + 라이다 2노드 기동. `/cmd_vel` **Publisher 1 = `control_node`** 확인.
+
+| 토픽 | 실측 | 판정 |
+|---|---|---|
+| `/camera/image_raw` | 11.49 Hz | ⚠️ 요청 30 Hz 대비 낮음 — Brio 100 협상 포맷 한계 추정(미확정) |
+| `/person_detection` | 30.2 Hz | YOLOv10s TensorRT 여유 (자체 타이머로 최신 프레임 재처리) |
+| `/person_tracks` | 29.9 Hz | ByteTrack 정상 |
+| `/target_person` | 등록 전 0 → 등록 후 **31.5 Hz** | `auto_select:=false` 동작 정상 |
+| `/target_distance` | **2.572 m** (NaN 아님) | 라이다 조회 성공 |
+| `/cmd_vel` | 15.0 Hz, `linear.x=0.5` | **예측식 일치**: `0.5×(2.572−1.0)=0.786` → `max_linear_vel` 0.5로 클램프 |
+| `/wheel_speed_cmd` | Pub 1 / **Sub 0** | AI `motor_node` 무해 확인 (micro-ROS agent 미실행) |
+
+### ✅ 포즈 토픽 계약 확인 — `/cart_pose`는 존재하지 않는다
+
+혼동의 원인이 이름 두 개였다: **EM 노드명** `cart_pose_publisher`(발행 토픽은 `/robot_pose`)와
+**AI 파라미터명** `cart_pose_topic`(값이 `/robot_pose`). 실행 그래프에서
+`ros2 node info /target_position_node` → `Subscribers: /robot_pose` 확인, `/cart_pose`는 토픽 목록에 없음.
+→ **양쪽 이미 `/robot_pose`로 일치, 변경 불필요.**
+`target_position_node`의 `카트 포즈 미수신` 경고는 `/robot_pose` Publisher 0(= SLAM 미실행) 때문이며
+**Phase 2에서는 정상**이다(추종은 `control_node`가 `/target_person`+`/scan`만으로 수행).
+
+### 🔴 카메라↔라이다 각도 정합 실측 — `lidar_mirrored=True` 확정, `camera_fov_deg`는 오류
+
+bbox와 `/scan`을 **동시 샘플링**해 판정(라이다 단독으로는 판정 불가 — 영상 내 위치를 모르므로).
+사람 식별은 "사람 없음 기준 대비 변한 클러스터"로 했다.
+
+| 위치 | `center_x_norm` | 사람 라이다 각도 | `mirrored=False` | `mirrored=True` |
+|---|---|---|---|---|
+| 카메라 오른쪽 | +0.727 | **+13.12°** (2.838 m) | −21.07° ❌ | +21.07° ✅ |
+| 카메라 왼쪽 | −0.623 | **−13.94°** (2.758 m) | +18.06° ❌ | −18.06° ✅ |
+
+**판정 1**: `lidar_mirrored=True` **양쪽에서 부호 일치 → 현재 런치값이 맞다.**
+AI 담당자 설명("라이다가 미러링돼 있어 그 값을 처리해서 보낸다")과도 일치. 협의 불필요.
+(드라이버는 `inverted: false`·`reversion: false`인데도 반전 — 장착 방향 추정, 원인 미확정)
+
+**판정 2 — 🔴 `camera_fov_deg=58.0`이 과대하다.** 두 점으로
+`α = center_x_norm × (F/2) − θ₀` 를 풀면 **F ≈ 40.1°, θ₀ ≈ +1.45°**
+(역대입 검증 `−0.623×20.04−1.45 = −13.94` 일치). θ₀=0으로 각 점 단독 환산해도 36.1°/44.8°로
+**둘 다 58°보다 훨씬 작다.** Brio 100의 58°는 **대각** 화각이고 4:3 640×480 크롭 수평 화각이 40°대라는
+계산과 부합. `lidar_yaw_offset_deg=0.0`은 유지 타당(θ₀ 1.45°는 무시 가능).
+⚠️ 미지수 2개·식 2개라 적합은 구조적으로 정확 — **검증에는 세 번째 점 필요.**
+
+**실동작 영향**: 방위각이 1.45배 밖으로 나가 조회 구간이 사람에서 벗어난다.
+오른쪽 사례에서 조회 `+15.29..+26.85°` vs 사람 `+10.25..+15.99°` → **겹침 0.7°(약 1빔)**.
+배경이 3.9 m 이상이라 `min_valid_range_in_span`이 아직 사람 거리를 채택했지만 **위태롭다.**
+→ **AI 파트에 `camera_fov_deg` 58 → 40 제안** (런치 하드코딩이라 협의 필요).
+
+### ✅ Stage 2 — 첫 통전 (바퀴 공중)
+
+브릿지 `mode:=hardware speed_profile:=slow` → `max_wheel_rad_s=2.0`, `dry_run=False`,
+`wheel_separation_m=0.38`, `cmd_vel_timeout_sec=0.5`, Serial connected.
+`check_stm_topics` **✅ 합격**(6토픽), `/stm/connected=true`, `/stm/fault=NONE`.
+
+🔴 **초기 무회전의 원인은 모터 전원 미투입이었다.** 브릿지→STM32 경로는 정상이었고
+(`SET_WHEEL_VEL,1.869,2.000` 송신 → STATUS `target L=1.87 R=2.00, pwm L=18 R=20`)
+`actual L=0.00 R=0.00` + **엔코더가 1327/1603에 완전히 고정**이었다.
+전원 인가 후 동일 조건에서 `actual L=1.47 R=1.56`, 엔코더 1327→**719,115**로 증가.
+→ 앞으로 구동 시험 전 **모터 전원 확인을 절차에 넣을 것**.
+
+| 검증 | 결과 |
+|---|---|
+| 차동구동식 | `v=0.037, ω=−0.080` → 계산 L=0.803 R=0.335 / 실제 target **0.810 / 0.260** ✅ (램프 지연 범위) |
+| **회전 방향** | 사람 오른쪽 → `ω<0` → **좌바퀴가 더 빠름** → 우회전. 4/4 샘플 일치 ✅ |
+| 데드존 | PWM 1~8 구간 `actual 0.00` — 예측표 그대로 ✅ |
+| 비례 축소 | `raw left=7.426 right=7.959` → `limited 1.866/2.000` (scale 0.251) ✅ 비율 보존 |
+
+### 🔴 정지 지연 실측 — 약 1.03초
+
+AI 터미널 Ctrl+C 후 브릿지 로그 타임스탬프 기준:
+
+```
+watchdog active -> timed_out      t=1785898085.758
+첫 SET_WHEEL_VEL,0.000,0.000      t=1785898085.760   (+0.002 s)
+마지막 '회전 중' STATUS            t=1785898085.789
+첫 '정지' STATUS                   t=1785898086.290
+```
+
+watchdog은 마지막 수신 0.5초 후 발동하므로 AI가 발행을 멈춘 시각 ≈ 085.258
+(브릿지가 `/cmd_vel` 로그를 8개마다 1개만 남겨 직접 측정은 ±0.53초 불확실).
+→ **AI 종료 → 바퀴 정지 ≈ 1.03초** = watchdog 0.5 + 램프 약 0.5.
+계획서 예측(최대 ~1.05초)과 일치. 정지 직전 1.89 rad/s(0.123 m/s) → 타행 **약 7~8 cm**.
+
+### 🔴 속도 2배 상향 — `max_wheel_rad_s` 2.0 → 4.0 (사용자 요청)
+
+`speed_profile:=slow` 위에 `max_wheel_rad_s:=4.0`을 launch 인자로 명시 오버라이드
+(로그: `속도 상한: max_wheel_rad_s=4.0 (launch 인자가 프로파일을 덮어씀)`).
+`4.0 × r 0.065 =` **0.260 m/s**. `nav2` 프로파일(6.4)은 실기 미검증이라 쓰지 않았다.
+
+부수 효과(설계상): 데드존은 바퀴 2.0 rad/s(PWM 20)에 고정이고 cap과 무관하므로,
+cap 2.0에서는 오차 ≥0.26 m가 즉시 포화(계단식)였으나 cap 4.0에서는 **오차 0.26~0.52 m 구간이
+비례 제어**가 되고 순수 회전이 ∓2.923(PWM 29)으로 데드존을 넘어 **조향이 살아난다.**
+대가: 타행 8→16 cm, **브릿지 사망 시 0.65 → 1.3 m**(펌웨어 5초 타임아웃), 램프 0.5→1.0초.
+
+### ✅ Stage 3 — 바닥 실주행 추종 (126초, 1257 샘플, 10 Hz 동기 기록)
+
+| 항목 | 결과 |
+|---|---|
+| **추종 유지율** | **1257/1257 = 100%** — 126초 동안 Re-ID가 타겟을 한 번도 놓치지 않음 |
+| `fault` / `connected` | 전 구간 **NONE / true** |
+| **STALL·ERROR** | **0건** |
+| 상한 4.0 도달 | target ±4.00 도달, `|target|>3.5` 샘플 L 94 / R 90 |
+| 엔코더 이동 | L 1,931,842→7,873,221 / R 1,521,292→6,907,509 |
+| 구동 형태 | 양쪽 회전 520 / **한쪽만(피벗) 287** / 정지 450 |
+
+🔴 **거리 유지가 진동한다** (목표 1.00 m):
+
+```
+중앙값 1.076 m (양호)   평균 1.065   표준편차 0.411 m   범위 0.315 ~ 2.996 m
+  < 0.74 m   후진          151  12.0%   ← 최소 0.315 m 까지 접근
+  0.74~1.00  후진(데드존)   389  30.9%
+  1.00~1.26  정지(데드존)   472  37.5%
+  > 1.26     전진          245  19.5%
+```
+
+**후진 명령 469/1257 = 37%**, `cmd_v` 최소 **−0.353 m/s**. 사용자 결정대로 코드가 아니라 절차로
+막기로 했으나 **사람이 자연스럽게 걸으면 1.2 m 유지가 안 된다**는 것이 실측으로 드러났다.
+조향도 거칠다: `angular.z` ±0.87(상한 1.0 근접), 피벗 23%.
+
+`actual`이 최대 ±4.35로 target ±4.00보다 **8.8% 높게** 읽힌다 — Phase 1의 미확정 항목
+(당시 target 2.0 → actual 2.22, +11%)과 **같은 현상이 재현**됐다. 엔코더 스케일 조사 근거.
+
+### 🔴 발견한 버그·오류 2건
+
+| # | 내용 | 근거 |
+|---|---|---|
+| 1 | **`/stm/pwm` 토픽이 항상 0** — 브릿지 자체 STATUS 로그는 `pwm L=18 R=20`을 보고하는데 토픽 발행값은 0. 파싱은 되고 발행만 어긋남 | 동기 기록 835 샘플 전부 `pwm_L=0, pwm_R=0`. `wheel_target`·`actual`·`encoder`는 정상 → 안전 영향 없음. **모터 파트 항목** |
+| 2 | **`choll-em` 별칭 공백 누락** — `mqtt_username:=chollmqtt_password:=CHANGE_ME` → username이 `chollmqtt_password:=CHANGE_ME`, password 빈 문자열 → 브로커 인증 거부 **CONNACK rc=5** | `fe_bridge_node`가 rc를 검사하지 않아 `MQTT 연결됨 (rc=5)`로 성공처럼 로깅(rc=0만 성공). 8~16초 주기 재접속 루프. 수동 ID 지정이면 `fe_bridge:=false`가 정답 |
+
+### 결론 — Phase 2 성공 기준 판정
+
+계획서 성공 기준(경로가 닫혔음을 증명) **충족**: 8노드 기동 · 등록 성공 · `/target_person` 발행 ·
+`/target_distance` 실거리 일치 · `/cmd_vel` Publisher 1 · **큰 오차에 올바른 방향으로 주행** ·
+예측표 부합 · STALL/FAULT 0 · 종료 순서 준수.
+성공 기준에 넣지 않았던 것(매끄러운 추종·보행 속도 추종·미세 조향)은 예상대로 미달이며,
+개선안 2건(`camera_fov_deg` 40, `target_distance_m` 1.3~1.5)은 **AI 파트 협의 대상**이다.
+
+<details>
+<summary>증거 파일 (gitignore 대상 — Jetson 로컬 `ros2_ws/log/phase2_20260805/`)</summary>
+
+```
+S3_floor.csv        172 KB  바닥 추종 1257 샘플 동기 기록 (t,cmd_v,cmd_w,tgt_L/R,act_L/R,pwm_L/R,dist,fault,conn)
+S3_bridge_4.log     840 KB  상한 4.0 주행 전체 STATUS/TX/제한 로그
+S2_bridge.log       2.7 MB  첫 통전 구간 (모터 전원 미투입 → 인가 후)
+S2_drive.csv / S2_drive2.csv   공중 구동 동기 기록
+S1_calib_right.log / S1_calib_left.log   카메라↔라이다 동시 캘리브레이션 원본
+S1_nodes.log / S1_pipeline_hz.log / S1_selected_state.log / S1_pose_topic_check.log
+```
+
+주요 원본 발췌:
+
+```
+=== Stage 1 파이프라인 ===
+/camera/image_raw        average rate: 11.486
+/person_detection        average rate: 30.223
+/person_tracks           average rate: 29.894
+/target_person           average rate: 31.538
+/target_distance         average rate: 14.970   data: 2.572000026702881
+/cmd_vel                 average rate: 15.026   linear.x: 0.5
+
+=== 포즈 계약 ===
+$ ros2 node info /target_position_node
+  Subscribers:
+    /robot_pose: geometry_msgs/msg/PoseStamped
+$ ros2 topic info /robot_pose      Publisher count: 0   Subscription count: 1
+$ ros2 topic info /cart_pose       토픽 없음
+
+=== Stage 2 모터 전원 미투입 (엔코더 고정) ===
+STATUS #1031: target L=1.87 R=2.00, actual L=0.00 R=0.00, pwm L=18 R=20, enc L=1327 R=1603
+  (STATUS 2826건 전체에서 enc 고유값 단 1개 = 무회전)
+=== 전원 인가 후 ===
+STATUS #22150: target L=1.43 R=2.00, actual L=1.47 R=1.56, pwm L=14 R=20, enc L=719115 R=566271
+
+=== 상한 4.0 적용 + 후진 ===
+제한 후 저장: raw left=4.063 right=4.230  -> limited left=3.842 right=4.000, max=4.000
+제한 후 저장: raw left=-4.232 right=-3.277 -> limited left=-4.000 right=-3.098, max=4.000
+
+=== 회전 방향 검증 (4/4 일치) ===
+w=-0.100 (음수=우회전)  tgt L= 0.660 > R= 0.280  ✅
+w=-0.063                tgt L= 0.760 > R= 0.290  ✅
+w=-0.089                tgt L= 0.850 > R= 0.270  ✅
+w=-0.080                tgt L= 0.810 > R= 0.260  ✅
+```
+
+</details>
+
 ## 2026-08-05 09:10 — ✅ EM Jetson 실기: choll_mqtt_bridge 실브로커 E2E + Phase 2 조회창 재측정으로 어제 블로커 반증 (relu 실기 / Claude 실행·기록)
 
 - **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
