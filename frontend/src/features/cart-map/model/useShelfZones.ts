@@ -1,42 +1,43 @@
 import { useEffect } from 'react';
 
-import { toMapZones } from './shelfZoneBoundary';
 import { useZoneStore } from './zoneStore';
 
 import { useListShelfZones } from '@/shared/api/generated/maps/maps';
 import { useToastStore } from '@/shared/ui/toast/toastStore';
 
-import type { MapInfo } from '@/shared/api/generated/model';
-
 /**
  * 책장 구역 목록 동기화 훅 (MAP-02).
- * 서버 구역을 받아 지도 % 좌표로 바꾼 뒤 zoneStore에 넣는다.
- * 받기 전이나 실패했을 때는 데모 구역이 그대로 남으므로 지도는 계속 동작한다.
+ *
+ * 구역이 그림 위 어디인지는 번들 평면도(zones.ts)가 정하므로, 서버 응답에서 가져오는 것은
+ * **구역 코드에 대응하는 id**뿐이다. 이 id가 있어야 이동 명령(NAV-01)을 보낼 수 있다.
+ * 코드가 어긋나면 그 구역만 지정 불가 상태로 남기고 사유를 알린다 —
+ * 서버 구역과 평면도가 다른 방을 가리키는 상황을 조용히 넘기면 사서가 틀린 자리를 누른다.
  */
-export function useShelfZones(mapId: number | null, mapInfo: MapInfo | undefined): void {
-  const setZones = useZoneStore((state) => state.setZones);
+export function useShelfZones(mapId: number | null): void {
+  const applyServerZones = useZoneStore((state) => state.applyServerZones);
   // 지도를 못 불러와도 화면 전체가 죽지 않도록 던지지 않는다 (useCartMapEvents와 같은 방침)
   const { data, isError } = useListShelfZones(mapId ?? 0, {
     query: { enabled: mapId != null, throwOnError: false },
   });
 
   useEffect(() => {
-    // 지도 메타(이미지 크기)가 있어야 픽셀→% 변환을 할 수 있다
-    if (!data || !mapInfo) {
+    if (!data) {
       return;
     }
-    const zones = toMapZones(data, mapInfo);
-    if (zones.length === 0) {
-      // 응답은 왔는데 경계를 하나도 못 읽은 경우 — 데모 구역을 유지하고 알린다
-      useToastStore.getState().show('구역 정보를 읽지 못했어요. 임시 구역으로 표시합니다');
-      return;
+    const { missing, unplaced } = applyServerZones(data);
+    if (missing.length > 0) {
+      useToastStore
+        .getState()
+        .show(`서버에 없는 구역이 있어요(${missing.join('·')}). 그 구역은 지정할 수 없어요`);
+    } else if (unplaced.length > 0) {
+      // 평면도에 자리가 없는 서버 구역 — 지도에 그릴 수 없다는 사실만 조용히 알린다
+      useToastStore.getState().show(`지도에 표시할 수 없는 구역이 있어요(${unplaced.join('·')})`);
     }
-    setZones(zones);
-  }, [data, mapInfo, setZones]);
+  }, [data, applyServerZones]);
 
   useEffect(() => {
     if (isError) {
-      useToastStore.getState().show('구역 정보를 불러오지 못했어요. 임시 구역으로 표시합니다');
+      useToastStore.getState().show('구역 정보를 불러오지 못했어요. 목적지를 지정할 수 없어요');
     }
   }, [isError]);
 }

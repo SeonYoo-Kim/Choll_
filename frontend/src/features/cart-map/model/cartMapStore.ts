@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import { unwrapAngle } from './angle';
-import { ZONE_POSITIONS } from './zones';
+import { START_POSITION } from './zones';
 import { zoneIndexOf, zoneIndexOfPoint } from './zoneStore';
 
 import type { MapPercent } from './mapTransform';
@@ -37,14 +37,6 @@ function smoothInterval(previousMs: number, gapMs: number): number {
   return Math.round(clamped / INTERVAL_STEP_MS) * INTERVAL_STEP_MS;
 }
 
-/** applyPosition이 위치에서 파생해 알려주는 결과 (진입 알림·정지 감지용) */
-export interface PositionApplied {
-  /** 직전 좌표에서 의미 있게 움직였는지 */
-  moved: boolean;
-  /** 새 구역에 진입했으면 그 인덱스(0-base), 아니면 null */
-  enteredZone: number | null;
-}
-
 interface CartMapState {
   /** 카트가 있는 구역 인덱스 (0-base, 구역 밖이면 null) */
   cartZone: number | null;
@@ -70,13 +62,15 @@ interface CartMapState {
   /**
    * 서버가 준 지도 정보 (MAP-01). 아직 못 받았으면 null.
    *
-   * 그림 주소·이미지 크기가 모두 여기서 나온다. 크기는 화면 좌표를 지도 픽셀로 되돌릴 때
-   * 쓰인다(구역 클릭 지점을 NAV-01에 실어 보낼 때).
-   * 이 그림을 못 그려도 대체 이미지를 쓰지 않는다 — 번들된 `assets/map.png`는 예시 평면도라,
-   * 그 위에 실제 카트 좌표와 구역을 얹으면 **틀린 위치를 사실처럼 보여주게 된다.**
+   * **좌표계의 기준**이다 — imageWidth·imageHeight로 화면의 % 좌표와 BE 지도 픽셀을 서로 바꾼다
+   * (WS 카트 위치를 그림 위에 얹을 때, 클릭 지점을 NAV-01에 실어 보낼 때).
+   * 응답의 `imageUrl`은 쓰지 않는다 — 바탕 그림은 번들 평면도다(floorPlanImage.ts 참조).
    */
   mapInfo: MapInfo | null;
-  /** 지도를 쓸 수 없는 상태 (MAP-01 조회 실패, 또는 응답에 이미지 주소가 없음) */
+  /**
+   * 지도를 쓸 수 없는 상태 (MAP-01 조회 실패).
+   * 좌표 기준이 없으면 카트 위치도 목적지도 뜻이 없으므로 화면은 에러로 넘긴다.
+   */
   mapUnavailable: boolean;
   /** MAP-01 조회 결과 반영 — mapInfo가 undefined이고 isError도 false면 아직 불러오는 중이다 */
   applyMapInfo: (mapInfo: MapInfo | undefined, isError: boolean) => void;
@@ -86,12 +80,14 @@ interface CartMapState {
    * WS CART_POSITION_UPDATE(WS-FE-01) 반영.
    * 좌표에서 현재 구역을 판정하고, 좌표가 움직이면 대기 상태를 이동 중으로 올린다
    * (BE 테스트 발행기처럼 위치만 오는 환경에서도 구역·상태가 실시간 갱신되도록).
+   *
+   * 직전 좌표에서 의미 있게 움직였는지를 반환한다 — 호출부가 정지 감지 타이머를 되감는 데 쓴다.
    */
-  applyPosition: (position: MapPercent, yaw: number) => PositionApplied;
+  applyPosition: (position: MapPercent, yaw: number) => boolean;
   /** 위치 변화가 멎었을 때 호출 — 위치 파생 이동 중 상태를 대기로 되돌린다 */
   markStationary: () => void;
-  /** WS CURRENT_ZONE_UPDATED(WS-FE-05) 반영. 새 구역에 진입했으면 그 인덱스를 반환(진입 알림용) */
-  applyZone: (currentZoneId: number | null) => number | null;
+  /** WS CURRENT_ZONE_UPDATED(WS-FE-05) 반영 */
+  applyZone: (currentZoneId: number | null) => void;
   /** WS NAVIGATION_STATUS_UPDATED(WS-FE-06) 반영 — ARRIVED면 도착 모달을 연다 */
   applyNavigation: (status: NavigationStatus, destinationZoneId?: number) => void;
   /** 워치독 발동 시 이동 상태 강제 리셋 — 이후 REST 재조회(syncFromCart)로 실제 상태를 복구한다 */
@@ -112,7 +108,7 @@ interface CartMapState {
  */
 export const useCartMapStore = create<CartMapState>()((set, get) => ({
   cartZone: null,
-  cartPosition: ZONE_POSITIONS[2],
+  cartPosition: START_POSITION,
   cartYaw: 0,
   positionIntervalMs: DEFAULT_POSITION_INTERVAL_MS,
   lastPositionAt: null,
@@ -125,9 +121,8 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   applyMapInfo: (mapInfo, isError) =>
     set({
       mapInfo: mapInfo ?? null,
-      // 조회가 실패했거나, 응답은 왔는데 이미지 주소가 비어 있으면 그릴 지도가 없는 것이다.
-      // mapInfo가 undefined면 아직 응답 전이므로 실패로 보지 않는다
-      mapUnavailable: isError || (mapInfo !== undefined && !mapInfo.imageUrl),
+      // 조회가 실패하면 좌표 기준이 없다. mapInfo가 undefined면 아직 응답 전이므로 실패로 보지 않는다
+      mapUnavailable: isError,
     }),
   startMove: () => set({ isMoving: true, cartStatus: 'MOVING', navStatus: 'ACCEPTED' }),
   applyPosition: (position, yaw) => {
@@ -151,13 +146,12 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
       zone === state.cartZone;
     if (unchanged) {
       set({ lastPositionAt: now, positionIntervalMs });
-      return { moved: false, enteredZone: null };
+      return false;
     }
 
     const moved =
       Math.hypot(position.x - state.cartPosition.x, position.y - state.cartPosition.y) >
       MOVE_EPSILON_PERCENT;
-    const enteredZone = zone !== null && zone !== state.cartZone ? zone : null;
     set({
       cartPosition: position,
       cartYaw,
@@ -167,19 +161,15 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
       // 추종(FOLLOWING) 등 다른 상태는 유지하고, 대기 중일 때만 이동 중으로 올린다
       ...(moved && !state.isMoving && state.cartStatus === 'IDLE' && { cartStatus: 'MOVING' }),
     });
-    return { moved, enteredZone };
+    return moved;
   },
   markStationary: () =>
     set((state) =>
       // 이동 명령 세션(isMoving)은 워치독·이동 이벤트가 관리하므로 건드리지 않는다
       state.cartStatus === 'MOVING' && !state.isMoving ? { cartStatus: 'IDLE' } : {},
     ),
-  applyZone: (currentZoneId) => {
-    const previousZone = get().cartZone;
-    const zone = currentZoneId === null ? null : zoneIndexOf(currentZoneId);
-    set({ cartZone: zone });
-    return zone !== null && zone !== previousZone ? zone : null;
-  },
+  applyZone: (currentZoneId) =>
+    set({ cartZone: currentZoneId === null ? null : zoneIndexOf(currentZoneId) }),
   applyNavigation: (status, destinationZoneId) => {
     if (MOVING_STATUSES.includes(status)) {
       set({ navStatus: status, isMoving: true, cartStatus: 'MOVING' });

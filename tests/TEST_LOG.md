@@ -15,6 +15,108 @@
 
 ---
 
+## 2026-08-07 00:24 — ✅ FE: 슬롯 만적 알림 팝업 추가 (Claude)
+
+- **배경**: 시연 카트는 RFID 리더가 5개만 달려 실물 슬롯이 5칸이다. 다 차면 사서에게
+  "북카트를 정리해달라"고 알려줄 화면이 없었다
+- **변경** (`frontend/feat/map`, 베이스 `494b8ec`):
+  - `PHYSICAL_SLOT_COUNT = 5` (shared/config/cart.ts) — DB 슬롯 12개 중 리더가 달린 범위
+  - `slotCapacity.ts` 신규: `physicalSlots`·`isCartFull`. EMPTY가 아니면 찬 것으로 센다
+    (RECOGNIZING·RECOGNITION_FAILED도 책이 물리적으로 올라가 있어 더 담을 수 없다).
+    실물 슬롯을 다 받지 못한 부분 응답은 만적으로 보지 않는다
+  - `SlotFullModal` 신규 + AppLayout에 마운트 — 슬롯 목록은 WS SLOT_UPDATED로 갱신되는
+    쿼리 캐시에서 오므로 마지막 책이 얹히는 순간 열리고 한 권 꺼내면 닫힌다
+- **막혔던 것 2가지**:
+  1. `react-hooks/set-state-in-effect` — "자리가 생기면 닫음 표시 리셋"을 useEffect + setState로
+     짰다가 린트에서 걸렸다. 조건이 풀리면 안쪽 컴포넌트가 **언마운트되며 상태가 버려지는**
+     구조로 바꿔 해결 (ArrivalModal과 같은 방식, 이펙트 0개)
+  2. 테스트에서 `setQueryData` 후 리렌더가 안 일어남 — TanStack v5가 구독자 알림을
+     `setTimeout(0)`으로 미루기 때문. 관찰용 컴포넌트로 "캐시는 바뀌었는데 렌더 값은 그대로"인
+     것을 확인한 뒤, act 안에서 매크로태스크까지 흘려보내 해결 (`await`만으로는 부족)
+- **결과**: **21 files, 129 tests, 0 failures** (신규 12: 만적 판정 8 + 팝업 6 중 일부) /
+  `tsc --noEmit` 0 / `eslint` 0
+- **스크린샷** (Playwright + 실행 중 dev 서버 5173, MSW on — 데스크톱/근접/모바일/이동 후 4장):
+  `01-slot-full-desktop.png` · `02-slot-full-closeup.png` · `03-after-confirm-slots.png` ·
+  `04-slot-full-mobile.png`
+- **알아둘 것**: MSW 픽스처의 1~5번 슬롯이 모두 OCCUPIED라 모킹 모드에서 앱을 열면 팝업이
+  바로 뜬다. 픽스처 데이터를 정확히 렌더한 결과이지만, 개발 중 거슬리면 픽스처를 실물 5칸
+  기준으로 손보는 별도 작업이 필요하다
+
+## 2026-08-07 00:00 — ✅ FE: 구역 진입 토스트 제거 (Claude)
+
+- **배경**: "카트가 N구역에 진입했어요" 토스트는 구역 단위라 정보가 거칠고, 지도의 구역
+  하이라이트·홈/지도의 현재 위치 카드가 같은 사실을 이미 보여준다. 기획상 원했던 것은
+  **책장 단위 근접 안내**인데 그건 미구현(책장 좌표를 주는 BE 엔드포인트가 없다)
+- **변경** (`frontend/feat/map`, 베이스 `7d9fd10`): `useCartMapEvents`의 토스트 2곳 제거.
+  이 토스트만을 위해 존재했던 반환값도 함께 정리 — `applyPosition`은 `PositionApplied`
+  객체 대신 `moved` 불리언만, `applyZone`은 `void`. 안 쓰이게 된 `zoneLabel` import 제거
+- **남긴 것**: 이동 명령 접수 토스트("N구역으로 카트가 이동을 시작해요")와 도착 모달 —
+  사서가 누른 행동에 대한 응답이라 성격이 다르다
+- **결과**: **19 files, 115 tests, 0 failures** / `tsc --noEmit` 0 / `eslint` 0
+- **브라우저 확인** (dev + MSW): 3구역으로 이동 → 진입 토스트 없음, 구역 하이라이트는 정상.
+  `toastsSeen: ["3구역으로 카트가 이동을 시작해요", "3구역에 도착했어요!"]` — 진입 토스트만 사라짐
+
+## 2026-08-06 23:33 — ✅ FE: 지도 바탕을 번들 평면도로 교체 + 클릭 좌표 전송 검증 (Claude)
+
+- **배경**: BE가 주는 SLAM 지도 그림(`MapInfo.imageUrl` = `/maps/test-room.png`)은 (a) 저장소·
+  배포본 어디에도 파일이 없어 nginx/vite가 `index.html`을 200으로 돌려주고 `<img>` 디코드가 실패,
+  (b) 점유격자 렌더 자체가 사서가 읽기 어려운 그림. FE가 그린 평면도(`assets/map.png`,
+  1707×921, 3통로)로 바탕을 바꾸고 구역 기하도 그 그림 기준으로 다시 잡음
+- **변경** (작업 트리, 브랜치 미분기 — `develop` 위에서 검증):
+  - `floorPlanImage.ts` 신규 (번들 그림 + 원본 크기 + "같은 바닥 범위" 전제 문서화)
+  - `zones.ts` 구역 기하 재작성 (7구역 2행 → 3통로), `zoneStore.ts`는 서버 구역을 **코드로 조인해
+    id만** 채움 (`applyServerZones`) — 위치·이름은 평면도가 정본
+  - `shelfZoneBoundary.ts`(+테스트) 삭제 — 서버 폴리곤을 그림 좌표로 쓰던 경로 제거
+  - `MapPanel.tsx`: 좌표 기준 사각형을 테두리 있는 `.canvas` → `<img>` 로 교정 (1px 테두리 때문에
+    클릭 기준 박스가 그림보다 2px 컸음, 구역 버튼 %는 패딩 박스 기준이라 서로 어긋났다)
+- **좌표 계약은 그대로**: NAV-01 `x`·`y`와 WS 위치는 여전히 BE 지도 이미지 픽셀
+- **결과**: **19 files, 115 tests, 0 failures** / `tsc --noEmit` 0 / `eslint` 0
+  (`prettier --check`는 `src/pages/search/SearchPage.tsx` 1건 경고 — 이번 변경과 무관한 기존 이슈)
+- **명령**: `pnpm --dir frontend test` · `npx tsc --noEmit` · `npx eslint .`
+- **브라우저 검증** (dev 서버 + MSW, DOM/네트워크 계측 — Browser 패널 미표시로 스크린샷 불가):
+  그림 로드·비율 일치, 구역 버튼 3개가 측정 좌표대로 배치, 통로 클릭 → NAV-01 본문이 기대 픽셀과
+  정확히 일치, 서가·테이블 클릭 → 요청 없이 안내 토스트
+
+<details>
+<summary>원본 출력 (vitest 집계 + 브라우저 계측)</summary>
+
+```
+$ npx vitest run
+ Test Files  19 passed (19)
+      Tests  115 passed (115)
+   Duration  6.32s
+
+$ npx tsc --noEmit        # 출력 없음 (exit 0)
+$ npx eslint .            # 출력 없음 (exit 0)
+
+# 브라우저 계측 1 — 그림·구역 배치 (http://localhost:5173/map, MSW on)
+{
+  "imageSrc": "/src/assets/map.png", "imageLoaded": true, "naturalSize": "1707x921",
+  "canvasAspect": 1.8535, "imageAspect": 1.8534,
+  "zones": [
+    { "label": "1구역 총류로 카트 이동",        "left": 70,  "top": 20.6, "width": 16.1, "height": 73.4 },
+    { "label": "2구역 철학·사회과학로 카트 이동", "left": 37,  "top": 20.6, "width": 17,   "height": 73.4 },
+    { "label": "3구역 문학·역사로 카트 이동",    "left": 4.2, "top": 20.6, "width": 16.8, "height": 73.4 }
+  ],
+  "cartCenterPct": { "x": 92.9, "y": 16.2 }     # START_POSITION(93, 16)
+}
+
+# 브라우저 계측 2 — 테두리 교정 전: 클릭 기준 박스가 그림보다 2px 큼
+{ "canvasRect": { "left": 308, "top": 182, "w": 647, "h": 349.08 },
+  "imageRect":  { "left": 309, "top": 183, "w": 645, "h": 347.08 },
+  "borderWidth": "1px / 1px" }
+
+# 브라우저 계측 3 — 교정 후: 클릭 지점 → NAV-01 본문이 기대 픽셀과 일치
+{ "imageRect": { "left": 309, "top": 187.5, "w": 645, "h": 347.08 },
+  "expected": { "x": 741, "y": 665 },
+  "sent": ["{\"zoneId\":2,\"x\":741,\"y\":665}"] }
+
+# 브라우저 계측 4 — 통로 밖(서가) 클릭
+{ "navRequestsSent": [], "toastLike": ["카트가 갈 수 있는 통로를 눌러주세요", ...] }
+```
+
+</details>
+
 ## 2026-08-04 09:55 — ✅ BE: TRACKS_UPDATED 중계를 영상 시청자 있을 때만으로 게이트 (Claude)
 
 - **배경**: AI가 status/target을 5Hz 상시 발행 → BE가 무조건 WS 중계 → FE 콘솔에

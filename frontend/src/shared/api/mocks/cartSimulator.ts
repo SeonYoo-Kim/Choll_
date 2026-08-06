@@ -1,14 +1,15 @@
 import { ws } from 'msw';
 
-import mapImage from '@/assets/map.png';
+import { FLOOR_PLAN_IMAGE, FLOOR_PLAN_SIZE } from '@/features/cart-map/model/floorPlanImage';
 import { displayToPercent, percentToDisplay } from '@/features/cart-map/model/mapTransform';
 import {
   CORRIDOR_Y,
   START_POSITION,
   ZONE_POSITIONS,
   ZONE_RECTS,
+  zoneLabel,
 } from '@/features/cart-map/model/zones';
-import { DEMO_ZONES, zoneIndexOf } from '@/features/cart-map/model/zoneStore';
+import { PLAN_ZONES, zoneIndexOf } from '@/features/cart-map/model/zoneStore';
 import { CartDetailStatus } from '@/shared/api/generated/model';
 
 import type { DisplayPosition, MapPercent } from '@/features/cart-map/model/mapTransform';
@@ -29,24 +30,39 @@ import type {
  * 구역 좌표는 FE 지도 픽스처(zones.ts)를 재사용해 화면과 항상 일치시킨다.
  */
 
-/** 지도 메타 픽스처 — 시뮬레이터가 %↔표시 좌표(px) 변환에 쓰는 기준값 */
+/**
+ * 지도 메타 픽스처 — 시뮬레이터가 %↔표시 좌표(px) 변환에 쓰는 기준값.
+ *
+ * 이미지 크기를 번들 평면도와 같게 두어, 모킹의 "지도 픽셀"이 평면도 픽셀과 1:1이 되게 한다
+ * (실제 BE는 SLAM 지도 크기를 주므로 값이 다를 수 있다 — 화면은 %로 환산해 쓰므로 상관없다).
+ * `imageUrl`은 화면이 쓰지 않지만(바탕은 번들 평면도) 응답 모양을 지키려고 채워 둔다.
+ */
 export const mapInfoFixture: MapInfo = {
   id: 1,
   name: '우리 도서관 1층',
-  // 실제 BE는 서버에 올라간 SLAM 지도 주소를 준다. 모킹에서는 번들된 평면도를 그대로 가리켜
-  // "서버 지도를 그리는" 정상 경로를 개발 중에도 확인할 수 있게 한다
-  imageUrl: mapImage,
+  imageUrl: FLOOR_PLAN_IMAGE,
   resolution: 0.05,
   originX: 0,
   originY: 0,
-  imageWidth: 1174,
-  imageHeight: 631,
+  imageWidth: FLOOR_PLAN_SIZE.width,
+  imageHeight: FLOOR_PLAN_SIZE.height,
 };
 
 /**
+ * 구역 인덱스(0-base) → 이 모킹이 쓰는 서버 구역 id.
+ *
+ * 실제 서버 id는 DB가 정하므로 규칙이 없지만, 모킹은 스스로 정해야 한다.
+ * 구역 픽스처·카트 응답·책 픽스처가 모두 이 함수를 거치게 해서 값이 갈라지지 않게 한다
+ * (스토어의 zoneIdOf를 쓰면 MAP-02 응답 전에는 id가 없어 책이 구역을 못 찾는다).
+ */
+export function mockZoneId(zoneIndex: number): number {
+  return zoneIndex + 1;
+}
+
+/**
  * 책장 구역 픽스처(MAP-02) — 실제 BE와 같은 모양으로 준다.
- * 경계는 지도 이미지 픽셀 폴리곤의 JSON 문자열이고, 값은 데모 구역(ZONE_RECTS)에서 만든다.
- * 이렇게 해두면 모킹으로 개발해도 서버 응답을 파싱하는 경로를 그대로 지나간다.
+ * 경계는 지도 이미지 픽셀 폴리곤의 JSON 문자열이고, 값은 평면도 구역(ZONE_RECTS)에서 만든다.
+ * 화면이 실제로 쓰는 것은 `id`뿐이지만(위치·이름은 평면도가 정한다) 응답 모양은 그대로 맞춘다.
  */
 export const shelfZonesFixture: ShelfZone[] = ZONE_RECTS.map((rect, index) => {
   const topLeft = percentToDisplay({ x: rect.left, y: rect.top }, mapInfoFixture);
@@ -57,10 +73,11 @@ export const shelfZonesFixture: ShelfZone[] = ZONE_RECTS.map((rect, index) => {
   // 실제 BE의 시드 데이터가 정수 픽셀이라 반올림해 맞춘다
   const corner = (point: DisplayPosition) => [Math.round(point.x), Math.round(point.y)];
   return {
-    id: DEMO_ZONES[index].id,
+    // 서버 id를 흉내 낸 값 — 평면도 구역에는 id가 없고, 이 응답으로 채워진다
+    id: mockZoneId(index),
     mapId: mapInfoFixture.id,
-    code: DEMO_ZONES[index].code,
-    name: DEMO_ZONES[index].name,
+    code: PLAN_ZONES[index].code,
+    name: PLAN_ZONES[index].name,
     boundaryData: JSON.stringify([
       corner(topLeft),
       corner({ x: bottomRight.x, y: topLeft.y }),
@@ -161,7 +178,7 @@ export function startCartMove(zoneId: number, point?: DisplayPosition): void {
   }
   isMoving = true;
   navigationCounter += 1;
-  const departureZoneId = currentZoneIndex === null ? null : currentZoneIndex + 1;
+  const departureZoneId = currentZoneIndex === null ? null : mockZoneId(currentZoneIndex);
   const start = currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex];
   const destination =
     point === undefined
@@ -302,7 +319,7 @@ export function stopCartMove(): void {
  * 실제 BE가 카트 위치로 구역을 판정하는 것에 대응한다 (슬롯 isTarget 계산에도 쓰인다).
  */
 export function currentCartZoneId(): number | null {
-  return isMoving || currentZoneIndex === null ? null : currentZoneIndex + 1;
+  return isMoving || currentZoneIndex === null ? null : mockZoneId(currentZoneIndex);
 }
 
 /** 시뮬레이터 상태를 반영한 카트 상세 픽스처 (CART-01 getCart 모킹 응답) */
@@ -318,7 +335,7 @@ export function cartDetailFixture(cartId: number): CartDetail {
     online: isOnline,
     mapId: mapInfoFixture.id,
     currentZoneId: currentCartZoneId(),
-    currentZoneName: isMoving || currentZoneIndex === null ? null : `${currentZoneIndex + 1}구역`,
+    currentZoneName: isMoving || currentZoneIndex === null ? null : zoneLabel(currentZoneIndex),
     position: percentToDisplay(
       currentZoneIndex === null ? START_POSITION : ZONE_POSITIONS[currentZoneIndex],
       mapInfoFixture,

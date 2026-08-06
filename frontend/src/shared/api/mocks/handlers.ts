@@ -2,7 +2,6 @@
 
 import type { StartNavigationBody } from '@/features/cart-map/api/moveCommands';
 import { zoneIndexOfBookshelf } from '@/features/cart-map/model/zones';
-import { zoneIdOf } from '@/features/cart-map/model/zoneStore';
 import type { SelectFollowTargetBody } from '@/features/follow-target/api/followTarget';
 import { getGetCartMockHandler } from '@/shared/api/generated/carts/carts.msw';
 import type { Slot, SlotBook } from '@/shared/api/generated/model';
@@ -18,6 +17,7 @@ import {
   cartWsHandler,
   currentCartZoneId,
   mapInfoFixture,
+  mockZoneId,
   pauseCartFollow,
   shelfZonesFixture,
   startCartFollow,
@@ -39,6 +39,10 @@ const emptySlot = (slotNumber: number): Slot => ({
 /**
  * 책 픽스처 — 책장 번호(KDC 백단위)를 주면 담당 구역(zones.ts의 ZONE_BOOKSHELVES 기준)을
  * 자동으로 유도한다. 구역·책장·청구기호가 항상 지도와 일치하도록 유지할 것.
+ *
+ * 구역 id는 스토어(zoneIdOf)가 아니라 모킹의 규칙(mockZoneId)에서 가져온다 —
+ * 이 픽스처는 모듈이 로드될 때 한 번 만들어지고, 그 시점에는 MAP-02 응답이 아직 없어
+ * 스토어의 구역에 id가 채워져 있지 않다.
  */
 const book = (
   id: number,
@@ -48,7 +52,7 @@ const book = (
   callNumber: string,
 ): SlotBook => {
   const zoneIndex = zoneIndexOfBookshelf(bookshelfNumber);
-  const shelfZoneId = zoneIndex === null ? null : zoneIdOf(zoneIndex);
+  const shelfZoneId = zoneIndex === null ? null : mockZoneId(zoneIndex);
   return {
     id,
     bookId: id,
@@ -65,8 +69,8 @@ const book = (
 
 /**
  * 개발용 슬롯 고정 픽스처 (슬롯 12개, 책 11권 적재).
- * 카트는 출발 지점에서 시작한다 — 300·400 책장 책 9권(슬롯 1·2·4~10)은
- * 3구역에 도착하면 정리 대상이 된다.
+ * 카트는 대기 지점에서 시작한다 — 300·400 책장 책 9권(슬롯 1·2·4~10)은
+ * 그 책장을 맡은 2구역에 도착하면 정리 대상이 된다.
  *
  * `isTarget`은 여기에 고정해두지 않는다 — 실제 BE처럼 **응답을 만들 때 카트의 현재 구역과
  * 비교해 계산한다**(`withTargetFlag`). 고정값이면 카트가 어디 있든 항상 대상으로 보인다.
@@ -145,7 +149,7 @@ const withTargetFlag = (slots: Slot[]): Slot[] => {
 /** 전체 API 모킹 핸들러. 특정 응답을 바꾸고 싶으면 개별 MockHandler에 override를 넘긴다. */
 export const handlers = [
   getListSlotsMockHandler(() => withTargetFlag(slotsFixture)),
-  // 카트에 11권 적재, 이 중 3구역(300·400 책장) 도착 시 대상은 9권(슬롯 1·2·4~10)
+  // 카트에 11권 적재, 이 중 2구역(300·400 책장) 도착 시 대상은 9권(슬롯 1·2·4~10)
   getGetTaskProgressMockHandler({
     totalSlots: 12,
     totalBooks: 16,
