@@ -10,7 +10,12 @@ echo "=== [1/4] apt 의존성 ==="
 sudo apt update
 sudo apt install -y \
   ros-humble-slam-toolbox ros-humble-navigation2 ros-humble-nav2-bringup \
-  ros-humble-tf2-tools python3-paho-mqtt cmake build-essential git
+  ros-humble-tf2-tools cmake build-essential git
+
+# paho-mqtt: 이미 있으면 건너뜀 — Jetson에는 pip 2.1.0이 설치돼 있어
+# apt 1.5.1과 공존시키면 import 우선순위 혼란 (choll_mqtt_bridge README 참조)
+python3 -c "import paho.mqtt" 2>/dev/null \
+  || sudo apt install -y python3-paho-mqtt
 
 echo "=== [2/4] YDLidar-SDK (드라이버 하드 의존성, 시스템 설치) ==="
 if ! ls /usr/local/lib/cmake/ydlidar_sdk >/dev/null 2>&1; then
