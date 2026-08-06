@@ -15,6 +15,33 @@
 
 ---
 
+## 2026-08-07 00:24 — ✅ FE: 슬롯 만적 알림 팝업 추가 (Claude)
+
+- **배경**: 시연 카트는 RFID 리더가 5개만 달려 실물 슬롯이 5칸이다. 다 차면 사서에게
+  "북카트를 정리해달라"고 알려줄 화면이 없었다
+- **변경** (`frontend/feat/map`, 베이스 `494b8ec`):
+  - `PHYSICAL_SLOT_COUNT = 5` (shared/config/cart.ts) — DB 슬롯 12개 중 리더가 달린 범위
+  - `slotCapacity.ts` 신규: `physicalSlots`·`isCartFull`. EMPTY가 아니면 찬 것으로 센다
+    (RECOGNIZING·RECOGNITION_FAILED도 책이 물리적으로 올라가 있어 더 담을 수 없다).
+    실물 슬롯을 다 받지 못한 부분 응답은 만적으로 보지 않는다
+  - `SlotFullModal` 신규 + AppLayout에 마운트 — 슬롯 목록은 WS SLOT_UPDATED로 갱신되는
+    쿼리 캐시에서 오므로 마지막 책이 얹히는 순간 열리고 한 권 꺼내면 닫힌다
+- **막혔던 것 2가지**:
+  1. `react-hooks/set-state-in-effect` — "자리가 생기면 닫음 표시 리셋"을 useEffect + setState로
+     짰다가 린트에서 걸렸다. 조건이 풀리면 안쪽 컴포넌트가 **언마운트되며 상태가 버려지는**
+     구조로 바꿔 해결 (ArrivalModal과 같은 방식, 이펙트 0개)
+  2. 테스트에서 `setQueryData` 후 리렌더가 안 일어남 — TanStack v5가 구독자 알림을
+     `setTimeout(0)`으로 미루기 때문. 관찰용 컴포넌트로 "캐시는 바뀌었는데 렌더 값은 그대로"인
+     것을 확인한 뒤, act 안에서 매크로태스크까지 흘려보내 해결 (`await`만으로는 부족)
+- **결과**: **21 files, 129 tests, 0 failures** (신규 12: 만적 판정 8 + 팝업 6 중 일부) /
+  `tsc --noEmit` 0 / `eslint` 0
+- **스크린샷** (Playwright + 실행 중 dev 서버 5173, MSW on — 데스크톱/근접/모바일/이동 후 4장):
+  `01-slot-full-desktop.png` · `02-slot-full-closeup.png` · `03-after-confirm-slots.png` ·
+  `04-slot-full-mobile.png`
+- **알아둘 것**: MSW 픽스처의 1~5번 슬롯이 모두 OCCUPIED라 모킹 모드에서 앱을 열면 팝업이
+  바로 뜬다. 픽스처 데이터를 정확히 렌더한 결과이지만, 개발 중 거슬리면 픽스처를 실물 5칸
+  기준으로 손보는 별도 작업이 필요하다
+
 ## 2026-08-07 00:00 — ✅ FE: 구역 진입 토스트 제거 (Claude)
 
 - **배경**: "카트가 N구역에 진입했어요" 토스트는 구역 단위라 정보가 거칠고, 지도의 구역
