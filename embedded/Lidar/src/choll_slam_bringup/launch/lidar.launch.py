@@ -28,17 +28,19 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # base_link -> laser_frame 정적 TF
-    # TODO(실측 필요): 골조에 라이다를 장착한 뒤 실제 위치를 재서 수정할 것.
+    # 실측값 반영 (2026-08-05, 임시 장착 상태에서 사용자 측정 —
+    # MOTOR_LIDAR_INTEGRATION.md §B3): x=0.30, z=0.25.
+    # yaw는 기둥 대칭축 실측 +0.51° → 0 확정. y는 중심선 가정(0.0) —
+    # 최종 장착 확정 시 재측정.
     #   --x  : 로봇 중심(base_link)에서 라이다까지 전방(+) 거리 [m]
     #   --y  : 좌측(+) 거리 [m]
-    #   --z  : 바닥 기준 높이 [m]  (아래 0.20은 임시 플레이스홀더)
-    #   --yaw: 장착 회전 [rad]. 커넥터/모터가 뒤쪽을 향하게 정방향 장착이면 0
+    #   --z  : 바닥 기준 높이 [m]
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_laser_frame',
         arguments=[
-            '--x', '0.0', '--y', '0.0', '--z', '0.20',
+            '--x', '0.30', '--y', '0.0', '--z', '0.25',
             '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0',
             '--frame-id', 'base_link',
             '--child-frame-id', 'laser_frame',
