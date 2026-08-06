@@ -31,9 +31,14 @@ def generate_launch_description() -> LaunchDescription:
     # 장착 확정 (2026-08-06 선반 카트 조립 — 이전 임시 장착에서 z축으로만
     # 이동, 수평 위치 불변): x=0.30(08-05 실측 유지), y=0.0(중심선),
     # yaw=0(기둥 대칭축 실측 +0.51° → 0 확정).
-    # z=0.25는 조립 전 값 — 바닥→라이다 광학창 중심 높이 실측 후 갱신(TODO).
-    # 2D SLAM에서 z는 기능 영향 없음(RViz 표시용) — 매핑 블로커 아님.
-    #   --x  : 로봇 중심(base_link)에서 라이다까지 전방(+) 거리 [m]
+    # z=0.32: 2026-08-07 사용자 줄자 실측 "바닥→라이다 광학창 중심 31.5~32 cm"
+    #   의 상단값. 2D SLAM에서 z는 기능 영향 없음(RViz 표시용).
+    # y=0.0 재확인: "30 cm 프로파일 좌우 중심 15 cm에 라이다" → 중심선 일치.
+    # ⚠️ TODO-확인(x): 같은 실측에서 "모터에서 26~27 cm"가 나왔는데 현재 값은
+    #   0.30(08-04 "바퀴축 중심→라이다 30 cm"). 모터 몸통 기준 대 차축 중심
+    #   기준 차이로 보이며 3.5 cm 어긋난다. 2D 매핑 품질에는 영향이 없고
+    #   Nav2 footprint 기하에만 영향 → base_link 기준점 확정 후 갱신.
+    #   --x  : 로봇 중심(base_link=구동 차축 중심)에서 라이다까지 전방(+) 거리 [m]
     #   --y  : 좌측(+) 거리 [m]
     #   --z  : 바닥 기준 높이 [m]
     static_tf_node = Node(
@@ -41,7 +46,7 @@ def generate_launch_description() -> LaunchDescription:
         executable='static_transform_publisher',
         name='base_link_to_laser_frame',
         arguments=[
-            '--x', '0.30', '--y', '0.0', '--z', '0.25',
+            '--x', '0.30', '--y', '0.0', '--z', '0.32',
             '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0',
             '--frame-id', 'base_link',
             '--child-frame-id', 'laser_frame',
