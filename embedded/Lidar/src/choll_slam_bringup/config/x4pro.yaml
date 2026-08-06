@@ -55,6 +55,9 @@ ydlidar_ros2_driver_node:
     #   지도에 영구 장애물로 박힘 (MOTOR_LIDAR_INTEGRATION.md §B3).
     #   여유각 ±3° 포함 잠정값 — 매핑 전 RViz로 해당 구간 포인트가
     #   사라졌는지 확인하고, 반대편이 사라지면 부호를 반전할 것.
+    # 2026-08-06 선반 카트 조립: 라이다가 z축으로만 이동(수평 불변)이라
+    #   기둥 방위각은 유지 — 단 선반·손잡이 등 신규 자기차폐 가능성은
+    #   PHASE3_QUICKSTART §1에서 0.6 m 이내 정지 포인트 전수 확인.
     ignore_array: "-78,-70,72,79"
 
     invalid_range_is_inf: false
