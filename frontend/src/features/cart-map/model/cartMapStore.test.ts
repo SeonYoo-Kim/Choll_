@@ -50,30 +50,28 @@ describe('cartMapStore', () => {
 
   it('applyPosition은 좌표·방향각을 갱신하고 좌표로 현재 구역을 판정한다', () => {
     // Z3(인덱스 2)에 있던 카트가 Z1(인덱스 0) 안으로 들어온 상황
-    const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 1.57);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 1.57);
     const state = useCartMapStore.getState();
     expect(state.cartPosition).toEqual(ZONE_POSITIONS[0]);
     // cartYaw는 짧은 쪽으로 누적한 값이라 부동소수 오차가 섞인다 (angle.ts 참조)
     expect(state.cartYaw).toBeCloseTo(1.57);
     expect(state.cartZone).toBe(0);
-    expect(result.enteredZone).toBe(0);
   });
 
   it('applyPosition은 구역 밖 좌표(통로)면 구역을 null로 만든다', () => {
-    const result = useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
     expect(useCartMapStore.getState().cartZone).toBeNull();
-    expect(result.enteredZone).toBeNull();
   });
 
   it('applyPosition은 좌표가 움직이면 대기 상태를 이동 중으로 올린다', () => {
-    const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
-    expect(result.moved).toBe(true);
+    const moved = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
+    expect(moved).toBe(true);
     expect(useCartMapStore.getState().cartStatus).toBe('MOVING');
   });
 
   it('applyPosition은 같은 좌표(정지)면 상태를 올리지 않는다', () => {
-    const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[2], 0);
-    expect(result.moved).toBe(false);
+    const moved = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[2], 0);
+    expect(moved).toBe(false);
     expect(useCartMapStore.getState().cartStatus).toBe('IDLE');
   });
 
@@ -151,21 +149,18 @@ describe('cartMapStore', () => {
     expect(useCartMapStore.getState().cartStatus).toBe('MOVING');
   });
 
-  it('applyZone은 새 구역 진입 시 그 인덱스를 반환한다', () => {
-    const entered = useCartMapStore.getState().applyZone(1);
-    expect(entered).toBe(0);
+  it('applyZone은 서버 구역 id를 인덱스로 바꿔 담는다', () => {
+    useCartMapStore.getState().applyZone(1);
     expect(useCartMapStore.getState().cartZone).toBe(0);
   });
 
-  it('applyZone은 같은 구역이면 null을 반환한다', () => {
-    const entered = useCartMapStore.getState().applyZone(3);
-    expect(entered).toBeNull();
-    expect(useCartMapStore.getState().cartZone).toBe(2);
+  it('applyZone에 목록에 없는 id가 오면 구역이 null이 된다', () => {
+    useCartMapStore.getState().applyZone(999);
+    expect(useCartMapStore.getState().cartZone).toBeNull();
   });
 
-  it('applyZone에 null(구역 이탈)이면 구역이 null이 되고 반환도 null이다', () => {
-    const entered = useCartMapStore.getState().applyZone(null);
-    expect(entered).toBeNull();
+  it('applyZone에 null(구역 이탈)이면 구역이 null이 된다', () => {
+    useCartMapStore.getState().applyZone(null);
     expect(useCartMapStore.getState().cartZone).toBeNull();
   });
 

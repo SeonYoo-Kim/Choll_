@@ -5,7 +5,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCartMapStore } from './cartMapStore';
 import { displayToPercent } from './mapTransform';
 import { useShelfZones } from './useShelfZones';
-import { zoneLabel } from './zones';
 
 import { getGetCartQueryKey, useGetCart } from '@/shared/api/generated/carts/carts';
 import { useGetMap } from '@/shared/api/generated/maps/maps';
@@ -135,12 +134,9 @@ export function useCartMapEvents(cartId: number): void {
         if (!payload.valid || !mapInfo) {
           return;
         }
-        const { moved, enteredZone } = useCartMapStore
+        const moved = useCartMapStore
           .getState()
           .applyPosition(displayToPercent(payload, mapInfo), payload.yaw);
-        if (enteredZone !== null) {
-          useToastStore.getState().show(`카트가 ${zoneLabel(enteredZone)}에 진입했어요`);
-        }
         if (moved) {
           feedStillness();
         }
@@ -149,10 +145,7 @@ export function useCartMapEvents(cartId: number): void {
 
     const offZone = socket.on<CurrentZoneUpdatedPayload>('CURRENT_ZONE_UPDATED', ({ payload }) => {
       feedWatchdog();
-      const enteredZone = useCartMapStore.getState().applyZone(payload.currentZoneId);
-      if (enteredZone !== null) {
-        useToastStore.getState().show(`카트가 ${zoneLabel(enteredZone)}에 진입했어요`);
-      }
+      useCartMapStore.getState().applyZone(payload.currentZoneId);
     });
 
     const offNavigation = socket.on<NavigationStatusUpdatedPayload>(
