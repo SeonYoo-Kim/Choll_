@@ -15,6 +15,67 @@
 
 ---
 
+## 2026-08-06 23:33 — ✅ FE: 지도 바탕을 번들 평면도로 교체 + 클릭 좌표 전송 검증 (Claude)
+
+- **배경**: BE가 주는 SLAM 지도 그림(`MapInfo.imageUrl` = `/maps/test-room.png`)은 (a) 저장소·
+  배포본 어디에도 파일이 없어 nginx/vite가 `index.html`을 200으로 돌려주고 `<img>` 디코드가 실패,
+  (b) 점유격자 렌더 자체가 사서가 읽기 어려운 그림. FE가 그린 평면도(`assets/map.png`,
+  1707×921, 3통로)로 바탕을 바꾸고 구역 기하도 그 그림 기준으로 다시 잡음
+- **변경** (작업 트리, 브랜치 미분기 — `develop` 위에서 검증):
+  - `floorPlanImage.ts` 신규 (번들 그림 + 원본 크기 + "같은 바닥 범위" 전제 문서화)
+  - `zones.ts` 구역 기하 재작성 (7구역 2행 → 3통로), `zoneStore.ts`는 서버 구역을 **코드로 조인해
+    id만** 채움 (`applyServerZones`) — 위치·이름은 평면도가 정본
+  - `shelfZoneBoundary.ts`(+테스트) 삭제 — 서버 폴리곤을 그림 좌표로 쓰던 경로 제거
+  - `MapPanel.tsx`: 좌표 기준 사각형을 테두리 있는 `.canvas` → `<img>` 로 교정 (1px 테두리 때문에
+    클릭 기준 박스가 그림보다 2px 컸음, 구역 버튼 %는 패딩 박스 기준이라 서로 어긋났다)
+- **좌표 계약은 그대로**: NAV-01 `x`·`y`와 WS 위치는 여전히 BE 지도 이미지 픽셀
+- **결과**: **19 files, 115 tests, 0 failures** / `tsc --noEmit` 0 / `eslint` 0
+  (`prettier --check`는 `src/pages/search/SearchPage.tsx` 1건 경고 — 이번 변경과 무관한 기존 이슈)
+- **명령**: `pnpm --dir frontend test` · `npx tsc --noEmit` · `npx eslint .`
+- **브라우저 검증** (dev 서버 + MSW, DOM/네트워크 계측 — Browser 패널 미표시로 스크린샷 불가):
+  그림 로드·비율 일치, 구역 버튼 3개가 측정 좌표대로 배치, 통로 클릭 → NAV-01 본문이 기대 픽셀과
+  정확히 일치, 서가·테이블 클릭 → 요청 없이 안내 토스트
+
+<details>
+<summary>원본 출력 (vitest 집계 + 브라우저 계측)</summary>
+
+```
+$ npx vitest run
+ Test Files  19 passed (19)
+      Tests  115 passed (115)
+   Duration  6.32s
+
+$ npx tsc --noEmit        # 출력 없음 (exit 0)
+$ npx eslint .            # 출력 없음 (exit 0)
+
+# 브라우저 계측 1 — 그림·구역 배치 (http://localhost:5173/map, MSW on)
+{
+  "imageSrc": "/src/assets/map.png", "imageLoaded": true, "naturalSize": "1707x921",
+  "canvasAspect": 1.8535, "imageAspect": 1.8534,
+  "zones": [
+    { "label": "1구역 총류로 카트 이동",        "left": 70,  "top": 20.6, "width": 16.1, "height": 73.4 },
+    { "label": "2구역 철학·사회과학로 카트 이동", "left": 37,  "top": 20.6, "width": 17,   "height": 73.4 },
+    { "label": "3구역 문학·역사로 카트 이동",    "left": 4.2, "top": 20.6, "width": 16.8, "height": 73.4 }
+  ],
+  "cartCenterPct": { "x": 92.9, "y": 16.2 }     # START_POSITION(93, 16)
+}
+
+# 브라우저 계측 2 — 테두리 교정 전: 클릭 기준 박스가 그림보다 2px 큼
+{ "canvasRect": { "left": 308, "top": 182, "w": 647, "h": 349.08 },
+  "imageRect":  { "left": 309, "top": 183, "w": 645, "h": 347.08 },
+  "borderWidth": "1px / 1px" }
+
+# 브라우저 계측 3 — 교정 후: 클릭 지점 → NAV-01 본문이 기대 픽셀과 일치
+{ "imageRect": { "left": 309, "top": 187.5, "w": 645, "h": 347.08 },
+  "expected": { "x": 741, "y": 665 },
+  "sent": ["{\"zoneId\":2,\"x\":741,\"y\":665}"] }
+
+# 브라우저 계측 4 — 통로 밖(서가) 클릭
+{ "navRequestsSent": [], "toastLike": ["카트가 갈 수 있는 통로를 눌러주세요", ...] }
+```
+
+</details>
+
 ## 2026-08-04 09:55 — ✅ BE: TRACKS_UPDATED 중계를 영상 시청자 있을 때만으로 게이트 (Claude)
 
 - **배경**: AI가 status/target을 5Hz 상시 발행 → BE가 무조건 WS 중계 → FE 콘솔에

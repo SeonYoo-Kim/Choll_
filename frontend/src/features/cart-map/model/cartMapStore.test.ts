@@ -1,9 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCartMapStore } from './cartMapStore';
-import { ZONE_POSITIONS } from './zones';
+import { ZONE_CODES, ZONE_POSITIONS } from './zones';
+import { useZoneStore } from './zoneStore';
+
+import type { ShelfZone } from '@/shared/api/generated/model';
+
+/** 서버 구역 응답 흉내 — 구역 id는 1·2·3, 코드 순서는 평면도와 같다 */
+const serverZones: ShelfZone[] = ZONE_CODES.map((code, index) => ({
+  id: index + 1,
+  mapId: 2,
+  code,
+  name: `${code} 서버 이름`,
+  boundaryData: '[[0,0],[10,0],[10,10],[0,10]]',
+}));
+
+/** 어느 구역에도 속하지 않는 지점 — 구역 위쪽 여백(사서 테이블 아래 통로) */
+const OUTSIDE_ZONES = { x: 50, y: 10 };
 
 beforeEach(() => {
+  // 구역에 서버 id가 채워져 있어야 zoneId↔인덱스 변환이 동작한다
+  useZoneStore.getState().applyServerZones(serverZones);
   useCartMapStore.setState({
     cartZone: 2,
     cartPosition: ZONE_POSITIONS[2],
@@ -19,6 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  useZoneStore.getState().resetZones();
 });
 
 describe('cartMapStore', () => {
@@ -31,24 +49,24 @@ describe('cartMapStore', () => {
   });
 
   it('applyPosition은 좌표·방향각을 갱신하고 좌표로 현재 구역을 판정한다', () => {
-    // (10, 20)은 Z5(인덱스 4) 클릭 영역 안 — Z3에서 Z5로 진입한 상황
-    const result = useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 1.57);
+    // Z3(인덱스 2)에 있던 카트가 Z1(인덱스 0) 안으로 들어온 상황
+    const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 1.57);
     const state = useCartMapStore.getState();
-    expect(state.cartPosition).toEqual({ x: 10, y: 20 });
+    expect(state.cartPosition).toEqual(ZONE_POSITIONS[0]);
     // cartYaw는 짧은 쪽으로 누적한 값이라 부동소수 오차가 섞인다 (angle.ts 참조)
     expect(state.cartYaw).toBeCloseTo(1.57);
-    expect(state.cartZone).toBe(4);
-    expect(result.enteredZone).toBe(4);
+    expect(state.cartZone).toBe(0);
+    expect(result.enteredZone).toBe(0);
   });
 
   it('applyPosition은 구역 밖 좌표(통로)면 구역을 null로 만든다', () => {
-    const result = useCartMapStore.getState().applyPosition({ x: 50, y: 50 }, 0);
+    const result = useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
     expect(useCartMapStore.getState().cartZone).toBeNull();
     expect(result.enteredZone).toBeNull();
   });
 
   it('applyPosition은 좌표가 움직이면 대기 상태를 이동 중으로 올린다', () => {
-    const result = useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    const result = useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
     expect(result.moved).toBe(true);
     expect(useCartMapStore.getState().cartStatus).toBe('MOVING');
   });
@@ -63,7 +81,7 @@ describe('cartMapStore', () => {
     useCartMapStore.setState({ cartYaw: 3.1 });
 
     // BE는 -π..π로 접어서 준다 — 실제로는 0.08rad만 움직인 상황
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, -3.1);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], -3.1);
 
     const yaw = useCartMapStore.getState().cartYaw;
     expect(Math.abs(yaw - 3.1)).toBeLessThan(0.1);
@@ -73,7 +91,7 @@ describe('cartMapStore', () => {
     useCartMapStore.setState({ cartYaw: 1.2 });
 
     // 모킹·구버전 BE가 yaw를 빼고 보내는 경우 (그대로 넣으면 rotate(NaNrad)로 회전이 죽는다)
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, undefined as unknown as number);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], undefined as unknown as number);
 
     expect(useCartMapStore.getState().cartYaw).toBe(1.2);
   });
@@ -90,10 +108,10 @@ describe('cartMapStore', () => {
   it('applyPosition은 연속 이벤트 간격을 애니메이션 길이로 반영한다', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    useCartMapStore.getState().applyPosition({ x: 78, y: 30 }, 0);
     vi.setSystemTime(300);
 
-    useCartMapStore.getState().applyPosition({ x: 12, y: 22 }, 0);
+    useCartMapStore.getState().applyPosition({ x: 78, y: 34 }, 0);
 
     // 기본값 1000ms에서 실제 간격(300ms) 쪽으로 당겨진다
     const interval = useCartMapStore.getState().positionIntervalMs;
@@ -104,26 +122,26 @@ describe('cartMapStore', () => {
   it('applyPosition은 오래 멈췄다 다시 움직인 공백을 주기로 착각하지 않는다', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    useCartMapStore.getState().applyPosition({ x: 78, y: 30 }, 0);
     vi.setSystemTime(300);
-    useCartMapStore.getState().applyPosition({ x: 12, y: 22 }, 0);
+    useCartMapStore.getState().applyPosition({ x: 78, y: 34 }, 0);
     const beforeIdle = useCartMapStore.getState().positionIntervalMs;
 
     // 30초 정지 후 재출발 — 이 공백이 섞이면 다음 구간이 느려터지게 보인다
     vi.setSystemTime(30_300);
-    useCartMapStore.getState().applyPosition({ x: 14, y: 24 }, 0);
+    useCartMapStore.getState().applyPosition({ x: 78, y: 38 }, 0);
 
     expect(useCartMapStore.getState().positionIntervalMs).toBe(beforeIdle);
   });
 
   it('applyPosition은 추종 중 상태를 이동 중으로 덮지 않는다', () => {
     useCartMapStore.setState({ cartStatus: 'FOLLOWING' });
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
     expect(useCartMapStore.getState().cartStatus).toBe('FOLLOWING');
   });
 
   it('markStationary는 위치 파생 이동 중 상태만 대기로 되돌린다', () => {
-    useCartMapStore.getState().applyPosition({ x: 10, y: 20 }, 0);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
     useCartMapStore.getState().markStationary();
     expect(useCartMapStore.getState().cartStatus).toBe('IDLE');
 
@@ -134,9 +152,9 @@ describe('cartMapStore', () => {
   });
 
   it('applyZone은 새 구역 진입 시 그 인덱스를 반환한다', () => {
-    const entered = useCartMapStore.getState().applyZone(5);
-    expect(entered).toBe(4);
-    expect(useCartMapStore.getState().cartZone).toBe(4);
+    const entered = useCartMapStore.getState().applyZone(1);
+    expect(entered).toBe(0);
+    expect(useCartMapStore.getState().cartZone).toBe(0);
   });
 
   it('applyZone은 같은 구역이면 null을 반환한다', () => {
@@ -152,7 +170,7 @@ describe('cartMapStore', () => {
   });
 
   it('applyNavigation(STARTED)은 이동 중으로 표시한다', () => {
-    useCartMapStore.getState().applyNavigation('STARTED', 5);
+    useCartMapStore.getState().applyNavigation('STARTED', 1);
     expect(useCartMapStore.getState().isMoving).toBe(true);
   });
 
@@ -184,9 +202,9 @@ describe('cartMapStore', () => {
   });
 
   it('syncFromCart는 전달된 필드만 갱신하고 status로 isMoving을 유도한다', () => {
-    useCartMapStore.getState().syncFromCart({ zoneId: 4, status: 'FOLLOWING' });
+    useCartMapStore.getState().syncFromCart({ zoneId: 2, status: 'FOLLOWING' });
     const state = useCartMapStore.getState();
-    expect(state.cartZone).toBe(3);
+    expect(state.cartZone).toBe(1);
     expect(state.cartStatus).toBe('FOLLOWING');
     expect(state.isMoving).toBe(false);
     expect(state.cartPosition).toEqual(ZONE_POSITIONS[2]);
