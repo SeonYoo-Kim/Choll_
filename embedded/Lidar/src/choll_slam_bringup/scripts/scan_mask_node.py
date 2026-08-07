@@ -1,90 +1,107 @@
 #!/usr/bin/env python3
-"""카트 자기차폐 섹터를 각도로 마스킹해 재발행하는 노드.
+"""카트 자기차폐 포인트를 걸러 `/scan`을 재발행하는 노드.
 
-왜 드라이버(`ignore_array`)가 아니라 별도 노드인가 — 2026-08-07 실측:
+두 가지 필터를 쓴다. 기본은 **박스 판정**이고, 각도 마스킹은 보조다.
 
-드라이버 `ignore_array`로 마스킹하면 스캔의 19.9%가 무효가 되고, rf2o가
-range 이미지 경계에서 허위 gradient를 만들어 **정지 상태에서 −0.4 deg/s**
-드리프트를 낸다(`S2_drift.log`). 마스킹을 끄면 같은 조건에서 yaw가 진동만
-하고 누적되지 않는다(`S2_drift_nomask.log`). 구조물 포인트는 센서 좌표계에서
-완전히 고정이라 스캔매칭을 붙잡아 주는 역할을 하고 있었다.
+박스 판정 (기본, 각도 무관)
+---------------------------
+반사점이 카트 상판 박스(`box_half_x` x `box_half_y`, laser_frame 기준) 안쪽이면
+버린다. 기하학적 근거: 박스 안은 카트 자기 몸통이고, 거기에 실제 장애물이 있다면
+이미 카트에 닿아 있는 상태다. 각도와 무관하므로 **카트를 옮기거나 케이블이
+흘러도 재산정이 필요 없다.**
 
-반면 slam_toolbox·Nav2는 구조물을 **반드시 걸러야** 한다. 0.12~0.46 m 포인트는
-`base_link` 기준 footprint 안쪽이라 지도에 영구 장애물로 박히고 Nav2 local
-costmap이 로봇을 상시 장애물로 둘러싼다.
+각도별 경계 거리는 ``r_box(t) = min(hx/|cos t|, hy/|sin t|)`` 이고,
+630 x 330 mm 기준으로 0.165 m(정면/후면) ~ 0.356 m(모서리) 사이다.
 
-거리 기반 필터(`min_laser_range` / `obstacle_min_range`)는 쓸 수 없다 —
-도서관 서가 통로에서 서가 자체가 라이다에서 0.3~0.4 m 거리라 벽이 지워진다.
-구조물은 특정 각도 섹터에만 있으므로 **각도로만** 잘라야 한다.
+왜 이 방식인가 — 2026-08-07 실측
+--------------------------------
+① 각도로 통째 자르면 먼 벽을 잃는다. 합판 절단면을 거의 평행하게 스치는 구간
+   (좌우 55~95°)에서 **유효율 98%인 빔이 10% 확률로 0.135 m를 보고**한다
+   (`S5_detail.log`의 p10 열). 그 구간을 각도로 막으면 이 장소의 가장 먼 관측
+   (+58~+60° 7.7 m, +87~+91° 6.7 m)이 통째로 사라져 스캔매칭 기준을 잃는다.
+② 거리로만 자르면 서가 통로에서 벽을 잃는다 (`slam_toolbox min_laser_range` /
+   Nav2 `obstacle_min_range`를 0.5로 올리면 라이다에서 0.3~0.4 m인 서가가 지워짐).
+③ 박스 판정은 둘을 합친 것이다. 잃는 시야가 거의 0이고 (실측: 환경 관측 316/440빔,
+   최대 8.81 m 유지) 자기 구조물만 정확히 걸러진다.
 
-그래서 배선을 이렇게 나눈다::
+왜 드라이버(`ignore_array`)가 아니라 노드인가
+---------------------------------------------
+드라이버에서 자르면 스캔의 19.9%가 무효가 되고 rf2o가 range 이미지 경계에서
+허위 gradient를 만들어 **정지 상태에서 -0.4 deg/s** 로 드리프트한다
+(`S2_drift.log`). 마스킹을 끄면 같은 조건에서 yaw가 진동만 하고 누적되지 않는다
+(`S2_drift_nomask.log`). 구조물 포인트는 센서 좌표계에서 완전히 고정이라
+스캔매칭을 붙잡아 주는 역할을 하고 있었다. 그래서 배선을 이렇게 나눈다::
 
     드라이버 → /scan_raw ──→ rf2o          (전체 스캔 → 드리프트 0)
                     └→ 이 노드 → /scan → slam_toolbox / Nav2 / AI
 
-`/scan`이 계약 토픽(docs/ROS2_API.md, ~11 Hz, BestEffort)이므로 마스킹된 쪽이
+`/scan`이 계약 토픽(docs/ROS2_API.md, ~11 Hz, BestEffort)이므로 걸러진 쪽이
 `/scan`을 유지한다. 구독 측 변경은 없다.
 
-마스킹 값은 NaN이다. 0.0은 Nav2가 range_min 미만으로 무시하지만 rf2o처럼
-0을 유효값으로 오해하는 소비자가 있을 수 있고, inf는 Nav2 obstacle_layer가
-`range_max - eps`로 바꿔 **raytrace 클리어링**을 유발해 그 방향의 실제
-장애물을 지운다. NaN은 laser_geometry·RViz·costmap 모두 그냥 버린다.
+마스킹 값은 NaN이다. 0.0은 Nav2가 range_min 미만으로 무시하지만 rf2o처럼 0을
+유효값으로 오해하는 소비자가 있을 수 있고, inf는 Nav2 obstacle_layer가
+`range_max - eps`로 바꿔 **raytrace 클리어링**을 유발해 그 방향의 실제 장애물을
+지운다. NaN은 laser_geometry·RViz·costmap 모두 그냥 버린다.
 """
 
 import math
 
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
-# 2026-08-07 실측 자기차폐 섹터(도). 여유각 ±2° 포함, 병합·정렬된 쌍.
-# 근거: 200스캔 시간 지속성 + 10분 간격 2회 측정 교차검증 (tests/TEST_LOG.md).
-#   -179..-173° 0.454 m | -161..-160° 0.121 | -157..-148° 0.128 | -138° 0.185
-#    -88..-86°  0.170   |  -81..-77°  0.131 |  -74..-73°  0.136 (좌 기둥 2개)
-#    +73..+74°  0.143   |  +79..+80°  0.141 (우 기둥 2개)
-#   +165..+167° 0.185   | +178..+180° 0.459
-DEFAULT_MASK_DEG = [
-    -180.0,
-    -171.0,
-    -163.0,
-    -146.0,
-    -140.0,
-    -136.0,
-    -90.0,
-    -71.0,
-    71.0,
-    82.0,
-    163.0,
-    169.0,
-    176.0,
-    180.0,
-]
+# 카트 상판 실측(2026-08-07 사용자 제공): 가로 630 x 세로 330 mm.
+# 원래 600x300이었으나 선 정리한 케이블이 선반 바깥으로 지나가 확장.
+# 라이다는 각 변의 중앙에 있으므로 laser_frame 기준 반폭/반깊이가 된다.
+DEFAULT_BOX_HALF_X = 0.165  # 세로 330 mm / 2 (전방/후방)
+DEFAULT_BOX_HALF_Y = 0.315  # 가로 630 mm / 2 (좌/우)
+# 장착·측정 공차. 0.15면 측면 경계가 0.362 m — 실측된 합판 절단면 스침
+# (좌 0.15~0.19 m, 우 0.25~0.37 m)을 모두 덮는다.
+DEFAULT_BOX_TOLERANCE = 0.15
+
+# 각도 마스킹은 기본 없음. 박스 판정으로 안 잡히는 구간이 나오면 여기에 쌍으로
+# 넣는다 (예: 스캔면에 걸치는 외부 부착물). 실측 근거 없이 채우지 말 것.
+DEFAULT_MASK_DEG: list[float] = []
 
 
 class ScanMaskNode(Node):
-    """`input_topic`을 받아 지정 각도 섹터를 NaN으로 만들어 `output_topic`에 낸다."""
+    """`input_topic`에서 카트 자기 구조물 반사를 걸러 `output_topic`으로 낸다."""
 
     def __init__(self) -> None:
-        """파라미터를 읽고 마스킹 섹터 쌍을 검증한 뒤 pub/sub을 만든다."""
+        """파라미터를 읽고 검증한 뒤 pub/sub을 만든다."""
         super().__init__("scan_mask_node")
         self.declare_parameter("input_topic", "/scan_raw")
         self.declare_parameter("output_topic", "/scan")
-        self.declare_parameter("mask_deg", DEFAULT_MASK_DEG)
+        self.declare_parameter("box_half_x", DEFAULT_BOX_HALF_X)
+        self.declare_parameter("box_half_y", DEFAULT_BOX_HALF_Y)
+        self.declare_parameter("box_tolerance", DEFAULT_BOX_TOLERANCE)
+        self.declare_parameter(
+            "mask_deg",
+            DEFAULT_MASK_DEG,
+            ParameterDescriptor(type=ParameterType.PARAMETER_DOUBLE_ARRAY),
+        )
 
         self._input_topic = str(self.get_parameter("input_topic").value)
         self._output_topic = str(self.get_parameter("output_topic").value)
-        mask = [float(v) for v in self.get_parameter("mask_deg").value]
+        self._hx = float(self.get_parameter("box_half_x").value)
+        self._hy = float(self.get_parameter("box_half_y").value)
+        self._tol = float(self.get_parameter("box_tolerance").value)
+        if self._hx <= 0.0 or self._hy <= 0.0:
+            raise ValueError(f"box 반폭은 양수여야 한다 (x={self._hx}, y={self._hy})")
+
+        mask = [float(v) for v in (self.get_parameter("mask_deg").value or [])]
         if len(mask) % 2 != 0:
             raise ValueError(f"mask_deg는 쌍이어야 한다 (현재 {len(mask)}개)")
         self._pairs: list[tuple[float, float]] = [
             (mask[i], mask[i + 1]) for i in range(0, len(mask), 2)
         ]
 
-        # 스캔 기하가 바뀔 때만 인덱스를 다시 계산한다 (라이다는 세션마다
-        # angle_increment가 조금씩 다르다 — 0.8200° / 0.8392° 실측).
+        # 스캔 기하가 바뀔 때만 다시 계산한다 (라이다는 세션마다 angle_increment가
+        # 조금씩 다르다 — 0.8200 / 0.8392 deg 실측).
         self._geom: tuple[int, float, float] | None = None
-        self._mask_idx: list[int] = []
+        self._limits: list[float] = []  # 빔별 박스 경계 거리, 섹터 마스킹은 inf
         self._reported = False
 
         self._pub = self.create_publisher(
@@ -93,50 +110,69 @@ class ScanMaskNode(Node):
         self._sub = self.create_subscription(
             LaserScan, self._input_topic, self._on_scan, qos_profile_sensor_data
         )
+        corner = math.degrees(math.atan2(self._hy, self._hx))
         self.get_logger().info(
-            f"scan_mask_node: {self._input_topic} -> {self._output_topic}, "
-            f"섹터 {len(self._pairs)}개 {self._pairs}"
+            f"scan_mask_node: {self._input_topic} -> {self._output_topic} | "
+            f"박스 {2000 * self._hx:.0f}x{2000 * self._hy:.0f}mm 공차 +{self._tol:.0%} "
+            f"→ 경계 정면 {self._box_limit(0.0):.3f} / "
+            f"모서리({corner:.1f}deg) {self._box_limit(corner):.3f} / "
+            f"측면 {self._box_limit(90.0):.3f} m | 섹터 마스킹 {len(self._pairs)}개"
         )
 
-    def _rebuild_index(self, msg: LaserScan) -> None:
-        """스캔 기하에 맞춰 마스킹할 빔 인덱스를 미리 계산한다."""
-        idx: list[int] = []
+    def _box_limit(self, deg: float) -> float:
+        """해당 방위각에서 "이보다 가까우면 카트 몸통" 인 거리 [m]."""
+        t = math.radians(deg)
+        c, s = abs(math.cos(t)), abs(math.sin(t))
+        rx = self._hx / c if c > 1e-9 else math.inf
+        ry = self._hy / s if s > 1e-9 else math.inf
+        return min(rx, ry) * (1.0 + self._tol)
+
+    def _rebuild(self, msg: LaserScan) -> None:
+        """스캔 기하에 맞춰 빔별 컷오프 거리를 미리 계산한다."""
+        limits: list[float] = []
+        n_sector = 0
         for i in range(len(msg.ranges)):
             deg = math.degrees(msg.angle_min + i * msg.angle_increment)
             deg = ((deg + 180.0) % 360.0) - 180.0
             if any(lo <= deg <= hi for lo, hi in self._pairs):
-                idx.append(i)
-        self._mask_idx = idx
+                limits.append(math.inf)  # 섹터 전체 제거
+                n_sector += 1
+            else:
+                limits.append(self._box_limit(deg))
+        self._limits = limits
         self._geom = (len(msg.ranges), msg.angle_min, msg.angle_increment)
         self.get_logger().info(
-            f"마스킹 인덱스 재계산: {len(idx)}/{len(msg.ranges)} 빔 "
-            f"({100.0 * len(idx) / max(1, len(msg.ranges)):.1f}%), "
+            f"컷오프 재계산: {len(limits)}빔, 섹터 전체제거 {n_sector}빔, "
             f"inc={math.degrees(msg.angle_increment):.4f}deg"
         )
 
     def _on_scan(self, msg: LaserScan) -> None:
-        """섹터를 NaN으로 바꿔 재발행한다."""
+        """카트 박스 안쪽 반사와 섹터 마스킹 구간을 NaN으로 바꿔 재발행한다."""
         geom = (len(msg.ranges), msg.angle_min, msg.angle_increment)
         if self._geom != geom:
-            self._rebuild_index(msg)
+            self._rebuild(msg)
 
         ranges = list(msg.ranges)
-        n = len(ranges)
-        for i in self._mask_idx:
-            if i < n:
+        dropped = 0
+        for i, r in enumerate(ranges):
+            if i >= len(self._limits):
+                break
+            # NaN/inf는 비교가 False가 되어 그대로 통과한다 (이미 무효값).
+            if r < self._limits[i]:
                 ranges[i] = math.nan
+                dropped += 1
         msg.ranges = ranges
         if msg.intensities:
             inten = list(msg.intensities)
-            for i in self._mask_idx:
-                if i < len(inten):
+            for i in range(min(len(inten), len(self._limits))):
+                if math.isnan(ranges[i]):
                     inten[i] = 0.0
             msg.intensities = inten
         self._pub.publish(msg)
 
         if not self._reported:
             self._reported = True
-            self.get_logger().info("첫 스캔 마스킹·재발행 완료")
+            self.get_logger().info(f"첫 스캔 처리 완료 — 제거 {dropped}빔")
 
 
 def main() -> None:

@@ -37,7 +37,10 @@ def generate_launch_description() -> LaunchDescription:
         remappings=[('scan', 'scan_raw'), ('point_cloud', 'point_cloud_raw')],
     )
 
-    # 자기차폐 섹터를 NaN으로 만들어 /scan 재발행 (섹터 목록은 노드 기본값)
+    # 카트 상판 박스 안쪽 반사(자기 구조물)를 NaN으로 만들어 /scan 재발행.
+    # 박스 치수·공차 기본값과 근거는 scan_mask_node.py 도크스트링 참조.
+    # 각도 섹터 마스킹(mask_deg)은 기본 없음 — 박스 판정으로 안 잡히는 것이
+    # 실측으로 확인될 때만 추가한다.
     scan_mask_node = Node(
         package='choll_slam_bringup',
         executable='scan_mask_node.py',
