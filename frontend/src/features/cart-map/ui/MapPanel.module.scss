@@ -12,6 +12,8 @@
   // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다.
   // 실제 값은 MapPanel이 FLOOR_PLAN_SIZE로 덮어쓴다 (그림을 바꿔도 한 곳만 고치도록)
   aspect-ratio: 1707 / 921;
+  // 구역 안팎을 가리지 않고 누른 자리가 목적지가 된다 (BE가 이동 가능 지점으로 스냅)
+  cursor: pointer;
   border: 1px solid $border-panel;
   border-radius: 22px;
   background: #fffdf8;
@@ -36,7 +38,7 @@
 
 .zone {
   position: absolute;
-  cursor: pointer; // 통로가 눌러서 목적지를 정하는 영역임을 커서로 알린다
+  cursor: inherit; // 지도 전체가 클릭 대상이라 구역 안이라고 커서를 달리 하지 않는다
   border: 2px dashed transparent;
   border-radius: 16px;
   background: transparent;
@@ -50,7 +52,9 @@
     background: rgba(105, 194, 182, 0.08);
   }
 
-  &:disabled {
+  // disabled가 아니라 aria-disabled인 이유: disabled 버튼은 클릭 이벤트가 발생하지 않아
+  // 눌러도 "이동 중이에요" 안내조차 뜨지 않는다 (MapPanel의 busy 검사 참조)
+  &[aria-disabled='true'] {
     cursor: wait;
   }
 }
