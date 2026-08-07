@@ -1,7 +1,14 @@
-"""X4Pro 라이다 브링업: ydlidar_ros2_driver_node + base_link->laser_frame 정적 TF.
+"""X4Pro 라이다 브링업: 드라이버 + 자기차폐 마스킹 + base_link->laser_frame 정적 TF.
+
+토픽 배선 (2026-08-07 변경 — 근거는 scripts/scan_mask_node.py 도크스트링):
+    드라이버 → /scan_raw ──→ rf2o          (전체 스캔 → 정지 드리프트 0)
+                    └→ scan_mask_node → /scan → slam_toolbox / Nav2 / AI
+
+드라이버 `ignore_array`로 마스킹하면 rf2o가 정지 상태에서 -0.4 deg/s 드리프트를
+내므로 마스킹을 노드로 옮겼다. `/scan`은 계약 토픽이라 이름·QoS를 유지한다.
 
 실행:  ros2 launch choll_slam_bringup lidar.launch.py
-확인:  ros2 topic hz /scan   (X4Pro 기본 회전수 기준 6~12 Hz 기대)
+확인:  ros2 topic hz /scan /scan_raw   (X4Pro 기본 회전수 기준 6~12 Hz 기대)
 """
 import os
 
@@ -25,6 +32,19 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
         emulate_tty=True,
         parameters=[params_file],
+        # 드라이버는 원본을 /scan_raw로 낸다 (rf2o 전용). 마스킹된 /scan은
+        # scan_mask_node가 발행한다.
+        remappings=[('scan', 'scan_raw'), ('point_cloud', 'point_cloud_raw')],
+    )
+
+    # 자기차폐 섹터를 NaN으로 만들어 /scan 재발행 (섹터 목록은 노드 기본값)
+    scan_mask_node = Node(
+        package='choll_slam_bringup',
+        executable='scan_mask_node.py',
+        name='scan_mask_node',
+        output='screen',
+        emulate_tty=True,
+        parameters=[{'input_topic': '/scan_raw', 'output_topic': '/scan'}],
     )
 
     # base_link -> laser_frame 정적 TF
@@ -60,5 +80,6 @@ def generate_launch_description() -> LaunchDescription:
             description='ydlidar_ros2_driver 파라미터 YAML 경로',
         ),
         driver_node,
+        scan_mask_node,
         static_tf_node,
     ])

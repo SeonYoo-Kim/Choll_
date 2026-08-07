@@ -20,7 +20,10 @@ def generate_launch_description() -> LaunchDescription:
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan',
+                # 🔴 반드시 마스킹 전 원본. 마스킹된 /scan을 주면 range 이미지에
+                # 구멍이 생겨 정지 상태에서도 -0.4 deg/s 드리프트가 난다
+                # (2026-08-07 실측, scripts/scan_mask_node.py 도크스트링 참조).
+                'laser_scan_topic': '/scan_raw',
                 'odom_topic': '/odom_rf2o',   # 휠 odom(/odom 예정)과 이름 충돌 방지
                 'publish_tf': True,           # odom -> base_link TF 발행
                 'base_frame_id': 'base_link',

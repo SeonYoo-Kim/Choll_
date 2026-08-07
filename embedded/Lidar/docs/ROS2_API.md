@@ -8,7 +8,7 @@
 
 | 메시지 ID | Topic | 메시지 타입 | 명세서 상태 | 실제 구현 | 비고 |
 |---|---|---|---|---|---|
-| ROS2-07 | `/scan` | sensor_msgs/LaserScan | 완료 | ✅ ydlidar 드라이버 발행(~11Hz, 센서 QoS). rf2o·slam_toolbox·Nav2 costmap×2가 구독 | 구독 측 **BEST_EFFORT** 필수 (Nav2 costmap은 기본이 센서 QoS라 설정 불필요) |
+| ROS2-07 | `/scan` | sensor_msgs/LaserScan | 완료 | ✅ **`scan_mask_node` 발행**(~11Hz, 센서 QoS) — 드라이버 원본(`/scan_raw`)에서 카트 자기차폐 7섹터(83/430빔, 19.3%)를 NaN으로 만든 것. slam_toolbox·Nav2 costmap×2·AI가 구독 | 구독 측 **BEST_EFFORT** 필수 (Nav2 costmap은 기본이 센서 QoS라 설정 불필요). 2026-08-07 발행 주체 변경 — 토픽명·타입·QoS는 불변이라 구독 측 영향 없음 |
 | ROS2-08 | `/robot_pose` | geometry_msgs/PoseStamped | 진행 중 (EM 미구현) | ✅ **구현 완료** — `cart_pose_publisher`가 TF map→base_link에서 10Hz 발행, frame=map, RELIABLE | **노션 상태를 "완료"로, Publisher를 `cart_pose_publisher`로 갱신 요청**. odom 프레임 포즈 금지 규약 준수 |
 | ROS2-09 | `/target_position` | geometry_msgs/PointStamped | 진행 중 (EM 미구현) | ✅ **구현 완료** — `goal_forwarder`가 구독 → auto_orient(방향 자동)·approach_distance(1.0m 권장) 보정 후 Nav2 전달. 스로틀: 간격 1s(상시)+이동 0.3m(주행 중/성공 후) | **노션 상태를 "완료"로, Subscriber를 `goal_forwarder`로 갱신 요청** |
 | ROS2-10 | `/cmd_vel` | geometry_msgs/Twist | 완료 (데모용 보존) | ⚠️ **발행 주체 충돌** — 명세는 AI `control_node`→`motor_node`(추종 데모). NAV 스택에서는 **Nav2 velocity_smoother가 발행**(20Hz, \|v\|≤0.3·\|ω\|≤0.6 클램프; 리커버리 중엔 behavior_server 직접 발행) | 추종 데모와 Nav2를 **동시에 켜면 이중 발행 충돌** — 운영 모드 일원화 팀 합의 필요 (명세서 방향은 ROS2-09→Nav2 경로) |
@@ -44,11 +44,12 @@ ROS2-01~06, 11, 13은 AI 파트 내부 토픽으로 Lidar 패키지와 무관 (�
 | 분류 | 이름 | 근거 |
 |---|---|---|
 | Nav2 내부 토픽 | `/cmd_vel_nav`(controller→smoother), `/plan`, `/local_plan`, `/local_costmap/*`, `/global_costmap/*`, `/map_updates`, DWB 디버그 토픽 | Nav2 노드 간 배선 — 외부 파트가 구독/발행할 일 없음 |
-| 드라이버 부산물 | `/point_cloud` (ydlidar) | 아무도 구독 안 함 (드라이버 기본 발행) |
+| 마스킹 전 원본 스캔 | `/scan_raw` (ydlidar 드라이버, 센서 QoS ~11Hz) — 구독자는 **rf2o와 `scan_mask_node` 둘만** | 🔴 rf2o는 **반드시 원본**을 써야 한다: 마스킹된 스캔을 주면 range 이미지 경계에서 허위 gradient가 생겨 정지 상태에서도 yaw가 −0.4 deg/s로 단조 드리프트한다(2026-08-07 실측, `tests/TEST_LOG.md`). 다른 파트는 `/scan`만 쓸 것 |
+| 드라이버 부산물 | `/point_cloud_raw` (ydlidar) | 아무도 구독 안 함 (드라이버 기본 발행. `/scan`→`/scan_raw` 리맵과 함께 이름이 바뀜) |
 | 위치추정 모드 전용 | `/initialpose`, `/amcl_pose`, `/particle_cloud` | 저장 지도 모드에서 RViz 2D Pose Estimate용 |
 | 액션 | `navigate_to_pose` (goal_forwarder→bt_navigator), follow_path·compute_path_to_pose·spin·wait 등 | Nav2 표준 — 팀 인터페이스는 ROS2-09/14가 감쌈 |
 | 서비스 | `/slam_toolbox/serialize_map` (지도 저장 절차), costmap clear (BT 리커버리가 호출) | 운영 절차용 — README에 기재 |
-| TF | `map→odom`(slam_toolbox/AMCL 중 하나만)→`base_link`(rf2o)→`laser_frame`(정적, z=0.20 TODO-실측). 카메라 장착 시 `base_link→camera_frame` 추가 예정 | 프레임 이름이 사실상의 계약 — 임의 변경 금지 |
+| TF | `map→odom`(slam_toolbox/AMCL 중 하나만)→`base_link`(rf2o)→`laser_frame`(정적, x=0.30 y=0.0 **z=0.32 실측 2026-08-07**). 카메라 장착 시 `base_link→camera_frame` 추가 예정 | 프레임 이름이 사실상의 계약 — 임의 변경 금지 |
 
 ## 부록 2. 명세서·문서 후속 조치 체크리스트
 

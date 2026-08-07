@@ -62,7 +62,8 @@
 | `/target_position` | PointStamped | 구독 | 명세 ROS2-09 (AI 발행). 스로틀 적용 |
 | `/cart/target_pose` | PoseStamped | 구독 | 단발 명령. frame_id 필수, 스로틀 없음 (제안 ROS2-14) |
 | `/cart/cancel` / `/cart/nav_status` | String / String | 구독/발행(래치) | 제안 ROS2-15/16. cancel data=requestId(선택) |
-| `/scan` | LaserScan | 발행 ~11Hz | 구독 측 **BestEffort** 필수 |
+| `/scan` | LaserScan | 발행 ~11Hz | `scan_mask_node`가 자기차폐 7섹터를 NaN으로. 구독 측 **BestEffort** 필수 |
+| `/scan_raw` | LaserScan | 발행 ~11Hz | 드라이버 원본. **rf2o 전용** — 마스킹된 `/scan`을 주면 정지 드리프트 −0.4°/s |
 | `/odom_rf2o` | Odometry | 발행 10Hz | 임시. `/odom`은 휠 오도메트리 예약 |
 | `/cmd_vel` | Twist | Nav2 발행 20Hz | ⚠ AI control_node와 발행 주체 충돌 — 동시 구동 금지 |
 
@@ -81,6 +82,9 @@ SELECT_TARGET은 AI `fe_bridge_node` 담당 — 이 브릿지에서 처리 금�
 - `src/ydlidar_ros2_driver`, `src/rf2o_laser_odometry`는 upstream — **직접 수정
   금지, 커밋 금지**(.gitignore 처리). 설정 변경은 항상 choll_* 쪽 yaml/launch에서.
 - YDLIDAR X4 Pro: baud **128000**(115200 아님), 싱글채널(시리얼 회전속도 제어 불가).
+- 자기차폐 마스킹은 **`x4pro.yaml`의 `ignore_array`가 아니라 `scan_mask_node`에서** 한다.
+  드라이버에서 자르면 rf2o가 정지 상태에서 yaw −0.4°/s로 단조 드리프트한다
+  (2026-08-07 실측). `ignore_array`는 빈 문자열로 유지할 것.
 - `bench:=true` 파라미터는 모터리스 검증 전용 — **실주행은 기본 nav2_params.yaml**.
 - 후진 금지 설계: 커스텀 BT(navigate_to_pose_no_backup.xml)가 1차 방어 —
   BT/behavior 설정 변경 시 이 전제를 깨지 말 것.
