@@ -71,11 +71,10 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   - `{"requestId","command":"MOVE","zoneId","target":{"x","y"},"pixel":{"x","y"}}` —
     **target은 SLAM 미터**(EM SLAM Nav의 goal 좌표. BE가 지도 메타로 픽셀→미터 역변환,
     `mqtt.position-unit=meters`일 때만 — pixels 모드에선 null), pixel은 지도 이미지 픽셀(참고용).
-    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 그 지점, 없으면 구역 bbox 중심.
-    **클릭 지점이 요청 구역 폴리곤 밖이면(서가·테이블 위) 구역 안 최근접점으로 스냅**한다
-    (`NavigationService.snapIntoZone` — 경계에서 `navigation.snap-margin-meters`(기본 0.5m)만큼
-    안쪽. FE가 지도 전체 자유 클릭으로 바뀌어 장애물 좌표가 올라오기 때문). 스냅 대상은 항상
-    요청에 실린 구역 하나다 — FE가 고른 가장 가까운 구역과 사서에게 안내한 구역이 어긋나지 않게
+    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 **그 지점 그대로**, 없으면 구역 bbox 중심.
+    통로 등 구역 밖 좌표도 목적지가 될 수 있어 **BE는 스냅하지 않는다**(2026-08-07 자유 좌표 이동) —
+    장애물(서가·테이블) 클릭을 고정 정차점으로 바꾸는 것은 FE 평면도(MAP_LANDMARKS)의 책임이고,
+    그래도 도달 불가한 goal은 Nav2가 거부해 `status/nav-result`(ABORTED·REJECTED)→FAILED로 알린다
   - `{"requestId","command":"CANCEL","zoneId"}` — 좌표 없음
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환
