@@ -52,9 +52,12 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   **선행 슬래시를 붙이지 않는다** — `/status/…`는 빈 최상위 레벨을 만든다 (ROS 토픽과 혼동 주의).
 - **MQTT** (카트→BE, 현재 확정분):
   - `status/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계.
-    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 지도 메타(resolution·origin)로
-    이미지 픽셀 변환(세로축 뒤집기 포함). 기본값 pixels(무변환) — EM 발행 시작 시 meters로 전환 +
-    `library_maps`(id=`mqtt.map-id`) 행에 실제 map.yaml 값 입력 필요
+    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 이미지 픽셀로 변환.
+    기본값 pixels(무변환). 변환 방식 2가지(2026-08-07): `library_maps`에 **아핀 6계수**(affine_a11~ty)가
+    있으면 그걸 우선 사용 — FE 평면도가 SLAM 지도에서 회전·좌우반전·크롭을 거쳐 만들어져
+    resolution·origin(세로반전식)으로는 표현 불가. 계수는 현장 캘리브레이션
+    (`scripts/calibrate_map_transform.py`, 대응점 3+개 → UPDATE SQL)으로 넣는다.
+    계수가 비어 있으면 기존 resolution·origin 방식으로 폴백
   - `status/slot` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
   - `status/cart` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
