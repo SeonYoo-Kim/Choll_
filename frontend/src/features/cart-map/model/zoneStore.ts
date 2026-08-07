@@ -103,6 +103,38 @@ export function zoneIndexOf(zoneId: number): number | null {
   return index === -1 ? null : index;
 }
 
+/** 점에서 사각형까지의 거리 (% 단위). 사각형 안이면 0 */
+function distanceToRect(point: MapPercent, rect: ZoneRect): number {
+  const dx = Math.max(rect.left - point.x, 0, point.x - (rect.left + rect.width));
+  const dy = Math.max(rect.top - point.y, 0, point.y - (rect.top + rect.height));
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * 지도 % 좌표에서 가장 가까운 구역 인덱스(0-base). 구역 목록이 비었으면 null.
+ *
+ * 서가·테이블처럼 어느 구역에도 속하지 않는 지점을 눌렀을 때 쓴다. **목적지를 정하는 값이 아니다** —
+ * 카트가 실제로 갈 자리는 함께 보내는 클릭 좌표로 BE가 정한다(이동 불가 지점이면 가장 가까운
+ * 이동 가능 지점으로 스냅). 이 값은 NAV-01의 필수 필드 `zoneId`를 채우기 위한 것이다.
+ * BE가 스냅한 지점이 여기서 고른 구역과 다를 수 있다.
+ */
+export function nearestZoneIndex(point: MapPercent): number | null {
+  const zones = currentZones();
+  if (zones.length === 0) {
+    return null;
+  }
+  let nearest = 0;
+  let shortest = Infinity;
+  zones.forEach((zone, index) => {
+    const distance = distanceToRect(point, zone.rect);
+    if (distance < shortest) {
+      shortest = distance;
+      nearest = index;
+    }
+  });
+  return nearest;
+}
+
 /** 지도 % 좌표가 속한 구역 인덱스(0-base). 어느 구역에도 없으면(통로·서가·테이블) null */
 export function zoneIndexOfPoint(point: MapPercent): number | null {
   const index = currentZones().findIndex(

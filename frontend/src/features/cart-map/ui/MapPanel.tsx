@@ -4,9 +4,9 @@ import { useRef } from 'react';
 import { useStartNavigation } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
 import { FLOOR_PLAN_IMAGE, FLOOR_PLAN_SIZE } from '../model/floorPlanImage';
-import { clientPointToDisplay, percentToDisplay } from '../model/mapTransform';
+import { clientPointToPercent, percentToDisplay } from '../model/mapTransform';
 import { zoneLabel } from '../model/zones';
-import { useZoneStore } from '../model/zoneStore';
+import { nearestZoneIndex, useZoneStore, zoneIndexOfPoint } from '../model/zoneStore';
 
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { DEMO_CART_ID } from '@/shared/config/cart';
@@ -14,6 +14,7 @@ import { useToastStore } from '@/shared/ui/toast/toastStore';
 
 import styles from './MapPanel.module.scss';
 
+import type { MapPercent } from '../model/mapTransform';
 import type { CSSProperties, MouseEvent } from 'react';
 
 /** 지도 영역의 가로세로 비율 — 평면도 원본 그대로 (crop 방지) */
@@ -79,26 +80,22 @@ export function MapPanel() {
     );
   }
 
-  /**
-   * 누른 지점을 BE 지도 픽셀 좌표로 바꾼다 — 구역 한가운데가 아니라 사서가 찍은 자리로 보내기 위함.
-   * 키보드로 버튼을 누르면 좌표가 없으므로(detail 0) null을 준다.
-   */
-  const clickedPoint = (event: MouseEvent<HTMLElement>) => {
-    if (event.detail === 0 || mapImageRef.current === null) {
-      return null;
-    }
-    return clientPointToDisplay(
-      { x: event.clientX, y: event.clientY },
-      mapImageRef.current.getBoundingClientRect(),
-      mapInfo,
-    );
-  };
+  // 이동 명령을 받을 수 없는 상태. 버튼을 disabled로 막지 않고 여기서 검사하는 이유:
+  // disabled 버튼은 클릭 이벤트 자체가 발생하지 않아, 눌러도 아무 안내 없이 조용하다.
+  const busy = cartStatus !== 'IDLE' || following || isPending;
 
-  const handleZoneClick = (zoneIndex: number, event: MouseEvent<HTMLButtonElement>) => {
-    // 같은 클릭을 지도 전체 핸들러가 한 번 더 처리하지 않게 한다
-    event.stopPropagation();
-    if (zoneIndex === cartZone) {
-      notify(`${zoneLabel(zoneIndex)}에 이미 카트가 있어요`);
+  /**
+   * 누른 지점으로 이동 명령을 보낸다.
+   *
+   * **목적지는 좌표다.** 서가·테이블 위를 눌러도 막지 않는다 — 카트가 들어갈 수 없는 지점이면
+   * BE가 가장 가까운 이동 가능 지점으로 스냅한다(2026-08-07 BE 확인).
+   *
+   * `zoneIndex`는 NAV-01의 필수 필드 `zoneId`를 채우기 위한 값일 뿐 목적지를 정하지 않는다.
+   * `point`가 null이면(키보드 조작) 그 구역의 중심으로 보낸다.
+   */
+  const requestMove = (zoneIndex: number, point: MapPercent | null) => {
+    if (busy) {
+      notify('카트가 이동 중이에요. 정지한 뒤 다시 지정해주세요');
       return;
     }
     const zone = zones[zoneIndex];
@@ -110,18 +107,46 @@ export function MapPanel() {
       notify(`${zoneLabel(zoneIndex)}의 구역 정보를 서버에서 받지 못해 이동할 수 없어요`);
       return;
     }
-    // 마우스로 누르면 그 지점, 키보드로 누르면 구역 중심을 목적지로 삼는다
-    const point = clickedPoint(event) ?? percentToDisplay(zone.center, mapInfo);
+    const target = percentToDisplay(point ?? zone.center, mapInfo);
     startNavigation({
       cartId: DEMO_CART_ID,
-      data: { zoneId: zone.id, x: Math.round(point.x), y: Math.round(point.y) },
+      data: { zoneId: zone.id, x: Math.round(target.x), y: Math.round(target.y) },
     });
   };
 
-  // 구역 버튼이 stopPropagation으로 자기 클릭을 가져가므로, 여기까지 온 클릭은 통로 밖이다.
-  // 서가·테이블 위는 카트가 들어갈 수 없고 BE도 zoneId 없는 목적지를 받지 않는다.
-  const handleOutsideClick = () => {
-    notify('카트가 갈 수 있는 통로를 눌러주세요');
+  /**
+   * 누른 지점을 지도 % 좌표로 바꾼다 — 구역 한가운데가 아니라 사서가 찍은 자리로 보내기 위함.
+   * 키보드로 버튼을 누르면 좌표가 없으므로(detail 0) null을 준다.
+   */
+  const clickedPercent = (event: MouseEvent<HTMLElement>) => {
+    if (event.detail === 0 || mapImageRef.current === null) {
+      return null;
+    }
+    return clientPointToPercent(
+      { x: event.clientX, y: event.clientY },
+      mapImageRef.current.getBoundingClientRect(),
+    );
+  };
+
+  const handleZoneClick = (zoneIndex: number, event: MouseEvent<HTMLButtonElement>) => {
+    // 같은 클릭을 지도 전체 핸들러가 한 번 더 처리하지 않게 한다
+    event.stopPropagation();
+    requestMove(zoneIndex, clickedPercent(event));
+  };
+
+  // 구역 버튼이 stopPropagation으로 자기 클릭을 가져가므로, 여기까지 온 클릭은 구역 밖이다.
+  // 좌표는 누른 그대로 보내고 zoneId만 가장 가까운 구역으로 채운다.
+  const handleMapClick = (event: MouseEvent<HTMLDivElement>) => {
+    const point = clickedPercent(event);
+    if (point === null) {
+      return;
+    }
+    const zoneIndex = zoneIndexOfPoint(point) ?? nearestZoneIndex(point);
+    if (zoneIndex === null) {
+      notify('구역 정보를 불러오지 못해 이동할 수 없어요');
+      return;
+    }
+    requestMove(zoneIndex, point);
   };
 
   return (
@@ -131,13 +156,13 @@ export function MapPanel() {
       <div
         className={styles.canvas}
         style={{ aspectRatio: PLAN_ASPECT_RATIO }}
-        onClick={handleOutsideClick}
+        onClick={handleMapClick}
       >
         <img ref={mapImageRef} src={FLOOR_PLAN_IMAGE} alt="" className={styles.mapImage} />
         {zones.map((zone, i) => (
           <button
             key={zone.code}
-            disabled={cartStatus !== 'IDLE' || following || isPending}
+            aria-disabled={busy}
             onClick={(event) => handleZoneClick(i, event)}
             aria-label={`${zoneLabel(i)} ${zone.name}로 카트 이동`}
             className={`${styles.zone} ${i === cartZone ? styles.zoneActive : ''}`}

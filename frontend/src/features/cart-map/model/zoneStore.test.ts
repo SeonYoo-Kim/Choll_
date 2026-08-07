@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ZONE_CODES } from './zones';
 import {
   PLAN_ZONES,
+  nearestZoneIndex,
   useZoneStore,
   zoneIdOf,
   zoneIndexOf,
@@ -88,5 +89,30 @@ describe('zoneStore', () => {
     });
     // 서가·테이블이 있는 위쪽 여백은 어느 구역에도 속하지 않는다
     expect(zoneIndexOfPoint({ x: 50, y: 5 })).toBeNull();
+  });
+
+  describe('nearestZoneIndex', () => {
+    it('구역 안의 점은 그 구역을 준다', () => {
+      PLAN_ZONES.forEach((zone, index) => {
+        expect(nearestZoneIndex(zone.center)).toBe(index);
+      });
+    });
+
+    it('구역 사이 서가 위의 점은 더 가까운 쪽 구역을 준다', () => {
+      // 3구역(x 4.1~21.0)과 2구역(x 37.0~54.1) 사이 — 왼쪽에 붙은 점
+      expect(nearestZoneIndex({ x: 25, y: 50 })).toBe(2);
+      // 같은 틈에서 오른쪽에 붙은 점
+      expect(nearestZoneIndex({ x: 34, y: 50 })).toBe(1);
+    });
+
+    it('구역 위쪽 테이블 영역은 바로 아래 구역을 준다', () => {
+      // 1구역(x 70.1~86.2) 바로 위 — 가로로는 구역 안이라 세로 거리만 남는다
+      expect(nearestZoneIndex({ x: 78, y: 5 })).toBe(0);
+    });
+
+    it('구역 목록이 비면 null', () => {
+      useZoneStore.setState({ zones: [] });
+      expect(nearestZoneIndex({ x: 50, y: 50 })).toBeNull();
+    });
   });
 });
