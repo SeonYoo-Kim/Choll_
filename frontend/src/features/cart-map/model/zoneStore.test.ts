@@ -99,10 +99,10 @@ describe('zoneStore', () => {
     });
 
     it('구역 사이 서가 위의 점은 더 가까운 쪽 구역을 준다', () => {
-      // 3구역(x 4.1~21.0)과 2구역(x 37.0~54.1) 사이 — 왼쪽에 붙은 점
-      expect(nearestZoneIndex({ x: 25, y: 50 })).toBe(2);
+      // 3구역(x 1.0~25.5)과 2구역(x 45.0~63.1) 사이 — 왼쪽에 붙은 점
+      expect(nearestZoneIndex({ x: 28, y: 50 })).toBe(2);
       // 같은 틈에서 오른쪽에 붙은 점
-      expect(nearestZoneIndex({ x: 34, y: 50 })).toBe(1);
+      expect(nearestZoneIndex({ x: 42, y: 50 })).toBe(1);
     });
 
     it('구역 위쪽 테이블 영역은 바로 아래 구역을 준다', () => {

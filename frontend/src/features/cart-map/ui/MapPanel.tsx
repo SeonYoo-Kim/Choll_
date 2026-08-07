@@ -47,18 +47,20 @@ export function MapPanel() {
   // 어느 쪽이 이기는지 EM과 정해진 바가 없어, 먼저 추종을 멈추도록 잠근다.
   const following = runState === 'FOLLOWING' || runState === 'PAUSED';
 
-  // 이번 요청의 목적지가 테이블이면 그 이름 — NAV-01 페이로드에는 구역 id만 실리므로,
-  // 시작 토스트와 도착 안내를 테이블 이름으로 하려면 요청 밖에서 따로 들고 있어야 한다.
+  // 이번 요청의 안내 방법 — NAV-01 페이로드에는 구역 id만 실리므로, "무엇을 눌러 시작한
+  // 이동인가"(서가·테이블·자유 지점)는 요청 밖에서 따로 들고 있어야 한다.
   // state가 아니라 ref인 이유: 요청→응답 사이에 리렌더가 필요한 값이 아니다
-  const pendingLandmarkName = useRef<string | null>(null);
+  const pendingAnnounce = useRef<{ name: string; toastOnArrival: boolean } | null>(null);
 
   const { mutate: startNavigation, isPending } = useStartNavigation({
     mutation: {
       onSuccess: (_, { data }) => {
-        const landmarkName = pendingLandmarkName.current;
-        startMove(landmarkName ?? undefined);
-        if (landmarkName !== null) {
-          notify(`${landmarkName}로 카트가 이동을 시작해요`);
+        const announce = pendingAnnounce.current;
+        // 도착을 토스트로 알릴 이동만 landmarkDestination에 기록한다 —
+        // 서가행은 이름으로 시작을 알리되 도착은 구역 정리 모달이 받는다
+        startMove(announce?.toastOnArrival ? announce.name : undefined);
+        if (announce !== null) {
+          notify(`${announce.name}로 카트가 이동을 시작해요`);
           return;
         }
         const zoneIndex = zones.findIndex((zone) => zone.id === data.zoneId);
@@ -97,14 +99,20 @@ export function MapPanel() {
   /**
    * 누른 지점으로 이동 명령을 보낸다.
    *
-   * **목적지는 좌표다.** 서가·테이블 위를 눌러도 막지 않는다 — 카트가 들어갈 수 없는 지점이면
-   * BE가 가장 가까운 이동 가능 지점으로 스냅한다(2026-08-07 BE 확인).
+   * **목적지는 좌표 그대로다.** BE는 스냅하지 않는다 — 장애물(서가·테이블) 위 클릭을 고정
+   * 정차점으로 바꾸는 책임은 이 화면(MAP_LANDMARKS)에 있고, 그래도 도달 불가한 좌표는
+   * Nav2가 거부해 실패 토스트가 뜬다(status/nav-result 상행).
    *
    * `zoneIndex`는 NAV-01의 필수 필드 `zoneId`를 채우기 위한 값일 뿐 목적지를 정하지 않는다.
    * `point`가 null이면(키보드 조작) 그 구역의 중심으로 보낸다.
-   * `landmarkName`이 있으면 이 이동은 테이블행 — 시작·도착 안내가 구역이 아니라 그 이름으로 나간다.
+   * `announce`가 있으면 시작 토스트가 구역 번호 대신 그 이름으로 나가고,
+   * `toastOnArrival`이면 도착도 구역 정리 모달 대신 이름 토스트로 알린다.
    */
-  const requestMove = (zoneIndex: number, point: MapPercent | null, landmarkName?: string) => {
+  const requestMove = (
+    zoneIndex: number,
+    point: MapPercent | null,
+    announce?: { name: string; toastOnArrival: boolean },
+  ) => {
     if (busy) {
       notify('카트가 이동 중이에요. 정지한 뒤 다시 지정해주세요');
       return;
@@ -118,7 +126,7 @@ export function MapPanel() {
       notify(`${zoneLabel(zoneIndex)}의 구역 정보를 서버에서 받지 못해 이동할 수 없어요`);
       return;
     }
-    pendingLandmarkName.current = landmarkName ?? null;
+    pendingAnnounce.current = announce ?? null;
     const target = percentToDisplay(point ?? zone.center, mapInfo);
     startNavigation({
       cartId: DEMO_CART_ID,
@@ -147,9 +155,9 @@ export function MapPanel() {
   };
 
   /**
-   * 사서·반납 테이블 클릭 — 누른 자리가 아니라 그 테이블의 **고정 정차점**으로 보낸다.
-   * 테이블은 장애물이라 그 위 좌표를 보내면 BE가 구역 안으로 옮긴다. 어디를 눌렀는지에 따라
-   * 정차 위치가 흔들리지 않게, 미리 정해둔(구역 안) 한 지점만 쓴다.
+   * 장애물(서가·테이블) 클릭 — 누른 자리가 아니라 그 장애물의 **고정 정차점**으로 보낸다.
+   * 장애물 위 좌표는 카트가 도달할 수 없다. 어디를 눌렀는지에 따라 정차 위치가 흔들리지 않게,
+   * 미리 정해둔(통로 안) 한 지점만 쓴다.
    */
   const handleLandmarkClick = (
     landmark: (typeof MAP_LANDMARKS)[number],
@@ -161,11 +169,15 @@ export function MapPanel() {
       notify('구역 정보를 불러오지 못해 이동할 수 없어요');
       return;
     }
-    requestMove(zoneIndex, landmark.stop, landmark.name);
+    requestMove(zoneIndex, landmark.stop, {
+      name: landmark.name,
+      toastOnArrival: landmark.arrival === 'toast',
+    });
   };
 
-  // 구역 버튼이 stopPropagation으로 자기 클릭을 가져가므로, 여기까지 온 클릭은 구역 밖이다.
-  // 좌표는 누른 그대로 보내고 zoneId만 가장 가까운 구역으로 채운다.
+  // 구역·장애물 버튼이 stopPropagation으로 자기 클릭을 가져가므로, 여기까지 온 클릭은
+  // 빈 바닥(통로)이다. 좌표는 누른 그대로 보내고 zoneId만 가장 가까운 구역으로 채운다.
+  // 도착 지점이 구역 밖이라 구역 정리 모달이 어울리지 않는다 — "지정한 위치" 토스트로 알린다.
   const handleMapClick = (event: MouseEvent<HTMLDivElement>) => {
     const point = clickedPercent(event);
     if (point === null) {
@@ -176,7 +188,7 @@ export function MapPanel() {
       notify('구역 정보를 불러오지 못해 이동할 수 없어요');
       return;
     }
-    requestMove(zoneIndex, point);
+    requestMove(zoneIndex, point, { name: '지정한 위치', toastOnArrival: true });
   };
 
   return (
