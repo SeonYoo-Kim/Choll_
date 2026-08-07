@@ -1,6 +1,7 @@
 package com.ssafy.backend.mqtt.config;
 
 import com.ssafy.backend.mqtt.heartbeat.MqttHeartbeatMessageHandler;
+import com.ssafy.backend.mqtt.navresult.MqttNavResultMessageHandler;
 import com.ssafy.backend.mqtt.position.MqttPositionMessageHandler;
 import com.ssafy.backend.mqtt.rfid.MqttRfidMessageHandler;
 import com.ssafy.backend.mqtt.tracks.MqttTracksMessageHandler;
@@ -63,7 +64,8 @@ public class MqttConfig {
 				properties.getPositionTopic(),
 				properties.getStatusTopic(),
 				properties.getRfidTopic(),
-				properties.getTracksTopic()
+				properties.getTracksTopic(),
+				properties.getNavResultTopic()
 			);
 		adapter.setQos(properties.getQos());
 		adapter.setConverter(new DefaultPahoMessageConverter());
@@ -98,11 +100,16 @@ public class MqttConfig {
 		MqttPositionMessageHandler positionHandler,
 		MqttHeartbeatMessageHandler heartbeatHandler,
 		MqttRfidMessageHandler rfidHandler,
-		MqttTracksMessageHandler tracksHandler
+		MqttTracksMessageHandler tracksHandler,
+		MqttNavResultMessageHandler navResultHandler
 	) {
 		return message -> {
 			String topic = message.getHeaders()
 				.get(MqttHeaders.RECEIVED_TOPIC, String.class);
+			if (properties.getNavResultTopic().equals(topic)) {
+				navResultHandler.handle(message);
+				return;
+			}
 			if (properties.getTracksTopic().equals(topic)) {
 				tracksHandler.handle(message);
 				return;

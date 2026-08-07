@@ -39,8 +39,9 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   추종 세션은 인메모리(카트당 1건) — 카트 상행 결과 토픽 확정 시 대상 상실·거리 전환을 붙일 자리
 - **WebSocket**: `/ws/carts/{cartId}`, JSON, BE→FE 이벤트 13종 (WS-FE-01~13)
   — 실구현 7종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
-  `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED —
-  STARTED/ARRIVED/FAILED는 카트 상행 결과 토픽 확정 후), `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
+  `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED는
+  REST 접수 기준, STARTED/ARRIVED/FAILED는 `status/nav-result` 상행 반영 — 2026-08-07 구현),
+  `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
   `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용. **영상 시청자가 있을 때만 중계** —
   FE가 선택 모달을 열면 영상 WS에 붙는 것을 게이트로 사용, 모달 밖 콘솔·트래픽 스팸 차단),
   `FOLLOW_STATUS_UPDATED`(FOLLOWING/PAUSED/STOPPED — REST 접수 기준. 대상 인식 여부·거리는 카트 상행 확정 후)
@@ -59,12 +60,22 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
   - `status/target` (AI→BE, 5~10Hz) — `{"image_width","image_height","tracks":[{"id","x","y","w","h"}]}`
     (x,y=bbox 좌상단 픽셀) → WS `TRACKS_UPDATED`로 원형 그대로 중계
+  - `status/nav-result` (EM SLAM Nav→BE, 2026-08-07 합의) — ROS2 `/cart/nav_status`(ROS2-16) 7종을
+    MQTT로 중계: `{"status":"IDLE|NAVIGATING|SUCCEEDED|ABORTED|CANCELED|REJECTED|NAV2_UNAVAILABLE"}`
+    (평문 문자열 페이로드도 수용). BE 매핑: NAVIGATING→WS STARTED / SUCCEEDED→ARRIVED /
+    CANCELED→CANCELLED / ABORTED·REJECTED·NAV2_UNAVAILABLE→FAILED(+failReason), IDLE은 무시.
+    종료 상태는 이동 세션을 닫고 `carts.operation_status`를 IDLE로 되돌린다
+    (세션이 없으면 — REST 취소 선행·BE 재시작 — 이벤트 중복 없이 DB 정리만)
   - ⚠️ 수신 토픽 4종 모두 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 재협의 필요
 - **MQTT** (BE→카트 명령): `cmd/move/cart`
   - `{"requestId","command":"MOVE","zoneId","target":{"x","y"},"pixel":{"x","y"}}` —
     **target은 SLAM 미터**(EM SLAM Nav의 goal 좌표. BE가 지도 메타로 픽셀→미터 역변환,
     `mqtt.position-unit=meters`일 때만 — pixels 모드에선 null), pixel은 지도 이미지 픽셀(참고용).
-    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 그 지점, 없으면 구역 bbox 중심
+    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 그 지점, 없으면 구역 bbox 중심.
+    **클릭 지점이 요청 구역 폴리곤 밖이면(서가·테이블 위) 구역 안 최근접점으로 스냅**한다
+    (`NavigationService.snapIntoZone` — 경계에서 `navigation.snap-margin-meters`(기본 0.5m)만큼
+    안쪽. FE가 지도 전체 자유 클릭으로 바뀌어 장애물 좌표가 올라오기 때문). 스냅 대상은 항상
+    요청에 실린 구역 하나다 — FE가 고른 가장 가까운 구역과 사서에게 안내한 구역이 어긋나지 않게
   - `{"requestId","command":"CANCEL","zoneId"}` — 좌표 없음
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환

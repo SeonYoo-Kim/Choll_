@@ -16,6 +16,7 @@ import com.ssafy.backend.common.exception.InvalidDomainException;
 import com.ssafy.backend.map.domain.LibraryMap;
 import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.command.MqttCommandPublisher;
+import com.ssafy.backend.mqtt.position.PolygonZoneMatcher;
 import com.ssafy.backend.mqtt.position.SlamCoordinateConverter;
 import com.ssafy.backend.navigation.service.NavigationService;
 import com.ssafy.backend.websocket.CartEventPublisher;
@@ -75,11 +76,13 @@ class NavigationServiceTest {
 			zoneRepository,
 			mapRepository,
 			new SlamCoordinateConverter(),
+			new PolygonZoneMatcher(new ObjectMapper()),
 			eventPublisher,
 			commandPublisherProvider,
 			new ObjectMapper(),
 			positionUnit,
-			2L
+			2L,
+			0.5
 		);
 	}
 
@@ -148,6 +151,47 @@ class NavigationServiceTest {
 		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
 		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
 		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson())
+			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+
+		// 구역 안을 누른 경우 — 좌표를 손대지 않는다
+		service.start(1L, 7L, 612.0, 431.0);
+
+		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
+		verify(commandPublisher).publish(command.capture());
+		assertThat(command.getValue().toString())
+			.contains("pixel=Pixel[x=612.0, y=431.0]");
+	}
+
+	@Test
+	void snapsClickOutsideZoneToNearestPointInsideZone() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		// 0~100 정사각형 구역 (중심 50,50)
+		when(zone.getPolygonJson()).thenReturn("[[0,0],[100,0],[100,100],[0,100]]");
+		when(zone.getMap()).thenReturn(map);
+		when(map.getResolution()).thenReturn(new BigDecimal("0.05"));
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+
+		// 구역 왼쪽 밖(서가 위)을 누름 — 가장 가까운 경계는 (0,50)
+		service.start(1L, 7L, -50.0, 50.0);
+
+		// 경계에서 중심 쪽으로 여유 0.5m / 0.05m/px = 10px 안쪽
+		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
+		verify(commandPublisher).publish(command.capture());
+		assertThat(command.getValue().toString())
+			.contains("zoneId=7")
+			.contains("pixel=Pixel[x=10.0, y=50.0]");
+	}
+
+	@Test
+	void keepsClickedPixelWhenZonePolygonIsUnreadable() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson()).thenReturn("not-json");
 		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
 
 		service.start(1L, 7L, 612.0, 431.0);
@@ -236,6 +280,81 @@ class NavigationServiceTest {
 		// 취소할 실제 이동이 없으므로 MQTT·WS 발행은 없어야 한다
 		verify(commandPublisher, never()).publish(any());
 		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
+	void cartNavResultSucceededEndsSessionAndPublishesArrived() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson())
+			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+		long navigationId = service.start(1L, 7L).navigationId();
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.NAVIGATING);
+
+		service.applyCartNavResult(1L, "NAVIGATING");
+		service.applyCartNavResult(1L, "SUCCEEDED");
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+		// ACCEPTED(start) → STARTED(NAVIGATING) → ARRIVED(SUCCEEDED)
+		verify(eventPublisher, org.mockito.Mockito.times(3)).publish(
+			eq(1L),
+			eq("NAVIGATION_STATUS_UPDATED"),
+			event.capture()
+		);
+		assertThat(event.getAllValues().get(1).toString()).contains("status=STARTED");
+		assertThat(event.getAllValues().getLast().toString())
+			.contains("status=ARRIVED")
+			.contains("navigationId=" + navigationId);
+		// 세션이 닫혔으므로 새 이동을 다시 받을 수 있다
+		service.start(1L, 7L);
+	}
+
+	@Test
+	void cartNavResultAbortedPublishesFailedWithReason() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson())
+			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+		service.start(1L, 7L);
+
+		service.applyCartNavResult(1L, "ABORTED");
+
+		ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+		verify(eventPublisher, org.mockito.Mockito.times(2)).publish(
+			eq(1L),
+			eq("NAVIGATION_STATUS_UPDATED"),
+			event.capture()
+		);
+		assertThat(event.getAllValues().getLast().toString())
+			.contains("status=FAILED")
+			.contains("주행을 포기");
+	}
+
+	@Test
+	void cartNavResultWithoutSessionOnlyReconcilesCartStatus() {
+		// REST 취소가 먼저 세션을 정리한 뒤 카트의 CANCELED 확인 응답이 도착한 경우 —
+		// 이벤트를 중복 발행하지 않고 DB 상태만 정리한다
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.NAVIGATING);
+
+		service.applyCartNavResult(1L, "CANCELED");
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
+	void cartNavResultIdleAndUnknownAreIgnored() {
+		service.applyCartNavResult(1L, "IDLE");
+		service.applyCartNavResult(1L, "WARMING_UP");
+
+		verify(eventPublisher, never()).publish(any(), any(), any());
+		verify(cart, never()).updateStatus(any(), any(), any());
 	}
 
 	@Test
