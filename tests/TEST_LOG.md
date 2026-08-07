@@ -15,6 +15,275 @@
 
 ---
 
+## 2026-08-07 15:25 — ✅ BE: status/nav-result 상행 수신 + E2E 재검증 (Claude)
+
+- **배경**: EM이 ROS2 `/cart/nav_status`(ROS2-16, 7종)를 MQTT `status/nav-result`로 중계해주기로
+  확정(2026-08-07). 직전 E2E에서 확인된 공백 — BE가 ARRIVED를 못 보내 도착 안내가 안 뜨고
+  `carts.operation_status`가 NAVIGATING에 남던 문제 — 을 메우는 수신부 구현
+- **변경**:
+  - `MqttNavResultMessageHandler` 신규 — `{"status":"..."}` JSON과 평문 문자열(std_msgs/String
+    브리지 대비) 모두 수용, `mqtt.cart-id`로 귀속 (기존 수신 4종과 같은 단일 카트 제약)
+  - `NavigationService.applyCartNavResult` — NAVIGATING→WS STARTED / SUCCEEDED→ARRIVED /
+    CANCELED→CANCELLED / ABORTED·REJECTED·NAV2_UNAVAILABLE→FAILED(+failReason) / IDLE·미지의 값 무시.
+    종료 상태는 세션을 닫고 카트를 IDLE로. **세션이 없으면 이벤트 없이 DB 정리만** —
+    REST 취소 직후 카트의 CANCELED 확인 응답이 중복 CANCELLED를 만들지 않게
+  - `mqtt.nav-result-topic=status/nav-result` 프로퍼티 + MqttConfig 구독·라우팅
+  - `scripts/fake_jetson.py` — MOVE 수락 시 NAVIGATING, 도착 시 SUCCEEDED, 취소 시 CANCELED,
+    target 없는 MOVE엔 REJECTED 발행
+- **명령·결과**: `gradlew.bat test` → **BUILD SUCCESSFUL, 96 tests 0 failures**
+  (신규 4: SUCCEEDED 종결·세션 재사용 / ABORTED 사유 / 세션 없는 CANCELED 무이벤트 정리 / IDLE·미지 값 무시)
+- **E2E 재검증** (BE·가짜 Jetson 재기동, FE 8081 실연동):
+  - 2구역 클릭 → 마커 점진 이동(80%→68.9→56.9→49.5% 정지) → 토스트 "2구역으로 …" →
+    **도착 모달 "2구역에 도착했어요!"** — 직전 로그에서 "안 뜬다"던 공백이 실경로로 메워짐
+  - 반납 테이블 클릭 → "반납 테이블로 …" → **"반납 테이블에 도착했어요" 토스트만** (모달 없음),
+    마커 정확히 (93.7%, 23%) 정지
+  - BE 로그: `[MQTT RECEIVE] topic=status/nav-result {"status":"NAVIGATING"}` → "카트 주행 시작" /
+    `{"status":"SUCCEEDED"}` → "카트 주행 종료 status=ARRIVED" (navigationId 1·2 모두)
+
+<details>
+<summary>BE 로그 발췌</summary>
+
+```text
+이동 명령 접수 cartId=1, navigationId=2, zoneId=1, pixel=(937.0, 138.0), target=Target[x=9.37, y=4.62]
+[MQTT RECEIVE] topic=status/nav-result, payload={"status": "NAVIGATING", ...}
+카트 주행 시작 cartId=1, navigationId=2
+[MQTT RECEIVE] topic=status/nav-result, payload={"status": "SUCCEEDED", ...}
+카트 주행 종료 cartId=1, navigationId=2, status=ARRIVED, failReason=null
+```
+
+</details>
+
+## 2026-08-07 15:00 — ✅ E2E: FE→BE→MQTT→가짜 Jetson 왕복 실구동 (Claude)
+
+- **목적**: 실물 카트 없이 전체 사슬 검증 — FE 클릭이 MQTT 명령으로 하행하고,
+  Jetson(SLAM)의 미터 좌표 위치가 BE에서 png 픽셀로 변환돼 FE 마커를 움직이는지.
+  **FE 마커는 낙관 이동 없이 수신 위치만 따라가야 한다**
+- **구성** (모두 로컬):
+  - MySQL `chollae`에 [test-room-3zones.sql](../backend/src/main/resources/db/test-room-3zones.sql)
+    적용 → Z1(id 1)·Z2(id 3)·Z3(id 4), 지도 meta 1000×600·resolution 0.01·origin (0,0)
+  - `scripts/fake_jetson.py` 신규 — cmd/move/cart 구독, status/cart 하트비트 5초,
+    status/position **SLAM 미터** 발행(이동 5Hz/정지 1Hz), MOVE target으로 0.5m/s 등속 이동
+  - BE `bootRun` — 환경변수로 로컬 브로커·`MQTT_POSITION_UNIT=meters` 오버라이드
+    (backend/.env은 원격 브로커·옛 토픽명이라 손대지 않음)
+  - FE dev 8081, `VITE_ENABLE_MSW=false` (vite proxy → :8080)
+- **관측된 사슬** (사서 테이블 클릭 1회):
+  1. FE → `POST /navigation {"zoneId":4,"x":225,"y":138}` (Z3 + 고정 정차점)
+  2. BE → `cmd/move/cart {"requestId":1,"command":"MOVE","zoneId":4,"target":{"x":2.25,"y":4.62},"pixel":{"x":225.0,"y":138.0}}`
+     — 픽셀→미터 역변환 정확 (225×0.01 / (600−138)×0.01)
+  3. 가짜 Jetson: target까지 등속 이동하며 미터 좌표 발행
+  4. BE: `raw=(2.25, 4.62) → image=(225.00, 138.00), detectedZoneId=4, stable=true` — 미터→픽셀
+     복원과 구역 판정(Z3) 모두 정확
+  5. FE 마커: 80% → 72.05 → 64.95 → 59.95 → 49.81 → 39.74 → 29.68 → **22.5% 정지** (1초 간격 샘플)
+     — 클릭 시점에 점프하지 않고 WS 위치 스트림만 따라 점진 이동, 시작 토스트
+     "사서 테이블로 카트가 이동을 시작해요" 확인
+- **확인된 공백 (실 BE 경로)**: BE가 `NAVIGATION_STATUS_UPDATED`를 ACCEPTED/CANCELLED만 발행
+  (STARTED/ARRIVED는 카트 상행 결과 토픽 미확정) → 도착 토스트·도착 모달이 실서버에서는 뜨지 않고,
+  DB `carts.operation_status`도 NAVIGATING에 머문다. FE는 30초 워치독이 상태를 리셋.
+  → EM과 상행 결과 토픽(예: status/nav-result) 확정이 다음 과제
+
+<details>
+<summary>실측 로그 발췌</summary>
+
+```text
+# 가짜 Jetson
+명령 수신 cmd/move/cart: {"requestId": 1, "command": "MOVE", "zoneId": 4,
+  "target": {"x": 2.25, "y": 4.62}, "pixel": {"x": 225.0, "y": 138.0}}
+이동 시작 → SLAM(2.250, 4.620)
+위치 발행 {'x': 7.501, 'y': 4.894, ...} ... 도착 x=2.250 y=4.620
+
+# BE
+카트 위치 수신 cartId=1, raw=(8.0, 4.92), image=(800.00, 108.00), unit=meters, detectedZoneId=null
+카트 위치 수신 cartId=1, raw=(2.25, 4.62), image=(225.00, 138.00), unit=meters, detectedZoneId=4, stable=true
+
+# FE 마커 샘플 (1초 간격, style.left)
+80% → 72.05% → 64.95% → 59.95% → 49.81% → 39.74% → 29.68% → 22.5% (이후 고정)
+```
+
+</details>
+
+## 2026-08-07 15:05 — ✅ FE: 테이블행 이동의 안내 문구 분리 (Claude)
+
+- **배경**: 사서/반납 테이블 버튼을 눌러도 안내가 "1구역으로 이동을 시작해요 → 1구역에 도착했어요
+  (꽂을 책 0권)"로 나왔다. NAV-01·WS-FE-06에는 구역 id만 있어 BE는 테이블행임을 모른다 — FE가 기억해야 한다
+- **변경**:
+  - `cartMapStore.landmarkDestination` 신규 — `startMove('반납 테이블')`로 기록, 이동 종료
+    (ARRIVED·CANCELLED·FAILED·워치독)마다 소거. **테이블행 도착은 구역 정리 모달(arrivalZone)을
+    열지 않는다** (테이블에는 꽂을 책이 없어 "0권" 모달이 소음)
+  - `useCartMapEvents`: ARRIVED 수신 시 landmarkDestination이 있으면 `"○○에 도착했어요"` 토스트
+    (applyNavigation이 값을 지우기 전에 읽는다)
+  - `MapPanel`: 테이블 클릭 시 시작 토스트를 `"○○로 카트가 이동을 시작해요"`로. 요청-응답 사이
+    이름 전달은 ref (리렌더가 필요 없는 값)
+- **명령·결과**: `pnpm test --run` → **20 files, 137 tests, 0 failures** (신규 3: 테이블행 도착이
+  모달을 안 여는 것 / 취소 후 구역 이동은 다시 여는 것 / 워치독 소거) / `tsc` 0 / `eslint` 0
+- **브라우저 검증** (dev 8081, MSW on, MutationObserver로 토스트 수집):
+  사서 테이블 클릭 → `"사서 테이블로 카트가 이동을 시작해요"` → `"사서 테이블에 도착했어요"`,
+  ARRIVAL NOTICE 모달 미표시 확인. 구역(통로) 클릭은 기존대로 "N구역…" 안내 유지
+
+<details>
+<summary>브라우저 관찰 원본</summary>
+
+```json
+{
+ "toasts": [
+  "반납 테이블에 도착했어요",
+  "사서 테이블로 카트가 이동을 시작해요",
+  "사서 테이블에 도착했어요"
+ ],
+ "zoneModalOpen": false
+}
+```
+
+(첫 줄 "반납 테이블에…"은 같은 시각 사람이 직접 누른 클릭의 도착 토스트)
+
+</details>
+
+## 2026-08-07 14:20 — ✅ FE: 새 평면도(1000×600) 좌표 실측 교정 + 브라우저 검증 (Claude)
+
+- **배경**: 사람이 `assets/map.png`를 1000×600 신판으로 교체. 어제 눈짐작으로 넣은 좌표를
+  실측으로 교정하고 브라우저에서 동작 확인
+- **측정 방법**: dev 서버(MSW on)에서 지도 페이지의 `<img>`를 canvas에 그려 **1px 픽셀 스캔** —
+  색 분류(청록=통로, 노랑·주황=테이블, 진회색=서가)로 각 영역의 정확한 바운딩 박스를 얻음
+- **교정** (0.1~0.5% 오차):
+  - `ZONE_RECTS`: Z1 left 75.6→75.5, Z2 39.0→38.9, Z3 2.5→2.4, top 20.3→20.2, height 74.2→73.8
+  - `MAP_LANDMARKS`: 사서 width 25.8→25.7, 반납 left 87.5→87.4·width 12.5→12.6
+  - SQL 폴리곤: 실측 픽셀 [755·389·24, 121~564]로, 책장 y 343→342
+- **오버레이 정합 검증** (버튼 rect 내부 픽셀 중 기대 색 비율): Z1~Z3 **99.1~99.2%**,
+  사서 테이블 96%, 반납 테이블 91.4% (모서리 라운딩·글자 픽셀 제외하면 사실상 전면 일치, ≤1px)
+- **기능 검증** (XHR 후킹으로 NAV-01 페이로드 확인):
+  - 사서 테이블 클릭 → `{"zoneId":3,"x":225,"y":138}` = Z3 + 고정 정차점 (22.5%, 23%) ✓
+  - 반납 테이블 클릭 → `{"zoneId":1,"x":937,"y":138}` = Z1 + 고정 정차점 (93.7%, 23%) ✓
+  - 화면: "3구역에 도착했어요"(800번대 책 2권 표시) / "1구역에 도착했어요" + 카트 마커가
+    반납 테이블 바로 아래 정차, Z1 활성 테두리 (스크린샷은 세션 대화에 있음)
+- **단위 테스트 재실행**: `pnpm test --run` → **20 files, 134 tests, 0 failures**
+- 검증용으로 잠깐 켠 `.env.development.local`의 `VITE_ENABLE_MSW`는 false로 원복
+
+<details>
+<summary>실측 원본 (canvas 1px 스캔, % = px/10 · px/6)</summary>
+
+```json
+{"Z3":{"px":[24,121,236,564],"pct":[2.4,20.2,23.6,94]},
+ "Z2":{"px":[389,121,601,564],"pct":[38.9,20.2,60.1,94]},
+ "Z1":{"px":[755,121,967,564],"pct":[75.5,20.2,96.7,94]},
+ "shelves_800_200":{"px":[249,231,375,453]},
+ "shelves_100_000":{"px":[615,231,741,453]},
+ "librarian":{"px":[0,0,257,90],"pct":[0,0,25.7,15]},
+ "return":{"px":[874,0,999,90],"pct":[87.4,0,99.9,15]}}
+```
+
+NAV-01 실측 페이로드:
+
+```json
+[{"method":"POST","url":"/api/carts/1/navigation","body":{"zoneId":3,"x":225,"y":138}},
+ {"method":"POST","url":"/api/carts/1/navigation","body":{"zoneId":1,"x":937,"y":138}}]
+```
+
+</details>
+
+## 2026-08-07 13:45 — ✅ FE+BE: 테이블 고정 정차점 + 평면도 1000×600 교체 (Claude)
+
+- **변경** (`backend/feature/navigation-goal-snap` 이어서):
+  - 스냅 여유 기본값 0.3 → **0.5 m** (사람이 정한 값)
+  - `zones.ts`: 새 평면도(1000×600) 기준으로 `ZONE_RECTS`·`CORRIDOR_Y`·`START_POSITION` 재측정,
+    `MAP_LANDMARKS` 신규 — 사서/반납 테이블의 클릭 영역 + 고정 정차점
+  - `MapPanel`: 테이블 버튼 2개 (클릭 지점이 아니라 `landmark.stop`을 보낸다)
+  - `floorPlanImage.ts` `FLOOR_PLAN_SIZE` 1707×921 → 1000×600, scss `aspect-ratio` 동반 수정
+  - `test-room-3zones.sql`: 존 폴리곤·책장 좌표를 평면도 격자에서 측정해 채움
+- **정차점 불변식**: 정차점이 구역 밖이면 BE `snapIntoZone`이 조용히 옮겨버리므로,
+  "정차점은 반드시 어느 `ZONE_RECTS` 안"을 단위 테스트로 고정했다 (`zones.test.ts`)
+- **명령·결과**:
+  - `frontend: pnpm test --run` → **20 files, 134 tests, 0 failures** (신규 5)
+  - `frontend: tsc --noEmit` 0 / `eslint` 0
+  - `backend: gradlew.bat test` → **24 classes, 92 tests, 0 failures**
+    (스냅 여유 0.5m 반영: 기대값 6.0px → 10.0px)
+- **⚠️ 브라우저 확인은 못 했다.** `frontend/src/assets/map.png`가 아직 옛 그림(1707×921)이다.
+  새 1000×600 파일로 교체하기 전 스크린샷은 클릭 영역이 어긋난 모습이라 검증 가치가 없다 —
+  파일 교체 후 지도 화면에서 테이블 버튼 위치와 정차 지점을 눈으로 확인해야 한다
+
+<details>
+<summary>전체 출력</summary>
+
+```text
+$ pnpm test --run
+ Test Files  20 passed (20)
+      Tests  134 passed (134)
+   Duration  28.22s
+
+$ pnpm exec tsc --noEmit
+(출력 없음)
+
+$ pnpm lint
+> eslint .
+(출력 없음)
+
+$ gradlew.bat test
+BUILD SUCCESSFUL in 30s
+
+$ awk 집계 (build/test-results/test/*.xml)
+classes=24 tests=92 skipped=0 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-07 12:14 — ✅ BE: 구역 밖 클릭 목적지 스냅 (Claude)
+
+- **배경**: FE가 지도 전체 자유 클릭으로 바뀌면서(`897a9b6`) 서가·테이블 위 좌표도 목적지로
+  올라온다. `MapPanel.tsx:90` 주석은 "BE가 가장 가까운 이동 가능 지점으로 스냅한다"고 적었지만
+  **BE에 그 로직이 없었다** — 장애물 안이 그대로 nav goal로 하행되던 상태
+- **변경** (`backend/feature/navigation-goal-snap`, 베이스 `d8f4deb`):
+  - `PolygonZoneMatcher.closestPointInside(polygonJson, x, y, margin)` 신규 — 폴리곤 안이면
+    그대로, 밖이면 경계 최근접점을 구해 중심 쪽으로 margin만큼 당긴다. 오목 폴리곤에서 당긴 점이
+    다시 밖으로 나가면 중심으로 폴백. 폴리곤 파싱을 `vertices()`로 모으고 null·빈 문자열·깨진
+    꼭짓점을 예외 대신 빈 목록으로 다루도록 정리(기존 `contains`는 꼭짓점이 깨지면 예외를 던졌다)
+  - `NavigationService.snapIntoZone` — 클릭 좌표를 **요청에 실린 구역** 안으로 스냅.
+    다른 구역으로 튀지 않게 한 이유: FE가 이미 가장 가까운 구역을 zoneId로 보내고 그 이름으로
+    사서에게 안내하므로 목적지가 다른 구역이면 안내와 어긋난다
+  - 여유는 `navigation.snap-margin-meters`(기본 0.3) → 구역이 속한 지도의 resolution으로 픽셀 환산
+  - 하행 픽셀을 소수 2자리로 정리 — `0.3 / 0.05 = 5.999999999999999`가 MQTT에 실리던 것
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21, Gradle 9.5.1
+- **결과**: **24 classes, 92 tests, 0 failures** (신규 8: 폴리곤 스냅 5 + NAV 스냅 3)
+- **1차 실패 → 수정**: `snapsClickOutsideZoneToNearestPointInsideZone`가
+  `pixel=Pixel[x=5.999999999999999, y=50.0]`로 실패. 테스트를 느슨하게 고치는 대신 하행 값
+  자체를 픽셀 2자리로 반올림(`roundPixel`) — EM이 읽는 페이로드에 부동소수점 노이즈를 남기지 않는다
+
+<details>
+<summary>1차 실패 출력</summary>
+
+```text
+NavigationServiceTest > snapsClickOutsideZoneToNearestPointInsideZone() FAILED
+    java.lang.AssertionError at NavigationServiceTest.java:186
+
+Expecting actual:
+  "MoveCommand[requestId=1, command=MOVE, zoneId=7, target=null, pixel=Pixel[x=5.999999999999999, y=50.0]]"
+to contain:
+  "pixel=Pixel[x=6.0, y=50.0]"
+
+37 tests completed, 1 failed
+BUILD FAILED in 59s
+```
+
+</details>
+
+<details>
+<summary>수정 후 전체 출력</summary>
+
+```text
+> Task :compileJava
+> Task :processResources
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 46s
+4 actionable tasks: 4 executed
+
+$ awk 집계 (build/test-results/test/*.xml, 24 files)
+tests=92 skipped=0 failures=0 errors=0
+```
+
+</details>
+
 ## 2026-08-07 00:24 — ✅ FE: 슬롯 만적 알림 팝업 추가 (Claude)
 
 - **배경**: 시연 카트는 RFID 리더가 5개만 달려 실물 슬롯이 5칸이다. 다 차면 사서에게
