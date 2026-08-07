@@ -15,6 +15,32 @@
 
 ---
 
+## 2026-08-07 17:50 — ✅ FE+BE: 자유 좌표 이동 (스냅 제거) + E2E (Claude)
+
+- **배경**: 이동 명령을 2갈래로 확정 — ① 바닥(구역·통로) 아무 좌표나 찍으면 그 지점으로,
+  ② 장애물(서가 4면·테이블 2개)을 찍으면 그 앞 고정 정차점으로. 어제 넣은 BE 스냅은
+  통로 클릭까지 구역 안으로 끌어당겨 ①과 충돌 → 제거
+- **변경**:
+  - FE (`frontend/feat/map-landmarks`): `MAP_LANDMARKS`에 서가 4면 추가(클릭 영역=서가 면,
+    정차점=그 면이 보는 통로 안 0.5m 여유). 도착 안내를 랜드마크별로 구분 —
+    서가행은 구역 정리 모달(`arrival:'zone'`), 테이블·자유 지점은 이름 토스트(`arrival:'toast'`).
+    통로 클릭은 "지정한 위치"로 안내
+  - BE (`backend/feature/navigation-uplink`): `snapIntoZone` 제거, 클릭 좌표 그대로 하행.
+    장애물 회피는 FE 책임 + Nav2 거부(status/nav-result ABORTED·REJECTED→FAILED)가 안전망.
+    `PolygonZoneMatcher`는 구역 판정 `contains`만 남김(깨진 폴리곤 관용 파싱은 유지),
+    `navigation.snap-margin-meters` 삭제
+- **명령·결과**:
+  - `frontend: pnpm test --run` → **20 files, 137 tests, 0 failures** / `tsc` 0 / `eslint` 0
+  - `backend: gradlew.bat test` → **89 tests, 0 failures** (스냅 테스트 7개 제거)
+- **E2E** (BE bootRun + 가짜 Jetson + FE 8081 실연동):
+  - 흰색 상단 통로 (50%, 17%) 클릭 → 마커 (49.9%, 17%) 정지 (**스냅이 있었다면 y가
+    구역 top 20.2% 안으로 끌려갔을 좌표**), "지정한 위치로/에 …" 토스트, 모달 없음
+  - 800 문학 서가 클릭 → 마커 정확히 고정 정차점 (18.6%, 57%),
+    "800 문학 서가로 …" 시작 토스트 → 도착 시 "3구역에 도착했어요!" 구역 정리 모달
+  - 사서/반납 테이블은 직전 로그에서 검증(도착 토스트, 모달 없음) — 동작 유지
+- **삽질 기록**: 가짜 Jetson을 FE 브랜치 체크아웃 상태에서 `scripts/fake_jetson.py`로 실행하면
+  파일이 없다(BE 브랜치에만 커밋됨) — `git show`로 꺼내 임시 경로에서 실행
+
 ## 2026-08-07 15:25 — ✅ BE: status/nav-result 상행 수신 + E2E 재검증 (Claude)
 
 - **배경**: EM이 ROS2 `/cart/nav_status`(ROS2-16, 7종)를 MQTT `status/nav-result`로 중계해주기로
