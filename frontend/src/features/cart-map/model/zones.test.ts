@@ -87,13 +87,29 @@ describe('MAP_LANDMARKS', () => {
     point.y <= rect.top + rect.height;
 
   /**
-   * 이 검사가 이 파일에서 가장 중요하다 — 정차점이 구역 밖이면 BE가 구역 안 최근접점으로
-   * 옮기므로(snapIntoZone), 우리가 정한 지점이 조용히 무시된다.
+   * 정차점은 장애물(서가·테이블) 밖의 바닥이어야 한다 — 장애물 위면 실물 카트가 서지 못하고
+   * Nav2가 goal을 거부한다. 자유 좌표 이동이라 구역 밖 흰 바닥은 허용된다(사서 테이블 정차점).
+   * 좌표를 옮기다 장애물 위로 올라가면 여기서 잡는다.
    */
-  it('정차점이 모두 어느 구역 안에 있다', () => {
+  it('정차점이 그림 안이고 어떤 장애물 위도 아니다', () => {
     MAP_LANDMARKS.forEach((landmark) => {
+      expect(landmark.stop.x).toBeGreaterThanOrEqual(0);
+      expect(landmark.stop.x).toBeLessThanOrEqual(100);
+      expect(landmark.stop.y).toBeGreaterThanOrEqual(0);
+      expect(landmark.stop.y).toBeLessThanOrEqual(100);
+      MAP_LANDMARKS.forEach((obstacle) => {
+        expect(
+          containsPoint(obstacle.rect, landmark.stop),
+          `${landmark.name}의 정차점이 ${obstacle.name} 위에 있습니다`,
+        ).toBe(false);
+      });
+    });
+  });
+
+  it('서가 정차점은 그 서가가 보는 통로(구역) 안에 있다', () => {
+    MAP_LANDMARKS.filter((landmark) => landmark.arrival === 'zone').forEach((landmark) => {
       const inside = ZONE_RECTS.some((rect) => containsPoint(rect, landmark.stop));
-      expect(inside, `${landmark.name}의 정차점이 구역 밖입니다`).toBe(true);
+      expect(inside, `${landmark.name}의 정차점이 통로 밖입니다`).toBe(true);
     });
   });
 

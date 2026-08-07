@@ -98,16 +98,26 @@ def main() -> None:
     parser.add_argument("--broker", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--speed", type=float, default=0.5, help="이동 속도 (m/s)")
-    parser.add_argument("--start-px", default="800,108", help="시작 위치 (지도 픽셀 x,y)")
+    parser.add_argument("--start-px", default="800,108", help="시작 위치 (지도 픽셀 x,y — 레거시 메타 기준)")
+    parser.add_argument(
+        "--start-world",
+        default=None,
+        help="시작 위치 (SLAM 미터 x,y) — 지정하면 --start-px 무시. "
+        "BE가 아핀 캘리브레이션을 쓰는 경우 픽셀 환산이 이 스크립트의 레거시 메타와 달라지므로 이 옵션을 쓸 것",
+    )
     args = parser.parse_args()
 
-    meta = MapMeta()
-    start_px_x, start_px_y = (float(v) for v in args.start_px.split(","))
-    # 픽셀 → SLAM 미터 (ROS 규약: 세로축 반전)
-    start_x = meta.origin_x + start_px_x * meta.resolution
-    start_y = meta.origin_y + (meta.height_px - start_px_y) * meta.resolution
+    if args.start_world is not None:
+        start_x, start_y = (float(v) for v in args.start_world.split(","))
+        log.info("시작 위치: SLAM(%.3f, %.3f)", start_x, start_y)
+    else:
+        meta = MapMeta()
+        start_px_x, start_px_y = (float(v) for v in args.start_px.split(","))
+        # 픽셀 → SLAM 미터 (ROS 규약: 세로축 반전)
+        start_x = meta.origin_x + start_px_x * meta.resolution
+        start_y = meta.origin_y + (meta.height_px - start_px_y) * meta.resolution
+        log.info("시작 위치: 픽셀(%.0f, %.0f) = SLAM(%.3f, %.3f)", start_px_x, start_px_y, start_x, start_y)
     cart = FakeCart(start_x, start_y, args.speed)
-    log.info("시작 위치: 픽셀(%.0f, %.0f) = SLAM(%.3f, %.3f)", start_px_x, start_px_y, start_x, start_y)
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fake-jetson")
 
