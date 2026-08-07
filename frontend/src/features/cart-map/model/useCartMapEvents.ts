@@ -151,6 +151,12 @@ export function useCartMapEvents(cartId: number): void {
     const offNavigation = socket.on<NavigationStatusUpdatedPayload>(
       'NAVIGATION_STATUS_UPDATED',
       ({ payload }) => {
+        // 테이블 이동의 도착 안내 — applyNavigation이 이 값을 지우므로 반영 전에 읽는다.
+        // 구역 도착 모달은 열리지 않고(스토어가 막는다) 토스트로만 알린다
+        const landmark = useCartMapStore.getState().landmarkDestination;
+        if (payload.status === 'ARRIVED' && landmark !== null) {
+          useToastStore.getState().show(`${landmark}에 도착했어요`);
+        }
         useCartMapStore.getState().applyNavigation(payload.status, payload.destinationZoneId);
         feedWatchdog(); // 도착·취소로 isMoving이 꺼졌으면 타이머 해제, 진행 중이면 되감기
         // 실패는 조용히 대기 상태로 돌아가면 사서가 이유를 알 길이 없다.

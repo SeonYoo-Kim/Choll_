@@ -24,4 +24,4 @@ export const FLOOR_PLAN_IMAGE: string = mapImage;
  * 평면도 원본 픽셀 크기 — 지도 영역의 가로세로 비율을 이 값에 맞춘다.
  * 비율이 어긋나면 `object-fit: cover`가 그림을 잘라내고, 잘린 만큼 클릭 지점이 실제와 달라진다.
  */
-export const FLOOR_PLAN_SIZE: { width: number; height: number } = { width: 1707, height: 921 };
+export const FLOOR_PLAN_SIZE: { width: number; height: number } = { width: 1000, height: 600 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CORRIDOR_Y,
+  MAP_LANDMARKS,
   START_POSITION,
   ZONE_BOOKSHELVES,
   ZONE_CODES,
@@ -75,5 +76,38 @@ describe('평면도 좌표', () => {
     const topmostZone = Math.min(...ZONE_RECTS.map((rect) => rect.top));
     expect(CORRIDOR_Y).toBeLessThan(topmostZone);
     expect(START_POSITION.y).toBeLessThan(topmostZone);
+  });
+});
+
+describe('MAP_LANDMARKS', () => {
+  const containsPoint = (rect: (typeof ZONE_RECTS)[number], point: { x: number; y: number }) =>
+    point.x >= rect.left &&
+    point.x <= rect.left + rect.width &&
+    point.y >= rect.top &&
+    point.y <= rect.top + rect.height;
+
+  /**
+   * 이 검사가 이 파일에서 가장 중요하다 — 정차점이 구역 밖이면 BE가 구역 안 최근접점으로
+   * 옮기므로(snapIntoZone), 우리가 정한 지점이 조용히 무시된다.
+   */
+  it('정차점이 모두 어느 구역 안에 있다', () => {
+    MAP_LANDMARKS.forEach((landmark) => {
+      const inside = ZONE_RECTS.some((rect) => containsPoint(rect, landmark.stop));
+      expect(inside, `${landmark.name}의 정차점이 구역 밖입니다`).toBe(true);
+    });
+  });
+
+  it('클릭 영역이 그림 안에 있고 구역과 겹치지 않는다', () => {
+    MAP_LANDMARKS.forEach(({ name, rect }) => {
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.top).toBeGreaterThanOrEqual(0);
+      expect(rect.left + rect.width).toBeLessThanOrEqual(100);
+      expect(rect.top + rect.height).toBeLessThanOrEqual(100);
+      ZONE_RECTS.forEach((zone) => {
+        const overlapX = rect.left < zone.left + zone.width && zone.left < rect.left + rect.width;
+        const overlapY = rect.top < zone.top + zone.height && zone.top < rect.top + rect.height;
+        expect(overlapX && overlapY, `${name} 클릭 영역이 구역과 겹칩니다`).toBe(false);
+      });
+    });
   });
 });
