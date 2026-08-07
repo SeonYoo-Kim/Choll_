@@ -5,7 +5,7 @@ import { useStartNavigation } from '../api/moveCommands';
 import { useCartMapStore } from '../model/cartMapStore';
 import { FLOOR_PLAN_IMAGE, FLOOR_PLAN_SIZE } from '../model/floorPlanImage';
 import { clientPointToPercent, percentToDisplay } from '../model/mapTransform';
-import { zoneLabel } from '../model/zones';
+import { MAP_LANDMARKS, zoneLabel } from '../model/zones';
 import { nearestZoneIndex, useZoneStore, zoneIndexOfPoint } from '../model/zoneStore';
 
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
@@ -47,10 +47,20 @@ export function MapPanel() {
   // 어느 쪽이 이기는지 EM과 정해진 바가 없어, 먼저 추종을 멈추도록 잠근다.
   const following = runState === 'FOLLOWING' || runState === 'PAUSED';
 
+  // 이번 요청의 목적지가 테이블이면 그 이름 — NAV-01 페이로드에는 구역 id만 실리므로,
+  // 시작 토스트와 도착 안내를 테이블 이름으로 하려면 요청 밖에서 따로 들고 있어야 한다.
+  // state가 아니라 ref인 이유: 요청→응답 사이에 리렌더가 필요한 값이 아니다
+  const pendingLandmarkName = useRef<string | null>(null);
+
   const { mutate: startNavigation, isPending } = useStartNavigation({
     mutation: {
       onSuccess: (_, { data }) => {
-        startMove();
+        const landmarkName = pendingLandmarkName.current;
+        startMove(landmarkName ?? undefined);
+        if (landmarkName !== null) {
+          notify(`${landmarkName}로 카트가 이동을 시작해요`);
+          return;
+        }
         const zoneIndex = zones.findIndex((zone) => zone.id === data.zoneId);
         notify(
           `${zoneIndex === -1 ? '해당 구역' : zoneLabel(zoneIndex)}으로 카트가 이동을 시작해요`,
@@ -92,8 +102,9 @@ export function MapPanel() {
    *
    * `zoneIndex`는 NAV-01의 필수 필드 `zoneId`를 채우기 위한 값일 뿐 목적지를 정하지 않는다.
    * `point`가 null이면(키보드 조작) 그 구역의 중심으로 보낸다.
+   * `landmarkName`이 있으면 이 이동은 테이블행 — 시작·도착 안내가 구역이 아니라 그 이름으로 나간다.
    */
-  const requestMove = (zoneIndex: number, point: MapPercent | null) => {
+  const requestMove = (zoneIndex: number, point: MapPercent | null, landmarkName?: string) => {
     if (busy) {
       notify('카트가 이동 중이에요. 정지한 뒤 다시 지정해주세요');
       return;
@@ -107,6 +118,7 @@ export function MapPanel() {
       notify(`${zoneLabel(zoneIndex)}의 구역 정보를 서버에서 받지 못해 이동할 수 없어요`);
       return;
     }
+    pendingLandmarkName.current = landmarkName ?? null;
     const target = percentToDisplay(point ?? zone.center, mapInfo);
     startNavigation({
       cartId: DEMO_CART_ID,
@@ -134,6 +146,24 @@ export function MapPanel() {
     requestMove(zoneIndex, clickedPercent(event));
   };
 
+  /**
+   * 사서·반납 테이블 클릭 — 누른 자리가 아니라 그 테이블의 **고정 정차점**으로 보낸다.
+   * 테이블은 장애물이라 그 위 좌표를 보내면 BE가 구역 안으로 옮긴다. 어디를 눌렀는지에 따라
+   * 정차 위치가 흔들리지 않게, 미리 정해둔(구역 안) 한 지점만 쓴다.
+   */
+  const handleLandmarkClick = (
+    landmark: (typeof MAP_LANDMARKS)[number],
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    event.stopPropagation();
+    const zoneIndex = zoneIndexOfPoint(landmark.stop) ?? nearestZoneIndex(landmark.stop);
+    if (zoneIndex === null) {
+      notify('구역 정보를 불러오지 못해 이동할 수 없어요');
+      return;
+    }
+    requestMove(zoneIndex, landmark.stop, landmark.name);
+  };
+
   // 구역 버튼이 stopPropagation으로 자기 클릭을 가져가므로, 여기까지 온 클릭은 구역 밖이다.
   // 좌표는 누른 그대로 보내고 zoneId만 가장 가까운 구역으로 채운다.
   const handleMapClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -159,6 +189,21 @@ export function MapPanel() {
         onClick={handleMapClick}
       >
         <img ref={mapImageRef} src={FLOOR_PLAN_IMAGE} alt="" className={styles.mapImage} />
+        {MAP_LANDMARKS.map((landmark) => (
+          <button
+            key={landmark.key}
+            aria-disabled={busy}
+            onClick={(event) => handleLandmarkClick(landmark, event)}
+            aria-label={`${landmark.name}로 카트 이동`}
+            className={styles.landmark}
+            style={{
+              left: `${landmark.rect.left}%`,
+              top: `${landmark.rect.top}%`,
+              width: `${landmark.rect.width}%`,
+              height: `${landmark.rect.height}%`,
+            }}
+          />
+        ))}
         {zones.map((zone, i) => (
           <button
             key={zone.code}
