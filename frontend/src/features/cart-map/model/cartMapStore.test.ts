@@ -31,6 +31,7 @@ beforeEach(() => {
     navStatus: null,
     isMoving: false,
     arrivalZone: null,
+    landmarkDestination: null,
   });
 });
 
@@ -218,5 +219,31 @@ describe('cartMapStore', () => {
     useCartMapStore.getState().applyNavigation('ARRIVED', 1);
     useCartMapStore.getState().dismissArrival();
     expect(useCartMapStore.getState().arrivalZone).toBeNull();
+  });
+
+  it('테이블행 이동의 도착은 구역 정리 모달을 열지 않는다', () => {
+    // 테이블에는 꽂을 책이 없다 — "이 구역에 꽂아야 할 책 0권" 모달은 안내가 아니라 소음이다
+    useCartMapStore.getState().startMove('반납 테이블');
+    expect(useCartMapStore.getState().landmarkDestination).toBe('반납 테이블');
+    useCartMapStore.getState().applyNavigation('ARRIVED', 1);
+    const state = useCartMapStore.getState();
+    expect(state.arrivalZone).toBeNull();
+    expect(state.cartZone).toBe(0); // 현재 구역 표시는 그대로 갱신된다
+    expect(state.landmarkDestination).toBeNull(); // 다음 구역 이동에 새지 않는다
+  });
+
+  it('테이블행 이동이 취소되면 다음 구역 이동은 다시 모달을 연다', () => {
+    useCartMapStore.getState().startMove('사서 테이블');
+    useCartMapStore.getState().applyNavigation('CANCELLED');
+    expect(useCartMapStore.getState().landmarkDestination).toBeNull();
+    useCartMapStore.getState().startMove();
+    useCartMapStore.getState().applyNavigation('ARRIVED', 1);
+    expect(useCartMapStore.getState().arrivalZone).toBe(0);
+  });
+
+  it('워치독 리셋(abortMove)도 테이블행 표시를 지운다', () => {
+    useCartMapStore.getState().startMove('반납 테이블');
+    useCartMapStore.getState().abortMove();
+    expect(useCartMapStore.getState().landmarkDestination).toBeNull();
   });
 });
