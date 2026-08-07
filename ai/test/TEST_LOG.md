@@ -13,6 +13,68 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-08 — ✅ target_position_node 주석 한글화(로직 불변), 114 passed·ruff 수정 1건 (Claude)
+
+- **명령**: `ruff check --fix` + `ruff format` (변경 2파일) + `pytest ai/test/ -q`
+- **환경**: Windows 11 개발 PC, Python 3.12 (miniforge base), ruff 0.16.0
+- **커밋**: develop 작업 트리 (커밋 전, `ai/feature/perf-measure` 브랜치로 커밋 예정)
+- **변경**: `target_position_node.py` 주석·독스트링 한글화 (별도 세션에서 학습용으로 추가).
+  **AST 대조(주석·독스트링 제거 후 구문 트리 비교)로 실행 로직이 HEAD와 동일함을 확인** —
+  차이는 독스트링 번역·신규 독스트링(`_pose_is_fresh`)·주석뿐. ruff가 import 사이 주석으로
+  깨진 정렬(I001) 1건을 자동 수정, format이 주석 간격 재정렬.
+- **미검증**: Jetson 실기 구동 (주석만 바뀌어 실기 재검증 불요 판단).
+
+<details>
+<summary>ruff / pytest 원본 출력</summary>
+
+```
+$ ruff check --fix scripts/measure_ai_perf.py ai/.../target_position_node.py
+Found 1 error (1 fixed, 0 remaining).
+
+$ ruff format scripts/measure_ai_perf.py ai/.../target_position_node.py
+1 file reformatted, 1 file left unchanged
+
+$ pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.22s
+```
+
+</details>
+
+## 2026-08-07 — ✅ 성능 측정 스크립트 신규, 114 passed·ruff 0건 (Claude)
+
+- **명령**: `ruff check scripts/measure_ai_perf.py` + `ruff format --check scripts/measure_ai_perf.py` + `pytest ai/test/ -q`
+- **환경**: Windows 11 개발 PC, Python 3.12 (miniforge base), ruff 0.16.0
+- **커밋**: develop 작업 트리 (커밋 전)
+- **변경**: `scripts/measure_ai_perf.py` 신규 — AI 파이프라인 FPS·지연·메모리 측정 로거
+  (독립 실행 스크립트, 패키지·launch·기존 노드 변경 없음 → **테스트 개수 변화 없음(114)**).
+  - FPS: `/camera/image_raw`(입력)·`/person_tracks`(파이프라인)·`/target_person`(타겟 잠금 시) 수신율
+  - 지연: `수신 시각 − header.stamp` (camera_node 캡처 stamp가 detector/tracker/reid에서 전파됨을 코드로 확인)
+  - 메모리: `/proc/meminfo` used + AI 노드 프로세스 RSS 합, `--baseline-mb`로 증가분 계산
+- **미검증**: Jetson 실기 실행(rclpy 구독·/proc 파싱·QoS 매칭)은 미실시 — Windows에는 ROS가 없어
+  정적 검증(ruff)만 수행. 실기 1회 스모크 후 결과를 이 로그에 추가할 것.
+
+<details>
+<summary>ruff / pytest 원본 출력</summary>
+
+```
+$ ruff check scripts/measure_ai_perf.py
+All checks passed!
+
+$ ruff format --check scripts/measure_ai_perf.py
+1 file already formatted
+```
+
+```
+$ pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.16s
+```
+
+</details>
+
 ## 2026-08-03 14:11 — ✅ MQTT 토픽 개편 후 114 passed, ruff 변경 파일 0건 (Claude)
 
 - **명령**: `pytest ai/test/ -q` + `ruff check fe_bridge_logic.py fe_bridge_node.py follow_robot_launch.py test_fe_bridge_logic.py`
