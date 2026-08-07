@@ -16,7 +16,6 @@ import com.ssafy.backend.common.exception.InvalidDomainException;
 import com.ssafy.backend.map.domain.LibraryMap;
 import com.ssafy.backend.map.repository.LibraryMapRepository;
 import com.ssafy.backend.mqtt.command.MqttCommandPublisher;
-import com.ssafy.backend.mqtt.position.PolygonZoneMatcher;
 import com.ssafy.backend.mqtt.position.SlamCoordinateConverter;
 import com.ssafy.backend.navigation.service.NavigationService;
 import com.ssafy.backend.websocket.CartEventPublisher;
@@ -76,13 +75,11 @@ class NavigationServiceTest {
 			zoneRepository,
 			mapRepository,
 			new SlamCoordinateConverter(),
-			new PolygonZoneMatcher(new ObjectMapper()),
 			eventPublisher,
 			commandPublisherProvider,
 			new ObjectMapper(),
 			positionUnit,
-			2L,
-			0.5
+			2L
 		);
 	}
 
@@ -147,58 +144,20 @@ class NavigationServiceTest {
 	}
 
 	@Test
-	void usesClickedPixelInsteadOfZoneCenterWhenProvided() {
+	void usesClickedPixelAsIsEvenOutsideZone() {
 		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
 		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
 		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
-		when(zone.getPolygonJson())
-			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
 		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
 
-		// 구역 안을 누른 경우 — 좌표를 손대지 않는다
+		// 구역 폴리곤 밖(통로 한가운데) 좌표 — 스냅 없이 그대로 하행한다.
+		// 장애물 회피는 FE 고정 정차점 + Nav2 거부(status/nav-result)가 맡는다
 		service.start(1L, 7L, 612.0, 431.0);
 
-		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
-		verify(commandPublisher).publish(command.capture());
-		assertThat(command.getValue().toString())
-			.contains("pixel=Pixel[x=612.0, y=431.0]");
-	}
-
-	@Test
-	void snapsClickOutsideZoneToNearestPointInsideZone() {
-		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
-		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
-		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
-		// 0~100 정사각형 구역 (중심 50,50)
-		when(zone.getPolygonJson()).thenReturn("[[0,0],[100,0],[100,100],[0,100]]");
-		when(zone.getMap()).thenReturn(map);
-		when(map.getResolution()).thenReturn(new BigDecimal("0.05"));
-		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
-
-		// 구역 왼쪽 밖(서가 위)을 누름 — 가장 가까운 경계는 (0,50)
-		service.start(1L, 7L, -50.0, 50.0);
-
-		// 경계에서 중심 쪽으로 여유 0.5m / 0.05m/px = 10px 안쪽
 		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
 		verify(commandPublisher).publish(command.capture());
 		assertThat(command.getValue().toString())
 			.contains("zoneId=7")
-			.contains("pixel=Pixel[x=10.0, y=50.0]");
-	}
-
-	@Test
-	void keepsClickedPixelWhenZonePolygonIsUnreadable() {
-		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
-		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
-		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
-		when(zone.getPolygonJson()).thenReturn("not-json");
-		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
-
-		service.start(1L, 7L, 612.0, 431.0);
-
-		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
-		verify(commandPublisher).publish(command.capture());
-		assertThat(command.getValue().toString())
 			.contains("pixel=Pixel[x=612.0, y=431.0]");
 	}
 

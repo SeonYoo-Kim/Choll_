@@ -52,9 +52,12 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   **선행 슬래시를 붙이지 않는다** — `/status/…`는 빈 최상위 레벨을 만든다 (ROS 토픽과 혼동 주의).
 - **MQTT** (카트→BE, 현재 확정분):
   - `status/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계.
-    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 지도 메타(resolution·origin)로
-    이미지 픽셀 변환(세로축 뒤집기 포함). 기본값 pixels(무변환) — EM 발행 시작 시 meters로 전환 +
-    `library_maps`(id=`mqtt.map-id`) 행에 실제 map.yaml 값 입력 필요
+    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 이미지 픽셀로 변환.
+    기본값 pixels(무변환). 변환 방식 2가지(2026-08-07): `library_maps`에 **아핀 6계수**(affine_a11~ty)가
+    있으면 그걸 우선 사용 — FE 평면도가 SLAM 지도에서 회전·좌우반전·크롭을 거쳐 만들어져
+    resolution·origin(세로반전식)으로는 표현 불가. 계수는 현장 캘리브레이션
+    (`scripts/calibrate_map_transform.py`, 대응점 3+개 → UPDATE SQL)으로 넣는다.
+    계수가 비어 있으면 기존 resolution·origin 방식으로 폴백
   - `status/slot` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
   - `status/cart` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
@@ -71,11 +74,10 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   - `{"requestId","command":"MOVE","zoneId","target":{"x","y"},"pixel":{"x","y"}}` —
     **target은 SLAM 미터**(EM SLAM Nav의 goal 좌표. BE가 지도 메타로 픽셀→미터 역변환,
     `mqtt.position-unit=meters`일 때만 — pixels 모드에선 null), pixel은 지도 이미지 픽셀(참고용).
-    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 그 지점, 없으면 구역 bbox 중심.
-    **클릭 지점이 요청 구역 폴리곤 밖이면(서가·테이블 위) 구역 안 최근접점으로 스냅**한다
-    (`NavigationService.snapIntoZone` — 경계에서 `navigation.snap-margin-meters`(기본 0.5m)만큼
-    안쪽. FE가 지도 전체 자유 클릭으로 바뀌어 장애물 좌표가 올라오기 때문). 스냅 대상은 항상
-    요청에 실린 구역 하나다 — FE가 고른 가장 가까운 구역과 사서에게 안내한 구역이 어긋나지 않게
+    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 **그 지점 그대로**, 없으면 구역 bbox 중심.
+    통로 등 구역 밖 좌표도 목적지가 될 수 있어 **BE는 스냅하지 않는다**(2026-08-07 자유 좌표 이동) —
+    장애물(서가·테이블) 클릭을 고정 정차점으로 바꾸는 것은 FE 평면도(MAP_LANDMARKS)의 책임이고,
+    그래도 도달 불가한 goal은 Nav2가 거부해 `status/nav-result`(ABORTED·REJECTED)→FAILED로 알린다
   - `{"requestId","command":"CANCEL","zoneId"}` — 좌표 없음
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환
