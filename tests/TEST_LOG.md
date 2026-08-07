@@ -15,6 +15,177 @@
 
 ---
 
+## 2026-08-07 17:40 — ✅ EM Phase 3-④ 매핑 완료(97 m² 지도 저장) / 🔴 ⑤ Nav2 회전 발진으로 SUCCEEDED 미달 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**(같은 네트워크의
+  다른 사람 ROS와 격리 — 사용자 지시). 브랜치 `em/feature/motor-Lidar-integrated` @ `50163ce`.
+- 세션 중 젯슨 1회 재부팅(사용자), 전원 사고 없음.
+
+### ④ 매핑 — ✅ 통과
+
+| 항목 | 값 |
+|---|---|
+| 주행 방식 | 사용자 teleop 수동 주행, Claude가 Hz·TF·지도 감시 |
+| `/scan` · `/odom_rf2o` | 11.0~11.7 Hz · 9.3~10.3 Hz (전 구간 안정) |
+| 감시 경고 | **기동 직후 3건뿐**, 주행 중 0건 (지도 찢어짐 없음) |
+| 관측 셀 | 9,265 → **38,673** / 격자 116,754 |
+| 관측 면적 | 약 **97 m²** |
+| 저장 파일 | `~/maps/library_map.{yaml,pgm,posegraph,data}` **4개** ✅ |
+
+**BE 전달값** (`SlamCoordinateConverter` 입력 / `mqtt.position-unit=meters` 전환 조건):
+
+| 항목 | 값 |
+|---|---|
+| `resolution` | **0.05** m/셀 |
+| `origin` | **[-8.14, -4.75, 0]** |
+| 격자 | **366 × 319 셀** = 18.30 m × 15.95 m |
+| 좌표 범위 | x `-8.14 ~ 10.16` m, y `-4.75 ~ 11.20` m |
+| `mode` | trinary (`occupied_thresh 0.65` / `free_thresh 0.25`) |
+
+### ④에서 확정한 속도 계층 — 두 곳을 같이 올려야 한다
+
+사용자가 "속도가 너무 느리다"고 두 번 지적. 원인은 **teleop 자체 상한**이었다.
+브릿지 cap은 "그 이상 못 나가게 막는" 방어선일 뿐, teleop이 안 보내면 무의미하다.
+`teleop_node.py:111-115`가 `__init__`에서 한 번만 읽어 `TeleopState`에 박으므로
+**`ros2 param set`은 성공을 반환하지만 효과가 없다** (브릿지와 동일한 함정) → 재기동 필수.
+
+| 계층 | 기본 | 최종 |
+|---|---|---|
+| teleop `max_linear_mps` | 0.13 | **0.52** (4배) |
+| teleop `max_angular_rps` | 0.60 | 0.60 (유지 — 올리면 스캔당 회전각이 커져 지도가 찢어짐) |
+| 브릿지 `max_wheel_rad_s` | 2.0 | **8.0** (PWM 80 / `MOTOR_PWM_MAX` 99) |
+
+하드웨어 한계는 **9.9 rad/s** (`MOTOR_OPEN_LOOP_PWM_PER_RAD_S=10` × `MOTOR_PWM_MAX=99`).
+정지 거리: 0.13 m/s에서 1.0 s·8 cm → **0.52 m/s에서 2.5 s·78 cm**, 브릿지 사망 시 **2.9 m**.
+
+### ⑤ Nav2 — 🔴 불합격 (`/cmd_vel` 계약 3/4 통과, `SUCCEEDED` 미달)
+
+기동은 전부 정상: lifecycle `Managed nodes are active` 1회 통과(Humble DDS 레이스 없음),
+`/cart/nav_status` 래치 IDLE, `/robot_pose` **9.99 Hz**, `/cmd_vel` 발행자는 Nav2 내부만
+(`velocity_smoother` + `behavior_server` — teleop·AI 없음), goal은 `/cart/target_pose`로만 투입.
+
+**시도 3회:**
+
+| # | goal | `max_vel_theta` | 결과 | PWM max | 진단 |
+|---|---|---|---|---|---|
+| 1 | (0.0, 1.0) | 0.6 | 150초 NAVIGATING, `linear.x` max **0.016** | **17** | 🔴 PWM 17 < 데드존 20 → **회전 자체가 안 됨** |
+| 2 | (0.0, 1.0) | 1.2 | 120초 NAVIGATING, `linear.x` max 0.134 | 38 | 데드존 탈출·전진 시작, 그러나 미도달 |
+| 3 | (0.0393381, 0.0393381) | 1.2 | 180초 NAVIGATING, `linear.x` max **0.150**(포화) | 49 | 🔴 **제자리 좌우 발진** |
+
+**🔴 근본 원인 — 회전 액추에이터가 bang-bang이다.**
+
+| 명령 | 바퀴 rad/s | PWM | 실제 |
+|---|---|---|---|
+| < 0.68 rad/s | < 2.0 | < 20 | **안 돎** (Phase 1 실측 데드존) |
+| 0.68 ~ 1.2 | 2.0 ~ 3.5 | 20 ~ 35 | 돎 |
+
+사용 가능한 제어 대역이 0.68~1.2 rad/s뿐이라 사실상 on/off다. 여기에 rf2o의 지연된
+yaw 피드백이 겹쳐 DWB의 비례 제어가 리미트 사이클에 빠진다.
+
+`Oscillation` 크리틱은 이미 critics 목록에 있으나 **기본값 `oscillation_reset_dist: 0.05 m`**
+때문에 무력화된다 — 위치가 0.1 m씩 흔들리므로 매 주기 잠금이 풀린다.
+
+또 **위치추정 자체가 튄다**: PWM 8(데드존 미만, 물리적으로 안 도는 상태)인데
+`map→base` yaw가 2초에 33° 점프하고 되돌아왔다. slam_toolbox가 두 가설 사이를 스냅한다.
+지도가 드리프트 있는 오도메트리로 만들어져 내부 정합이 완전하지 않은 것으로 보인다.
+
+<details><summary>시도 3 원본 — 제자리 발진 궤적 (`S15_monitor.log`)</summary>
+
+```
+   t[s] | scanHz odomHz | map->base x,y,yaw          | pwm L,R
+ 1413.4 |   11.3   10.0 | +0.837 +2.778   +61.8deg   |  -16,  16
+ 1415.4 |   11.3   10.0 | +0.720 +2.894   +24.2deg   |   12, -12
+ 1417.4 |   11.3   10.0 | +0.800 +2.789   +55.3deg   |   -8,  12
+ 1419.4 |   11.3   10.0 | +0.719 +2.865   +30.6deg   |   20, -20
+ 1421.4 |   11.3   10.0 | +0.815 +2.782   +61.0deg   |  -20,  24
+ 1423.4 |   11.7   10.0 | +0.706 +2.889   +26.7deg   |   24, -20
+ 1425.5 |   11.3   10.0 | +0.781 +2.799   +53.8deg   |  -24,  24
+ 1427.5 |   11.3   10.0 | +0.710 +2.875   +29.8deg   |   28, -28
+ 1429.5 |   11.3   10.0 | +0.753 +2.787   +52.3deg   |  -28,  32
+ 1431.5 |   11.3   10.0 | +0.704 +2.870   +32.2deg   |   32, -32
+ → PWM 부호가 2초마다 반전, 위치는 (0.63~0.84, 2.77~2.89)에서 벗어나지 않음
+```
+</details>
+
+<details><summary>시도 3 계약 검증 원본 (`S18_navverify.log`)</summary>
+
+```
+=== 결과 ===
+  nav_status 전이: NAVIGATING
+  /cmd_vel 수신    : 3463건
+  linear.x 범위    : +0.0000 ~ +0.1500 m/s
+  |angular.z| 최대 : 1.2000 rad/s
+  PWM 최대         : 49
+
+  🔴 NAVIGATING → SUCCEEDED  ← 위반
+  ✅ 0 <= linear.x <= 0.15
+  ✅ |angular.z| <= 1.2
+  ✅ 음수 linear.x 0건        ← 후진 금지 설계 검증됨
+
+  종합: 🔴 불합격
+```
+</details>
+
+<details><summary>시도 1 원본 — 데드존 미만으로 회전 불가 (`S14_navverify.log`)</summary>
+
+```
+  [   3.6s] nav_status → NAVIGATING
+  [  10.1s] NAVIGATING  cmd_vel   130건  lin [+0.000, +0.000]  |ang| max 0.600  pwm max 17
+  ...
+  [ 140.3s] NAVIGATING  cmd_vel  2552건  lin [+0.000, +0.016]  |ang| max 0.600  pwm max 17
+  → |angular.z|가 150초 내내 상한 0.6에 붙어 있었고 PWM 17로 데드존 미만
+```
+</details>
+
+### ⑤ 때문에 바꾼 `nav2_params.yaml` (커밋 `50163ce`)
+
+| 파라미터 | 이전 | 이후 | 근거 |
+|---|---|---|---|
+| `FollowPath.max_vel_x` | 0.3 | **0.15** | 회전 확보를 위해 절반 (사용자 지시) |
+| `FollowPath.max_vel_theta` | 0.6 | **1.2** | PWM 17 → 35, 데드존 탈출 |
+| `FollowPath.max_speed_xy` | 0.3 | 0.15 | 위와 정합 |
+| `FollowPath.acc_lim_theta` | 0.8 | **1.6** | 데드존 구간 빠르게 통과 |
+| `velocity_smoother.max_velocity` | [0.3,0,0.6] | **[0.15,0,1.2]** | ROS 쪽 유일한 클램프 |
+| `behavior_server.max_rotational_vel` | 0.5 | **1.2** | velocity_smoother 우회 경로 |
+| `behavior_server.min_rotational_vel` | 0.15 | **0.70** | 0.15는 PWM 4로 데드존. 파일의 `TODO-팀확인: 모터 데드밴드 실측 후 조정` 해소 |
+| 브릿지 `max_wheel_rad_s` (⑤용) | 2.0 | **6.0** | 회전 1.2는 바퀴 3.51, 조합 명령 최대 5.82 → 비례 축소 없이 통과 |
+
+🔴 **계약 변경**: `docs/ROS2_API.md` ROS2-10의 `|ω| ≤ 0.6`이 **≤ 1.2**로 바뀌었다.
+`/cmd_vel`은 EM 내부(Nav2→브릿지) 경로지만 명세 문서에 기재돼 있으므로 갱신 필요.
+
+### 다음 세션 우선순위 (⑤ 해결)
+
+1. **휠 오도메트리** — 근본 해결. STATUS에 `enc L/R`이 이미 올라온다(`enc L=8010097 R=10030923`).
+   ⚠️ 사용자 확인: **현재 작업 불가 상태**
+2. **데드존 보상** — 브릿지 또는 펌웨어에서 `|목표| > 0`일 때 최소 PWM(≈20)을 깔아 주면
+   회전 제어 대역이 0부터 열린다. bang-bang이 비례 제어로 바뀌므로 발진이 사라진다
+3. **`Oscillation` 크리틱 실효화** (yaml만) — `oscillation_reset_dist: 0.05 → 0.3`,
+   `oscillation_reset_angle: 0.2 → 0.5`. 위치 지터로 잠금이 풀리는 것을 막는다
+4. **`PathAlign.scale 32` / `GoalAlign.scale 24` 하향** — 회전 지향 압력을 줄인다
+5. **지도 재작성 검토** — 위치추정 스냅이 지도 내부 정합 문제일 수 있다.
+   1·2 해결 후 재매핑하면 지도 품질이 올라간다
+
+### 세션 중 발견한 부수 사실
+
+- **`/stm/pwm`은 `Int16MultiArray`다** (`Int32MultiArray` 아님). 이전 기록에서 "pwm이 항상 0"이라고
+  본 것은 구독 타입 불일치였다 — 브릿지 버그가 아니다. **정정**
+- `ROS_DOMAIN_ID=42`로 전환 후 노트북 RViz가 안 보였다. 젯슨 쪽은 무죄(`ufw`·`nftables` inactive,
+  멀티캐스트 `239.255.0.1` 가입, 노트북 `192.168.0.79` ping 3/3). 공유기 멀티캐스트 차단 의심 →
+  유니캐스트 우회 XML을 `ros2_ws/log/phase3_20260807/fastdds_peer_laptop.xml`에 준비
+- **젯슨 로컬 모니터(`:0`)로 RViz를 띄울 수 있다** — `launch_rviz.sh`가 `DISPLAY=:0` +
+  `XAUTHORITY=/run/user/1000/gdm/Xauthority`로 SSH 세션에서도 로컬 화면에 띄운다. 네트워크 무관
+- 합판 절단면이 라이다에서 **좌 0.165 m / 우 0.27 m**로 비대칭. 막힌 총량 약 30°(8%), 남는 시야 330°
+- 기둥은 **2020 프로파일 2개**(좌 −81.6~−73.4°, 우 +70.1~+78.3°, 8.2° = 19.8 mm).
+  가운데가 무응답으로 갈라져 4개로 보였던 것은 T슬롯 홈
+
+- **증거 파일** (`.gitignore`의 `log/`로 커밋 제외): `ros2_ws/log/phase3_20260807/`
+  `S11_save_map.log`(지도 저장), `S14/S17/S18_navverify.log`(Nav2 3회), `S15_monitor.log`(발진 궤적),
+  `S16_bridge.log`(STATUS·엔코더), `S5_box.log`·`S5_detail.log`(합판·기둥 실측),
+  `S6_drift_box.log`·`S7_drift_clear.log`(드리프트), 재현용 스크립트 일체
+  (`restart_all42.sh`, `launch_teleop.sh`, `save_map.sh`, `nav_verify.py`, `monitor.py`, `drift.py`)
+
+---
+
 ## 2026-08-07 10:05 — 🔴→✅ EM Phase 3-③ 드리프트 원인 규명: 드라이버 마스킹이 rf2o를 망가뜨림 → `scan_mask_node`로 이관 (relu 실기 / Claude 실행·기록)
 
 - **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble. 브랜치 `em/feature/motor-Lidar-integrated` @ `a959a1c`.

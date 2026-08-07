@@ -73,6 +73,10 @@ bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
     use_sim_time: false
 
+  # 2026-08-07 실측 변경: 회전 0.6 rad/s는 바퀴 1.754 rad/s = PWM 17로
+  #   Phase 1 실측 데드존(PWM 20) 미만이라 카트가 아예 회전하지 않았다.
+  #   Nav2가 '목표 방향 회전' 단계를 못 끝내고 150초간 NAVIGATING에 갇힘
+  #   (tests/TEST_LOG.md). 회전 2배·직진 절반으로 재배분한다.
 controller_server:
   ros__parameters:
     use_sim_time: false
@@ -100,18 +104,18 @@ controller_server:
       debug_trajectory_details: True
       min_vel_x: 0.0             # 후진 금지 (후방 미검증 + 방향전환 홀드 회피)
       min_vel_y: 0.0
-      max_vel_x: 0.3             # 초기 디레이트 (설계 최대 0.5) TODO-팀확인
+      max_vel_x: 0.15   # 2026-08-07 0.3 -> 0.15 (회전 확보를 위해 절반)
       max_vel_y: 0.0
-      max_vel_theta: 0.6         # 초기 디레이트 (설계 최대 1.0) TODO-팀확인
+      max_vel_theta: 1.2    # 2026-08-07 0.6 -> 1.2 (PWM 17 데드존 탈출, 바퀴 3.51)
       min_speed_xy: 0.0
-      max_speed_xy: 0.3
+      max_speed_xy: 0.15
       min_speed_theta: 0.0
       acc_lim_x: 0.3             # TODO-팀확인: STM32 램프 4rad/s² 기준 축 미확정
       acc_lim_y: 0.0
-      acc_lim_theta: 0.8         # TODO-팀확인
+      acc_lim_theta: 1.6    # 2026-08-07 데드존 구간을 빠르게 통과
       decel_lim_x: -0.3
       decel_lim_y: 0.0
-      decel_lim_theta: -0.8
+      decel_lim_theta: -1.6
       vx_samples: 20
       vy_samples: 0
       vtheta_samples: 20
@@ -274,9 +278,9 @@ behavior_server:
     simulate_ahead_time: 2.0
     # ⚠ Humble에서 behavior는 velocity_smoother를 우회해 /cmd_vel 직접 발행
     #   → 여기서 자체 클램프 (STM32에 클램프 없음)
-    max_rotational_vel: 0.5
-    min_rotational_vel: 0.15   # TODO-팀확인: 모터 데드밴드 실측 후 조정
-    rotational_acc_lim: 0.8
+    max_rotational_vel: 1.2
+    min_rotational_vel: 0.70   # 2026-08-07 실측 반영: 0.15는 PWM 4로 데드존. 0.70 = PWM 20.5
+    rotational_acc_lim: 1.6
 
 waypoint_follower:
   ros__parameters:
@@ -296,10 +300,10 @@ velocity_smoother:
     scale_velocities: False
     feedback: "OPEN_LOOP"        # rf2o 노이즈 + 모터리스 벤치 테스트 고려
     # ⚠ ROS 쪽 유일한 속도 클램프 (STM32 무클램프) — [x, y, theta]
-    max_velocity: [0.3, 0.0, 0.6]
-    min_velocity: [0.0, 0.0, -0.6]   # x 하한 0.0 = 후진 금지
-    max_accel: [0.3, 0.0, 0.8]       # TODO-팀확인 (STM32 램프와 정합)
-    max_decel: [-0.3, 0.0, -0.8]
+    max_velocity: [0.15, 0.0, 1.2]
+    min_velocity: [0.0, 0.0, -1.2]   # x 하한 0.0 = 후진 금지
+    max_accel: [0.3, 0.0, 1.6]       # TODO-팀확인 (STM32 램프와 정합)
+    max_decel: [-0.3, 0.0, -1.6]
     odom_topic: "/odom_rf2o"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]  # TODO-팀확인: 모터 정지마찰 실측 후
