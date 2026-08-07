@@ -87,8 +87,9 @@ describe('MAP_LANDMARKS', () => {
     point.y <= rect.top + rect.height;
 
   /**
-   * 이 검사가 이 파일에서 가장 중요하다 — 정차점이 구역 밖이면 BE가 구역 안 최근접점으로
-   * 옮기므로(snapIntoZone), 우리가 정한 지점이 조용히 무시된다.
+   * 정차점은 통로(구역) 안이어야 한다 — 통로 밖이면 서가·테이블·벽에 붙은 자리라
+   * 실물 카트가 서지 못하고 Nav2가 goal을 거부한다. 좌표를 옮기다 통로 밖으로
+   * 나가면 여기서 잡는다.
    */
   it('정차점이 모두 어느 구역 안에 있다', () => {
     MAP_LANDMARKS.forEach((landmark) => {

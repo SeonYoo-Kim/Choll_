@@ -57,24 +57,28 @@ export const CORRIDOR_Y = 18;
 export const START_POSITION: { x: number; y: number } = { x: 80, y: 18 };
 
 /**
- * 지도 위 고정 목적지 — 구역이 아니라 **정해진 한 지점**을 가리키는 버튼.
+ * 지도 위 고정 목적지 — 장애물(서가·테이블) 위 클릭을 **정해진 한 지점**으로 바꾸는 버튼.
  *
- * 사서·반납 테이블은 카트가 들어갈 수 없는 장애물이라 구역이 될 수 없지만, 사서가 "저기로 가라"고
- * 지시할 대상이긴 하다. 그래서 클릭 영역은 테이블 그림에 얹고 목적지는 별도의 `stop`으로 둔다 —
- * 테이블 어디를 눌러도 카트는 항상 같은 자리에 선다.
+ * 이동 명령은 두 갈래다: 바닥(구역·통로)을 찍으면 그 좌표 그대로, 장애물을 찍으면 그 앞의
+ * 고정 정차점으로. 카트가 들어갈 수 없는 자리를 목적지로 흘리지 않는 책임은 FE에 있다 —
+ * BE는 좌표를 그대로 하행하고, 그래도 도달 불가면 Nav2가 거부해 실패 토스트가 뜬다(안전망).
  *
- * `stop`은 **반드시 어느 구역 폴리곤 안이어야 한다.** BE는 구역 밖 좌표를 그 구역 안 최근접점으로
- * 스냅하므로(NavigationService.snapIntoZone), 구역 밖에 두면 우리가 정한 지점이 무시되고
- * 서버가 옮긴 자리로 간다. 통로 안에서 테이블에 가장 가까운 지점을 고른 이유가 이것이다.
+ * `stop`은 통로 안, 그 장애물에 실제로 붙어 작업할 수 있는 자리로 잡는다 (카트 폭 고려 여유 5%≈0.5m).
  */
 export interface MapLandmark {
   /** React key·테스트 식별용 (서버로 가지 않는다) */
   key: string;
   name: string;
-  /** 지도 이미지 위 클릭 영역 (%) — 평면도에 그려진 테이블 */
+  /** 지도 이미지 위 클릭 영역 (%) — 평면도에 그려진 장애물 */
   rect: ZoneRect;
-  /** 카트 정차 지점 (%) — 구역 안이어야 한다 */
+  /** 카트 정차 지점 (%) — 통로(구역) 안이어야 한다 */
   stop: { x: number; y: number };
+  /**
+   * 도착을 어떻게 알릴까.
+   * 'zone' — 구역 정리 모달 (서가: 그 자리에서 꽂을 책 목록이 필요하다)
+   * 'toast' — 이름 토스트만 (테이블: 꽂을 책이 없어 모달이 소음이다)
+   */
+  arrival: 'zone' | 'toast';
 }
 
 export const MAP_LANDMARKS: readonly MapLandmark[] = [
@@ -84,6 +88,7 @@ export const MAP_LANDMARKS: readonly MapLandmark[] = [
     rect: { left: 0, top: 0, width: 25.7, height: 15.0 },
     // 테이블 오른쪽 끝 아래 — Z3 통로의 우상단
     stop: { x: 22.5, y: 23.0 },
+    arrival: 'toast',
   },
   {
     key: 'returnTable',
@@ -91,6 +96,37 @@ export const MAP_LANDMARKS: readonly MapLandmark[] = [
     rect: { left: 87.4, top: 0, width: 12.6, height: 15.0 },
     // 테이블 아래쪽 끝 아래 — Z1 통로의 상단
     stop: { x: 93.7, y: 23.0 },
+    arrival: 'toast',
+  },
+  // 서가 4면 — 클릭 영역은 어두운 서가 블록의 해당 면 절반, 정차점은 그 면이 바라보는 통로 안.
+  // (800·200이 한 블록, 100·000이 한 블록. 왼쪽 면은 왼쪽 통로를, 오른쪽 면은 오른쪽 통로를 본다)
+  {
+    key: 'shelf800',
+    name: '800 문학 서가',
+    rect: { left: 24.9, top: 38.5, width: 6.2, height: 37.0 },
+    stop: { x: 18.6, y: 57.0 }, // Z3 통로 오른쪽, 서가 앞
+    arrival: 'zone',
+  },
+  {
+    key: 'shelf200',
+    name: '200 종교 서가',
+    rect: { left: 31.3, top: 38.5, width: 6.2, height: 37.0 },
+    stop: { x: 43.9, y: 57.0 }, // Z2 통로 왼쪽, 서가 앞
+    arrival: 'zone',
+  },
+  {
+    key: 'shelf100',
+    name: '100 철학 서가',
+    rect: { left: 61.5, top: 38.5, width: 6.2, height: 37.0 },
+    stop: { x: 55.1, y: 57.0 }, // Z2 통로 오른쪽, 서가 앞
+    arrival: 'zone',
+  },
+  {
+    key: 'shelf000',
+    name: '000 총류 서가',
+    rect: { left: 67.9, top: 38.5, width: 6.2, height: 37.0 },
+    stop: { x: 80.5, y: 57.0 }, // Z1 통로 왼쪽, 서가 앞
+    arrival: 'zone',
   },
 ];
 
