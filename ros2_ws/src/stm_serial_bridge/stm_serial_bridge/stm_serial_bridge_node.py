@@ -142,11 +142,13 @@ class StmSerialBridgeNode(Node):
         self.declare_parameter("serial_port", "/dev/ttyACM0")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("wheel_radius_m", 0.065)
-        # 2026-08-04 실측값(좌우 구동 바퀴 트레드 중심선 간 거리 0.38m).
+        # 좌우 구동 바퀴 트레드 중심선 간 거리.
+        # 🔴 2026-08-07 실측 정정: 0.38 -> 0.265 (줄자 26~27cm). 0.38이면 실제
+        #   회전율이 명령의 1.43배가 되어 Nav2가 좌우로 진동한다 (TEST_LOG 참조).
         # 이 값이 틀리면 angular.z -> 좌우 속도 차 변환이 어긋나 회전량이 맞지 않는다.
         # config/stm_serial_bridge.yaml 과 같은 값을 유지할 것 — launch 를 거치지 않고
         # `ros2 run` 으로 직접 띄우면 이 기본값이 쓰인다.
-        self.declare_parameter("wheel_separation_m", 0.38)
+        self.declare_parameter("wheel_separation_m", 0.265)
         self.declare_parameter("tx_rate_hz", 20.0)
         self.declare_parameter("cmd_vel_timeout_sec", 0.5)
         self.declare_parameter("dry_run", True)
