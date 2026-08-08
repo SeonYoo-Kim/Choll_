@@ -28,6 +28,15 @@ ROS2-01~06, 11, 13은 AI 파트 내부 토픽으로 Lidar 패키지와 무관 (�
 - MQTT-01 `status/position` 페이로드 — BE 파서(`MqttPositionMessageHandler`) 실측으로
   `{"x","y","timestamp"(ISO-8601, 선택)}` 확정. EM은 `yaw`(라디안, CCW+)를 추가 송신
   (BE 파서 확장 제안 상태). mapId는 페이로드에 없음(BE `mqtt.map-id` 설정).
+  - **2026-08-09 실기 확정**: 브로커 실측으로 EM 발행 확인 —
+    `{"x":-0.008,"y":-0.0,"yaw":0.0591,"timestamp":"2026-08-08T18:14:39.719Z"}`, 1.80 Hz.
+    `/robot_pose` 10.0 Hz → 브릿지 0.5초 스로틀의 결과값이다.
+  - 🔴 **BE는 `yaw`를 파싱하지 않는다.** `record PositionPayload(x, y, timestamp)`에 필드가
+    없고, FE로 나가는 값은 `CartPositionTelemetryService`의 `TEMPORARY_YAW = ZERO` 상수다.
+    "yaw를 보내기로 했는데 반영이 안 됐다"의 원인은 EM이 아니라 BE다.
+  - 🔴 **단위 전제**: EM은 SLAM **미터**를 보낸다. BE `mqtt.position-unit` 기본값이
+    `pixels`라 그대로 두면 미터값을 픽셀로 읽어 구역 판정이 전부 실패한다.
+    `meters` 전환 + `library_maps` 지도 메타 등록이 선행되어야 한다(등록이 먼저).
 
 ## 표 B. 명세서에 없는 사용 중 API — 명세서 추가 제안 (노션 붙여넣기용)
 

@@ -6,6 +6,161 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-09 03:30 — ✅ EM→BE 위치 발행 배선 검증 + ZUPT 실측 / 🔴 BE 단위 설정이 블로커 (relu 실기 / Claude 실행·기록)
+
+Nav2 P2P 가 막혀 있어, 그보다 낮은 층의 MVP —**카트가 자기 위치를 BE 로 계속 보내는 것**—
+을 먼저 닫았다. 구역별 도서 표시·슬롯 LED 는 NAV 없이 이 하나만으로 성립한다.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`,
+  브랜치 `em/feature/motor-Lidar-integrated` @ `712186f`
+- **스택**: `bringup.launch.py ekf:=true` (라이다+scan_mask+rf2o+공분산스탬퍼+ZUPT+EKF+slam_toolbox)
+  → `interface.launch.py`(cart_pose_publisher) → `bridge.launch.py`(mqtt_bridge)
+- **신규 도구** (`ros2_ws/log/phase4_20260808/`, gitignore 대상):
+  `mqtt_sniff.py`(paho 로 브로커 `#` 구독 — 구독 전용), `pose_probe.py`(/robot_pose 표류),
+  `launch_position.sh`
+
+### ① 전제 복구 — 브리지 동결 해소 확인 (재부팅 후)
+
+2026-08-09 02:45 항목의 브리지 동결이 젯슨 재부팅으로 사라졌다. 재측정 원본:
+
+```
+=== 결과 ===                          (enc_probe.py 30)
+  수신 건수        : 300  (평균 10.0 Hz)
+  값이 바뀐 횟수   : 0  (정지 중이면 0 이 정상)
+  /stm/connected   : True
+  끊김(>0.5s) : 0 회
+✅ 30초 동안 끊김 없음. 정지 중에도 계속 발행된다.
+   값도 전혀 안 바뀌었다 — ZUPT 판정 조건을 정상적으로 만족한다.
+```
+
+⚠️ **재현 조건은 여전히 미확정**이다. 모터 담당 이관 사항(`main()` spin 루프 방어)은 유효하다.
+
+### ② STEP 1 — 위치 배관 실측 (매핑 모드) ✅
+
+```
+=== /robot_pose 감시 22초 ===          (pose_probe.py 22)
+  수신 건수   : 220  (평균 10.0 Hz)
+  frame_id    : ['map']
+  끊김(>0.5s) : 0 회
+✅ 발행 정상 (10.0 Hz, 끊김 0회)
+```
+
+```
+=== MQTT 트래픽 관찰 25초 ===          (mqtt_sniff.py 25, 필터 '#')
+  ✅ 접속 성공 (rc=0)
+  status/target    건수 115  (4.58 Hz)   {"image_width":640,"image_height":480,"tracks":[]}
+  status/position  건수  45  (1.80 Hz)
+      {"x":-0.008,"y":-0.0,"yaw":0.0591,"timestamp":"2026-08-08T18:14:39.719Z"}
+  carts/status     건수 1   {"status": "offline"}     ← 리테인 잔재
+  status/cart      건수 1   {"status": "offline"}
+  페이로드 키: ['timestamp', 'x', 'y', 'yaw']
+```
+
+**브로커 `#` 구독으로 문서 불일치를 실측 종결했다.** `embedded/CLAUDE.md` 의
+`carts/{cartId}/telemetry/position` · `choll/cart/rfid` · `carts/status` 는 낡았다.
+살아 있는 토픽은 `status/position` · `status/cart` · `status/target` 이다
+(`status/slot`·`cmd/*` 는 관측 구간 0건 — RPi/BE 명령 미가동).
+
+**🔴 yaw 는 EM 이 이미 보내고 있다.** "반영이 안 됐다"의 원인은 BE 쪽이다 —
+`MqttPositionMessageHandler.java:78-83` 의 `record PositionPayload(x, y, timestamp)` 에
+yaw 필드가 없어 파싱조차 안 하고, `CartPositionTelemetryService.java:30` 의
+`TEMPORARY_YAW = BigDecimal.ZERO` 로 FE 에는 항상 0 이 나간다.
+
+### ③ STEP 2 — ZUPT 검증 ✅ 정지 yaw 표류 24° → 2.91° (8.2배)
+
+```
+=== /robot_pose 감시 90초 ===          (pose_probe.py 90, 카트 완전 정지)
+  수신 건수   : 891  (평균 9.9 Hz)    끊김 0회
+  처음 : x=-0.0167  y=-0.0008  yaw=  +4.492 deg
+  마지막: x=-0.0213  y=-0.0013  yaw=  +7.370 deg
+  === 표류량 (최대-최소) ===
+      x   : 0.0049 m      y   : 0.0005 m      yaw : 2.908 deg
+✅ yaw 표류 2.91 deg < 3 deg
+✅ 위치 표류 x 0.005 / y 0.001 m < 0.05 m
+```
+
+ZUPT 가 실제로 발행 중임을 별도 확인 (추정 아님):
+
+```
+[zupt_node.py-6] [INFO] [zupt]: ZUPT 4200건 발행     ← 20초당 200건 = 10Hz
+$ ros2 topic echo /odom_zupt --once
+  frame_id: odom / child_frame_id: base_link
+  twist 전부 0, pose covariance[0] = 1000000.0
+$ python3 enc_probe.py 92 → 903건 9.8Hz, 값변화 0, 끊김 0
+```
+
+비교 기준: 2026-08-08 실측 **`/cmd_vel` 0건인 90초 동안 map→base_link yaw 24°**.
+
+### ④ STEP 3 — AMCL 좌표 재현성 ⏸ 미완 (환경 요인)
+
+`restart_localize.sh ~/maps/map_home.yaml` + `/initialpose` 토픽으로 headless 기동
+(RViz 2D Pose Estimate 없이 됨 — GUI 의존 제거).
+
+**AMCL 모드에서 위치 배관은 오히려 더 안정적이다** (AMCL 이 정지 중 map→odom 을 고정):
+
+```
+=== /robot_pose 감시 14초 ===
+  처음 : x=-0.1494  y=-0.4763  yaw= +79.956 deg
+  마지막: x=-0.1494  y=-0.4765  yaw= +80.036 deg
+  표류량  x 0.0001 m / y 0.0007 m / yaw 0.166 deg
+=== MQTT ===  status/position 27건 (1.81 Hz)
+  {"x":-0.149,"y":-0.477,"yaw":1.3971,"timestamp":"2026-08-08T18:22:31.119Z"}
+```
+
+**미완 사유 — 초기 위치 추정이 수렴하지 않음** (`scan_fit.py`):
+
+| 시도 | 현재 정합 | 격자탐색 최적 |
+|---|---|---|
+| 초기 pose (0, 0, 0) | 0.349 | **0.608** at dx −0.20 dy −0.40 dyaw **+80°** |
+| 보정 (−0.24, −0.46, +80°) | 0.163 | **0.671** at dx −0.40 dy +0.40 dyaw **−175°** |
+
+- 최적 yaw 가 +80° → −175° 로 튄다. **고정 오프셋이 아니므로 라이다 장착 회전이 아니다**
+  (scan_fit.py 의 자동 판정 문구는 이 경우 오독이다 — 세션 초반엔 같은 도구가 +25° 를 냈다).
+- 지도가 87×73 px = **4.35×3.65 m 의 작고 거의 직사각형인 방**, occupied 603칸 →
+  180° 대칭 모호성. 최고 점수도 0.61~0.67 로 낮다.
+- AMCL `update_min_d: 0.25` / `update_min_a: 0.2` → **움직여야만 보정한다.**
+  정지 상태로는 원리적으로 수렴 불가.
+- 사용자 판단으로 중단: "지금 맵 위치가 좀 변경 되서 내일 맵 위치 똑같이 해서 다시".
+
+### 🔴 다음 세션 전제 — 데모는 `library_map` 이다
+
+BE `library_maps` **id=2** 에 8/7 지도 기준 아핀 6계수가 들어 있고 구역 폴리곤도 그 픽셀
+좌표계로 찍혀 있다(사용자 확인). 따라서 `map_home` 이 아니라 아래를 써야 한다.
+
+| 지도 | 해상도 | origin | 크기(px) | 실측 크기 |
+|---|---|---|---|---|
+| `~/maps/library_map.yaml` (8/7 17:02) | 0.05 | [−8.14, −4.75] | 366×319 | 18.3 × 15.95 m |
+| `~/maps/map_home.yaml` (8/9 01:14) | 0.05 | [−2.43, −1.97] | 87×73 | 4.35 × 3.65 m |
+
+### 🔴 BE 블로커 (코드 실측, EM 이 못 고침)
+
+1. `mqtt.enabled` 기본 `false` (`application.properties:16`) — 배포에서 켜져 있는지 확인 필요
+2. **`mqtt.position-unit` 기본 `pixels`** — EM 은 SLAM **미터**를 보낸다.
+   `CartPositionTelemetryService.java:82-91` 이 `meters` 일 때만 변환 블록을 타므로,
+   `pixels` 면 `x=-0.149` 를 **픽셀 −0.149** 로 읽는다 → 지도 밖/구석 → 구역 판정 전멸 →
+   **LED 가 절대 안 켜진다.**
+3. 부수 효과: `NavigationService.java:142-145` 가 `position-unit != meters` 면 MOVE 의
+   `target` 을 `null` 로 보내고, EM 브릿지(`bridge_logic.py:42-46`)가 그 명령을 거부한다.
+   **BE 이동 명령이 EM 에 도달한 적이 없다** — Nav2 튜닝과 별개 문제였다.
+4. ⚠️ `MQTT_MAP_ID=2` 행이 DB 에 없으면 meters 모드에서 매 메시지마다
+   `ResourceNotFoundException("지도", 2)` 가 나고, 이 예외는 핸들러 catch 에 안 걸려
+   트랜잭션이 깨진다 → **3번(지도 등록)을 2번(meters 전환)보다 먼저** 해야 한다.
+
+### 판정
+
+| 항목 | 목표 | 실측 | 결과 |
+|---|---|---|---|
+| `/robot_pose` | ≈10 Hz, frame=map | 10.0 / 9.9 Hz, `['map']`, 끊김 0 | ✅ |
+| MQTT `status/position` | ≈2 Hz | 1.80 / 1.81 Hz | ✅ |
+| 페이로드 키 | x·y 필수 | `['timestamp','x','y','yaw']` | ✅ |
+| 정지 90초 yaw 표류 | < 3° | **2.91°** (이전 24°) | ✅ |
+| 정지 90초 x·y 표류 | < 0.05 m | 0.005 / 0.001 m | ✅ |
+| 엔코더 스트림 | 끊김 0 | 9.8 Hz, 값변화 0, 끊김 0 | ✅ |
+| AMCL 좌표 재현성 | A 왕복 0.2 m | 초기 pose 미수렴 | ⏸ 내일 |
+| FE 화면 카트 위치 | 실이동과 일치 | BE 설정 대기 | ⏸ |
+
+---
+
 ## 2026-08-09 — 🔴 EM 실기: 우측 모터 무동작 = **24V 전원 연장선(WAGO) 단선** / teleop 회전 1.50→0.90 재조정 (relu 실기 / Claude 진단·기록)
 
 - **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`.
