@@ -45,9 +45,12 @@ DEFAULT_STATUS_RATE_HZ = 10.0
 # 바퀴 1회전당 엔코더 count — 펌웨어 `motor_config.h`의 **명목값**
 # (MOTOR_ENCODER_CPR 380 × MOTOR_GEAR_RATIO 51 × QUADRATURE 4).
 #
-# ⚠️ 2026-08-03 실측 평균은 68162.5 count/wheel-rev 로 명목값보다 약 12.1% 작고
-#    그 원인은 아직 미확정이다. mock 은 "펌웨어가 믿고 있는 값"을 그대로 쓴다 —
-#    이 숫자를 실측값으로 바꿔도 브리지 검증 결과는 달라지지 않는다(형식만 검증하므로).
+# ⚠️ 실측 평균은 명목값보다 약 12% 작다 — 2026-08-03 68162.5, 2026-08-08 68167
+#    count/wheel-rev 로 두 차례 재현됐고, 그 원인은 아직 미확정이다.
+#    ROS Wheel Odometry 는 실측 기준값 68160(`counts_per_wheel_rev` 파라미터)을 쓰지만
+#    **이 mock 은 계속 명목값을 쓴다.** mock 이 흉내내는 대상은 odometry 가 아니라
+#    "펌웨어가 믿고 있는 값"이기 때문이다. 펌웨어 상수가 바뀔 때만 이 값을 따라 바꾼다.
+#    (형식만 검증하므로 이 숫자를 바꿔도 브리지 검증 결과 자체는 달라지지 않는다.)
 DEFAULT_COUNTS_PER_WHEEL_REV = 380.0 * 51.0 * 4.0
 
 # int32 래핑 — 펌웨어가 STATUS 에 `%ld`로 싣는 누적 count 의 자료형 범위.

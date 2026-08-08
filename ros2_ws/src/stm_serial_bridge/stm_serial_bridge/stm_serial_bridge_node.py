@@ -147,6 +147,15 @@ class StmSerialBridgeNode(Node):
         # config/stm_serial_bridge.yaml 과 같은 값을 유지할 것 — launch 를 거치지 않고
         # `ros2 run` 으로 직접 띄우면 이 기본값이 쓰인다.
         self.declare_parameter("wheel_separation_m", 0.38)
+        # 바퀴 1회전당 누적 엔코더 count. 2026-08-08 실측 기준값(좌우 공통).
+        # ⚠️ **이 노드는 이 값을 쓰지 않는다.** 실제 소비자는 별도 노드 `wheel_odometry`
+        # (`wheel_odometry_node.py`)이고 정본은 `config/wheel_odometry.yaml` 이다.
+        # 여기 선언은 두 파일이 갈리지 않도록 두는 사본이며, 일치는 테스트가 강제한다.
+        #
+        # ⚠️ 펌웨어 명목값 77520 과 의도적으로 다르다. STM 의 actual_rad_s 는 77520 기준이라
+        #    약 12% 작게 보고되므로, 이 값으로 계산한 odometry 속도와 같은 축에서 비교하면
+        #    안 된다. 스케일 통일은 별건인 Encoder Scale Calibration 작업의 몫이다.
+        self.declare_parameter("counts_per_wheel_rev", 68160.0)
         self.declare_parameter("tx_rate_hz", 20.0)
         self.declare_parameter("cmd_vel_timeout_sec", 0.5)
         self.declare_parameter("dry_run", True)
@@ -428,6 +437,10 @@ class StmSerialBridgeNode(Node):
         logger.info(
             f"  wheel_separation_m  = {self._param_value('wheel_separation_m')}"
             "  <-- 2026-08-04 좌우 구동 바퀴 트레드 중심선 간 실측값"
+        )
+        logger.info(
+            f"  counts_per_wheel_rev= {self._param_value('counts_per_wheel_rev')}"
+            "  <-- 2026-08-08 실측(좌우 공통). ⚠️ 펌웨어 명목 77520 과 다름"
         )
         logger.info(f"  tx_rate_hz          = {self._param_value('tx_rate_hz')}")
         logger.info(

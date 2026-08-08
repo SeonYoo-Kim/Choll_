@@ -179,13 +179,24 @@ App_Run()
 - 코드 작성 완료(빌드 확인), 실기 테스트는 아직. `MOTOR_STALL_PWM_THRESHOLD`(80)/`MOTOR_STALL_TARGET_RAD_S`
   (0.2f)/`MOTOR_STALL_ACTUAL_RAD_S`(0.1f)/`MOTOR_STALL_DURATION_MS`(500u)는 모두 실기 미검증 잠정값
   (`motor_config.h`) — 실기에서 바퀴를 손으로 잡아 의도적으로 Stall을 유발해 튜닝 필요.
-- **엔코더 count/rev 캘리브레이션 미완**(2026-08-03 실측 완료, 원인 미확정): 출력축 **1회전당**
-  실측 평균 **68162.5** count/wheel-rev(좌우 각 4회전 측정의 평균)가 감속비 51:1 기준 명목값
-  **77520**(=380×51×4)보다 약 12.1% 작다.
-  `MOTOR_ENCODER_QUADRATURE_MULTIPLIER = 4.0f`가 맞는지, CPR 380의 정의가 맞는지, 타이머 입력
-  필터(IC1/IC2Filter=8)로 edge가 누락되는지 중 어느 것이 원인인지 **아직 구분되지 않았다.**
-  실측값을 코드에 강제 적용하지 않았으므로 STATUS의 LA/RA는 현재 실제보다 약 12% 작게 보고된다.
-  (상세: `motor_config.h`의 `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV` 주석)
+- **엔코더 count/rev 캘리브레이션 미완**(실측은 2회 재현 완료, **원인은 여전히 미확정**):
+  출력축 **1회전당** 실측 평균이 감속비 51:1 기준 명목값 **77520**(=380×51×4)보다 약 12% 작다.
+  - 2026-08-03: 좌우 각 4회전 → Left 68107.75 / Right 68217.25 / **통합 68162.5**
+  - 2026-08-08: 좌우 각 10회전(이상치 제거) → Left 약 68420 / Right 약 67913 / **통합 약 68167**
+  - **통합 평균이 재현됐다.** 따라서 명목값과의 차이는 1회성 측정 실수가 아니다.
+  - ⚠️ **좌우 편차는 재현되지 않았다** — 08-03은 Right가 0.16% 컸고 08-08은 Left가 0.75% 크다.
+    두 측정 모두 손 회전이라 "정확히 1회전" 오차가 섞여 있다. **좌우 차이를 하드웨어 특성으로
+    확정하지 않으며, 좌우 개별 보정값도 도입하지 않는다.**
+  - `MOTOR_ENCODER_QUADRATURE_MULTIPLIER = 4.0f`가 맞는지, CPR 380의 정의가 맞는지, 타이머 입력
+    필터(IC1/IC2Filter=8)로 edge가 누락되는지 중 어느 것이 원인인지 **아직 구분되지 않았다.**
+  - 실측값을 펌웨어에 강제 적용하지 않았으므로 STATUS의 LA/RA는 여전히 실제보다 약 12% 작다.
+  - ⚠️ **ROS 쪽과 스케일이 다르다(의도된 일시적 불일치)**: ROS Wheel Odometry는 실측 기준값
+    **68160**(`stm_serial_bridge`의 `counts_per_wheel_rev` 파라미터)을, 이 펌웨어는 명목
+    **77520**을 쓴다. 펌웨어를 지금 바꾸지 않는 이유는 이 상수가 속도 보고뿐 아니라 PI 제어
+    입력과 Stall 판정까지 함께 바꾸기 때문이다. 통일은 별건인 Encoder Scale Calibration의 몫이며,
+    그때까지 **LA/RA와 ROS odometry 속도를 같은 축에서 비교하지 않는다.**
+  - (상세: `motor_config.h`의 `MOTOR_ENCODER_COUNTS_PER_WHEEL_REV` 주석,
+    [docs/serial_protocol.md](serial_protocol.md)의 "펌웨어와 ROS의 스케일 불일치" 절)
 - **`actual_rad_s` 수치 정확도 미검증**: `MOTOR_GEAR_RATIO` 100→51 변경으로 같은 회전에서 보고되는
   actual_rad_s가 약 1.96배 커진다. 재빌드·재플래시와 전진/후진 동작 확인은 **2026-08-04 완료**했으나,
   **보고값이 실제 회전 속도와 일치하는지는 아직 측정하지 않았다.**
@@ -198,22 +209,25 @@ App_Run()
    재출발되는지 확인. ESTOP/Latched Safe Stop 중 `RESET_STALL`이 거부되는지도 함께 확인
    (안전 테스트 절차는 [docs/serial_protocol.md](serial_protocol.md) Stall Detection 절 참고).
    실기 데이터로 `MOTOR_STALL_*` Threshold 튜닝(오검출/미검출 여부 확인).
-2. **엔코더 스케일(count/rev) 실측 재확인** — 빌드·플래시·전진/후진 동작 확인은 2026-08-04 완료.
-   남은 것은 **스케일 정확도**이며, 검증 방법은 **바퀴를 정확히 1회전 돌린 전후 `encoder_total`
-   차이 측정**이다: 모터를 구동하지 않고(target 0) 손으로 출력축을 정확히 1회전시켜
-   `/stm/encoder_total`의 변화량을 읽고, 좌우 각각 여러 번 반복해 평균을 낸다.
-   - 판정: 변화량이 **68162.5 근처** → 기존 실측 재확인 / **77520 근처** → 명목값이 맞고 이전 측정에
-     오차가 있었음 / 둘 다 아님 → 추가 원인 조사(IC Filter 등, `.ioc` 변경은 사용자 승인 필요)
-   - ⚠️ **목표 속도(Target)와 보고 속도(Actual)의 비교는 합격 기준으로 쓰지 않는다.**
+2. ~~**엔코더 스케일(count/rev) 실측 재확인**~~ → **2026-08-08 완료**. 바퀴 공중 상태에서 손으로
+   1회전씩 좌우 각 10회 측정(이상치 제거) → 통합 평균 약 **68167** count/wheel-rev 로
+   2026-08-03의 68162.5가 재현됐다. 사전에 정해둔 **판정 A**(기존 실측 재확인, 명목 77520이 틀림)에
+   해당한다. 이 결과에 따라 **ROS Wheel Odometry는 좌우 공통 68160을 기준값으로 쓴다.**
+   - ⚠️ 재현된 것은 **통합 평균**이다. 좌우 편차는 크기·부호가 모두 달라져 재현되지 않았으므로
+     좌우 개별 보정값의 근거로 쓰지 않는다.
+   - ⚠️ **목표 속도(Target)와 보고 속도(Actual)의 비교는 합격 기준으로 쓰지 않았다.**
      Actual은 모터 부하·마찰·제어 상태에 따라 달라지므로 "Target 2.0이면 Actual 1.76" 같은
-     기대값은 성립하지 않는다. 스케일 판정은 위 count/rev 측정으로만 한다.
-3. **엔코더 count/rev 캘리브레이션 원인 규명**: 68162.5 vs 명목 77520(-12.1%)의 원인이 CPR 정의 /
+     기대값은 성립하지 않는다. 스케일 판정은 count/rev 측정으로만 했다.
+3. **엔코더 count/rev 캘리브레이션 원인 규명**: 실측 약 68160 vs 명목 77520(-12.1%)의 원인이 CPR 정의 /
    Quadrature 배율 / 타이머 입력 필터(IC1/IC2Filter=8) / 실제 하드웨어 사양 중 무엇인지 확정.
    구분 방법 예: `.ioc`의 IC Filter를 낮춰 재측정, 모터축(감속 전) 1회전 카운트 측정,
    데이터시트 재확인. 원인을 확정한 뒤에 해당 매크로 하나만 정정한다
    (실측값을 별도 상수로 강제 적용하지 않는다).
    `MOTOR_LEFT_ENCODER_DIRECTION_SIGN`/`MOTOR_RIGHT_ENCODER_DIRECTION_SIGN`은 2026-08-03 실기에서
    전진 양수/후진 음수로 확인됐다(위 "실제 검증 완료된 기능" 참고).
+   - 이 작업이 **펌웨어(77520)와 ROS Wheel Odometry(68160)의 스케일 불일치를 해소하는 자리**다.
+     원인이 확정되기 전에는 펌웨어 상수를 건드리지 않는다 — PI 제어 입력과 Stall 판정이 함께
+     바뀌므로, 숫자만 맞추면 제어 거동이 조용히 달라진다.
 4. 하드웨어 실측(바퀴 반지름/최대 RPM) 후 `MOTION_CONTROLLER_MAX_WHEEL_RAD_S`와 `MOTOR_OPEN_LOOP_PWM_PER_RAD_S` 확정 및 clamp 적용 (`motion_controller.c`/`motor_config.h` TODO 참고)
 5. Python Tool의 FAULT/RESET_STALL 지원(별도 작업)
 6. (STM 쪽 작업 아님, 참고) ROS2 Serial Bridge의 STATUS 수신 경로는 2026-08-03 실기 검증
