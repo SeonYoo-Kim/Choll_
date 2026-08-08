@@ -39,9 +39,11 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   추종 세션은 인메모리(카트당 1건) — 카트 상행 결과 토픽 확정 시 대상 상실·거리 전환을 붙일 자리
 - **WebSocket**: `/ws/carts/{cartId}`, JSON, BE→FE 이벤트 13종 (WS-FE-01~13)
   — 실구현 7종: `CART_POSITION_UPDATE`(MQTT 위치 중계, yaw는 EM 미송신으로 임시 0), `SLOT_UPDATED`(RFID 중계),
-  `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED —
-  STARTED/ARRIVED/FAILED는 카트 상행 결과 토픽 확정 후), `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
-  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용),
+  `CART_CONNECTION_UPDATED`(하트비트 기반 ONLINE/OFFLINE 전환 시), `NAVIGATION_STATUS_UPDATED`(ACCEPTED/CANCELLED는
+  REST 접수 기준, STARTED/ARRIVED/FAILED는 `status/nav-result` 상행 반영 — 2026-08-07 구현),
+  `TASK_PROGRESS_UPDATED`(RFID 이벤트마다),
+  `TRACKS_UPDATED`(AI 추적 후보 중계 — FE 타겟 선택 UI용. **영상 시청자가 있을 때만 중계** —
+  FE가 선택 모달을 열면 영상 WS에 붙는 것을 게이트로 사용, 모달 밖 콘솔·트래픽 스팸 차단),
   `FOLLOW_STATUS_UPDATED`(FOLLOWING/PAUSED/STOPPED — REST 접수 기준. 대상 인식 여부·거리는 카트 상행 확정 후)
 - **WebSocket 영상**: `/ws/carts/{cartId}/video` (FE 시청, 바이너리 JPEG 1메시지=1프레임)
   ← `/ws/carts/{cartId}/video/publish` (Jetson 발행, 10fps/품질70 기준 ~4Mbps)
@@ -50,20 +52,32 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
   **선행 슬래시를 붙이지 않는다** — `/status/…`는 빈 최상위 레벨을 만든다 (ROS 토픽과 혼동 주의).
 - **MQTT** (카트→BE, 현재 확정분):
   - `status/position` — `{"x","y","timestamp"}` → 구역 판정 후 DB 갱신 + WS 중계.
-    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 지도 메타(resolution·origin)로
-    이미지 픽셀 변환(세로축 뒤집기 포함). 기본값 pixels(무변환) — EM 발행 시작 시 meters로 전환 +
-    `library_maps`(id=`mqtt.map-id`) 행에 실제 map.yaml 값 입력 필요
+    좌표 단위 계약(2026-07-31): **SLAM 미터** — `mqtt.position-unit=meters`면 BE가 이미지 픽셀로 변환.
+    기본값 pixels(무변환). 변환 방식 2가지(2026-08-07): `library_maps`에 **아핀 6계수**(affine_a11~ty)가
+    있으면 그걸 우선 사용 — FE 평면도가 SLAM 지도에서 회전·좌우반전·크롭을 거쳐 만들어져
+    resolution·origin(세로반전식)으로는 표현 불가. 계수는 현장 캘리브레이션
+    (`scripts/calibrate_map_transform.py`, 대응점 3+개 → UPDATE SQL)으로 넣는다.
+    계수가 비어 있으면 기존 resolution·origin 방식으로 폴백
   - `status/slot` — `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}` (2026-07-30 실물 기준 확정)
   - `status/cart` (하트비트, 5초 주기) — 수신 시 ONLINE, `cart.connection.offline-timeout-seconds`(기본 15초)
     무신호 시 워치독이 OFFLINE 전환. 페이로드는 timestamp 선택(없으면 수신 시각 기준)
   - `status/target` (AI→BE, 5~10Hz) — `{"image_width","image_height","tracks":[{"id","x","y","w","h"}]}`
     (x,y=bbox 좌상단 픽셀) → WS `TRACKS_UPDATED`로 원형 그대로 중계
+  - `status/nav-result` (EM SLAM Nav→BE, 2026-08-07 합의) — ROS2 `/cart/nav_status`(ROS2-16) 7종을
+    MQTT로 중계: `{"status":"IDLE|NAVIGATING|SUCCEEDED|ABORTED|CANCELED|REJECTED|NAV2_UNAVAILABLE"}`
+    (평문 문자열 페이로드도 수용). BE 매핑: NAVIGATING→WS STARTED / SUCCEEDED→ARRIVED /
+    CANCELED→CANCELLED / ABORTED·REJECTED·NAV2_UNAVAILABLE→FAILED(+failReason), IDLE은 무시.
+    종료 상태는 이동 세션을 닫고 `carts.operation_status`를 IDLE로 되돌린다
+    (세션이 없으면 — REST 취소 선행·BE 재시작 — 이벤트 중복 없이 DB 정리만)
   - ⚠️ 수신 토픽 4종 모두 cartId가 없어 `mqtt.cart-id`(기본 1)로 귀속 — 다중 카트 도입 시 재협의 필요
 - **MQTT** (BE→카트 명령): `cmd/move/cart`
   - `{"requestId","command":"MOVE","zoneId","target":{"x","y"},"pixel":{"x","y"}}` —
     **target은 SLAM 미터**(EM SLAM Nav의 goal 좌표. BE가 지도 메타로 픽셀→미터 역변환,
     `mqtt.position-unit=meters`일 때만 — pixels 모드에선 null), pixel은 지도 이미지 픽셀(참고용).
-    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 그 지점, 없으면 구역 bbox 중심
+    목적지 픽셀은 FE가 NAV-01 요청에 x·y(클릭 지점)를 주면 **그 지점 그대로**, 없으면 구역 bbox 중심.
+    통로 등 구역 밖 좌표도 목적지가 될 수 있어 **BE는 스냅하지 않는다**(2026-08-07 자유 좌표 이동) —
+    장애물(서가·테이블) 클릭을 고정 정차점으로 바꾸는 것은 FE 평면도(MAP_LANDMARKS)의 책임이고,
+    그래도 도달 불가한 goal은 Nav2가 거부해 `status/nav-result`(ABORTED·REJECTED)→FAILED로 알린다
   - `{"requestId","command":"CANCEL","zoneId"}` — 좌표 없음
   - `{"command":"SELECT_TARGET","trackId"}` — `POST /api/carts/{id}/follow/target`에서 발행,
     Jetson fe_bridge_node가 `/select_target` ROS 토픽으로 변환

@@ -16,6 +16,8 @@ public class MqttProperties {
 	private String rfidTopic = "status/slot";
 	// AI(Jetson)가 발행하는 추적 후보 목록 — FE 타겟 선택 UI용 (TRACKS_UPDATED로 중계)
 	private String tracksTopic = "status/target";
+	// EM SLAM Nav의 주행 결과 (ROS2 /cart/nav_status를 MQTT로 중계, 2026-08-07 합의)
+	private String navResultTopic = "status/nav-result";
 	// BE→EM 명령 토픽 — ⚠️ EM 미확정 임시값. 확정 시 EM·API 명세서와 동시 갱신할 것
 	private String commandTopic = "cmd/move/cart";
 	// BE→라즈베리파이 슬롯 LED 점등 토픽 — 현재 구역에서 내려놓을 슬롯 번호 목록
@@ -94,6 +96,14 @@ public class MqttProperties {
 
 	public void setTracksTopic(String tracksTopic) {
 		this.tracksTopic = tracksTopic;
+	}
+
+	public String getNavResultTopic() {
+		return navResultTopic;
+	}
+
+	public void setNavResultTopic(String navResultTopic) {
+		this.navResultTopic = navResultTopic;
 	}
 
 	public String getCommandTopic() {

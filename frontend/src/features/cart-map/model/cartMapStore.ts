@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 
 import { unwrapAngle } from './angle';
-import { ZONE_POSITIONS, zoneIndexOf, zoneIndexOfPoint } from './zones';
+import { START_POSITION } from './zones';
+import { zoneIndexOf, zoneIndexOfPoint } from './zoneStore';
 
 import type { MapPercent } from './mapTransform';
-import type { CartDetailStatus } from '@/shared/api/generated/model';
+import type { CartDetailStatus, MapInfo } from '@/shared/api/generated/model';
 import type { NavigationStatus } from '@/shared/api/ws/cartSocket';
 
 /** 이동 중으로 취급하는 이동 상태 (접수·시작) */
@@ -36,14 +37,6 @@ function smoothInterval(previousMs: number, gapMs: number): number {
   return Math.round(clamped / INTERVAL_STEP_MS) * INTERVAL_STEP_MS;
 }
 
-/** applyPosition이 위치에서 파생해 알려주는 결과 (진입 알림·정지 감지용) */
-export interface PositionApplied {
-  /** 직전 좌표에서 의미 있게 움직였는지 */
-  moved: boolean;
-  /** 새 구역에 진입했으면 그 인덱스(0-base), 아니면 null */
-  enteredZone: number | null;
-}
-
 interface CartMapState {
   /** 카트가 있는 구역 인덱스 (0-base, 구역 밖이면 null) */
   cartZone: number | null;
@@ -66,18 +59,46 @@ interface CartMapState {
   isMoving: boolean;
   /** 도착 알림 모달에 표시할 구역 인덱스 (null이면 닫힘) */
   arrivalZone: number | null;
-  /** 이동 명령(NAV-01) 접수 성공 시 낙관적 표시 — WS 이벤트 도착 전 버튼 잠금용 */
-  startMove: () => void;
+  /**
+   * 진행 중인 이동의 목적지가 테이블(랜드마크)이면 그 이름 (예: "반납 테이블"), 구역 이동이면 null.
+   *
+   * BE 계약(NAV-01·WS-FE-06)에는 구역 id만 있어서, "테이블로 보냈다"는 사실은 FE만 안다.
+   * 이 값이 있으면 도착 시 구역 정리 모달 대신 토스트로 안내한다 — 테이블에는 꽂을 책이 없어
+   * "이 구역에 꽂아야 할 책 0권" 모달이 오히려 어리둥절하다.
+   */
+  landmarkDestination: string | null;
+  /**
+   * 서버가 준 지도 정보 (MAP-01). 아직 못 받았으면 null.
+   *
+   * **좌표계의 기준**이다 — imageWidth·imageHeight로 화면의 % 좌표와 BE 지도 픽셀을 서로 바꾼다
+   * (WS 카트 위치를 그림 위에 얹을 때, 클릭 지점을 NAV-01에 실어 보낼 때).
+   * 응답의 `imageUrl`은 쓰지 않는다 — 바탕 그림은 번들 평면도다(floorPlanImage.ts 참조).
+   */
+  mapInfo: MapInfo | null;
+  /**
+   * 지도를 쓸 수 없는 상태 (MAP-01 조회 실패).
+   * 좌표 기준이 없으면 카트 위치도 목적지도 뜻이 없으므로 화면은 에러로 넘긴다.
+   */
+  mapUnavailable: boolean;
+  /** MAP-01 조회 결과 반영 — mapInfo가 undefined이고 isError도 false면 아직 불러오는 중이다 */
+  applyMapInfo: (mapInfo: MapInfo | undefined, isError: boolean) => void;
+  /**
+   * 이동 명령(NAV-01) 접수 성공 시 낙관적 표시 — WS 이벤트 도착 전 버튼 잠금용.
+   * 테이블 버튼으로 시작한 이동이면 그 이름을 넘긴다 (도착 안내를 테이블 이름으로 하기 위함).
+   */
+  startMove: (landmarkName?: string) => void;
   /**
    * WS CART_POSITION_UPDATE(WS-FE-01) 반영.
    * 좌표에서 현재 구역을 판정하고, 좌표가 움직이면 대기 상태를 이동 중으로 올린다
    * (BE 테스트 발행기처럼 위치만 오는 환경에서도 구역·상태가 실시간 갱신되도록).
+   *
+   * 직전 좌표에서 의미 있게 움직였는지를 반환한다 — 호출부가 정지 감지 타이머를 되감는 데 쓴다.
    */
-  applyPosition: (position: MapPercent, yaw: number) => PositionApplied;
+  applyPosition: (position: MapPercent, yaw: number) => boolean;
   /** 위치 변화가 멎었을 때 호출 — 위치 파생 이동 중 상태를 대기로 되돌린다 */
   markStationary: () => void;
-  /** WS CURRENT_ZONE_UPDATED(WS-FE-05) 반영. 새 구역에 진입했으면 그 인덱스를 반환(진입 알림용) */
-  applyZone: (currentZoneId: number | null) => number | null;
+  /** WS CURRENT_ZONE_UPDATED(WS-FE-05) 반영 */
+  applyZone: (currentZoneId: number | null) => void;
   /** WS NAVIGATION_STATUS_UPDATED(WS-FE-06) 반영 — ARRIVED면 도착 모달을 연다 */
   applyNavigation: (status: NavigationStatus, destinationZoneId?: number) => void;
   /** 워치독 발동 시 이동 상태 강제 리셋 — 이후 REST 재조회(syncFromCart)로 실제 상태를 복구한다 */
@@ -98,7 +119,7 @@ interface CartMapState {
  */
 export const useCartMapStore = create<CartMapState>()((set, get) => ({
   cartZone: null,
-  cartPosition: ZONE_POSITIONS[2],
+  cartPosition: START_POSITION,
   cartYaw: 0,
   positionIntervalMs: DEFAULT_POSITION_INTERVAL_MS,
   lastPositionAt: null,
@@ -106,7 +127,22 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   navStatus: null,
   isMoving: false,
   arrivalZone: null,
-  startMove: () => set({ isMoving: true, cartStatus: 'MOVING', navStatus: 'ACCEPTED' }),
+  landmarkDestination: null,
+  mapInfo: null,
+  mapUnavailable: false,
+  applyMapInfo: (mapInfo, isError) =>
+    set({
+      mapInfo: mapInfo ?? null,
+      // 조회가 실패하면 좌표 기준이 없다. mapInfo가 undefined면 아직 응답 전이므로 실패로 보지 않는다
+      mapUnavailable: isError,
+    }),
+  startMove: (landmarkName) =>
+    set({
+      isMoving: true,
+      cartStatus: 'MOVING',
+      navStatus: 'ACCEPTED',
+      landmarkDestination: landmarkName ?? null,
+    }),
   applyPosition: (position, yaw) => {
     const state = get();
     const now = Date.now();
@@ -128,13 +164,12 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
       zone === state.cartZone;
     if (unchanged) {
       set({ lastPositionAt: now, positionIntervalMs });
-      return { moved: false, enteredZone: null };
+      return false;
     }
 
     const moved =
       Math.hypot(position.x - state.cartPosition.x, position.y - state.cartPosition.y) >
       MOVE_EPSILON_PERCENT;
-    const enteredZone = zone !== null && zone !== state.cartZone ? zone : null;
     set({
       cartPosition: position,
       cartYaw,
@@ -144,19 +179,15 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
       // 추종(FOLLOWING) 등 다른 상태는 유지하고, 대기 중일 때만 이동 중으로 올린다
       ...(moved && !state.isMoving && state.cartStatus === 'IDLE' && { cartStatus: 'MOVING' }),
     });
-    return { moved, enteredZone };
+    return moved;
   },
   markStationary: () =>
     set((state) =>
       // 이동 명령 세션(isMoving)은 워치독·이동 이벤트가 관리하므로 건드리지 않는다
       state.cartStatus === 'MOVING' && !state.isMoving ? { cartStatus: 'IDLE' } : {},
     ),
-  applyZone: (currentZoneId) => {
-    const previousZone = get().cartZone;
-    const zone = currentZoneId === null ? null : zoneIndexOf(currentZoneId);
-    set({ cartZone: zone });
-    return zone !== null && zone !== previousZone ? zone : null;
-  },
+  applyZone: (currentZoneId) =>
+    set({ cartZone: currentZoneId === null ? null : zoneIndexOf(currentZoneId) }),
   applyNavigation: (status, destinationZoneId) => {
     if (MOVING_STATUSES.includes(status)) {
       set({ navStatus: status, isMoving: true, cartStatus: 'MOVING' });
@@ -165,18 +196,23 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
     if (status === 'ARRIVED') {
       const zone =
         destinationZoneId === undefined ? get().cartZone : zoneIndexOf(destinationZoneId);
+      // 테이블 이동의 도착은 구역 정리 모달을 열지 않는다 — 안내는 호출부가 토스트로 한다
+      const isLandmarkArrival = get().landmarkDestination !== null;
       set({
         navStatus: status,
         isMoving: false,
         cartStatus: 'IDLE',
-        ...(zone !== null && { cartZone: zone, arrivalZone: zone }),
+        landmarkDestination: null,
+        ...(zone !== null && { cartZone: zone }),
+        ...(zone !== null && !isLandmarkArrival && { arrivalZone: zone }),
       });
       return;
     }
     // STOPPED · CANCELLED · FAILED — 이동만 끝나고 카트는 대기 상태로 돌아간다
-    set({ navStatus: status, isMoving: false, cartStatus: 'IDLE' });
+    set({ navStatus: status, isMoving: false, cartStatus: 'IDLE', landmarkDestination: null });
   },
-  abortMove: () => set({ isMoving: false, cartStatus: 'IDLE', navStatus: null }),
+  abortMove: () =>
+    set({ isMoving: false, cartStatus: 'IDLE', navStatus: null, landmarkDestination: null }),
   syncFromCart: ({ position, zoneId, status }) =>
     set((state) => ({
       cartPosition: position ?? state.cartPosition,

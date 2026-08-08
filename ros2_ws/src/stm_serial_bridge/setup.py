@@ -26,6 +26,9 @@ setup(
         "console_scripts": [
             "stm_serial_bridge_node = "
             "stm_serial_bridge.stm_serial_bridge_node:main",
+            # 휠 오도메트리. Serial 포트를 열지 않고 /stm/encoder_total 만 구독한다.
+            "wheel_odometry_node = "
+            "stm_serial_bridge.wheel_odometry_node:main",
             # 하드웨어 없이 검증하기 위한 테스트 도구.
             # 실제 장치(/dev/ttyACM*)를 열지 않는다.
             "mock_stm = stm_serial_bridge.mock_stm:main",

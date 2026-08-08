@@ -31,3 +31,48 @@ export function percentToDisplay(percent: MapPercent, mapInfo: MapInfo): Display
     y: (percent.y / 100) * mapInfo.imageHeight,
   };
 }
+
+/**
+ * 화면에서 누른 지점을 지도 % 좌표로 바꾼다.
+ *
+ * `client`는 마우스 이벤트의 clientX/clientY, `bounds`는 지도 영역의 getBoundingClientRect() 값이다.
+ * 지도가 화면에서 어떤 크기로 그려지든 비율로 환산하므로 배율과 무관하다.
+ * 지도 영역 크기를 모르거나(0) 지도 밖을 누른 경우 null.
+ *
+ * %를 먼저 내주는 이유: 누른 자리가 어느 구역인지 판정할 때(zoneStore)도 같은 값이 필요한데,
+ * 구역 좌표는 BE 픽셀이 아니라 평면도 %로 정의돼 있다(zones.ts).
+ */
+export function clientPointToPercent(
+  client: { x: number; y: number },
+  bounds: { left: number; top: number; width: number; height: number },
+): MapPercent | null {
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    return null;
+  }
+  const percent: MapPercent = {
+    x: ((client.x - bounds.left) / bounds.width) * 100,
+    y: ((client.y - bounds.top) / bounds.height) * 100,
+  };
+  if (percent.x < 0 || percent.x > 100 || percent.y < 0 || percent.y > 100) {
+    return null;
+  }
+  return percent;
+}
+
+/**
+ * 화면에서 누른 지점을 표시 좌표(px)로 바꾼다 — NAV-01에 클릭 지점을 실어 보낼 때 쓴다.
+ * 판정은 clientPointToPercent가 하고 여기서는 단위만 바꾼다.
+ */
+export function clientPointToDisplay(
+  client: { x: number; y: number },
+  bounds: { left: number; top: number; width: number; height: number },
+  mapInfo: MapInfo,
+): DisplayPosition | null {
+  const percent = clientPointToPercent(client, bounds);
+  if (percent === null) {
+    return null;
+  }
+  const display = percentToDisplay(percent, mapInfo);
+  // BE·시드 데이터가 정수 픽셀을 쓰므로 맞춰서 보낸다
+  return { x: Math.round(display.x), y: Math.round(display.y) };
+}

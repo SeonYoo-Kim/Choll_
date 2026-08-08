@@ -34,8 +34,11 @@ class PolygonZoneMatcherTest {
 
 	@Test
 	void ignoresMalformedPolygonJson() {
+		assertThat(matcher.contains("not-json", BigDecimal.ONE, BigDecimal.ONE)).isFalse();
+		assertThat(matcher.contains(null, BigDecimal.ONE, BigDecimal.ONE)).isFalse();
+		// 꼭짓점이 깨진 경우(좌표 하나 누락) — 예외 대신 "구역 아님"
 		assertThat(matcher.contains(
-			"not-json",
+			"[[0,0],[100],[100,100]]",
 			BigDecimal.ONE,
 			BigDecimal.ONE
 		)).isFalse();

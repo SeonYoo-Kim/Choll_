@@ -3,7 +3,8 @@ import { CircleStop } from 'lucide-react';
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { useStopCart } from '@/features/cart-control/model/useStopCart';
 import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
-import { ZONE_NAMES, zoneLabel } from '@/features/cart-map/model/zones';
+import { zoneLabel } from '@/features/cart-map/model/zones';
+import { useZoneName } from '@/features/cart-map/model/zoneStore';
 import { ArrivalModal } from '@/features/cart-map/ui/ArrivalModal';
 import { MapPanel } from '@/features/cart-map/ui/MapPanel';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
@@ -27,6 +28,7 @@ const NAV_STATUS_LABELS: Record<NavigationStatus, string> = {
 export function MapPage() {
   // 위치 좌표는 이 화면이 직접 쓰지 않는다 — 통째로 구독하면 좌표가 올 때마다 페이지 전체가 다시 그려진다
   const cartZone = useCartMapStore((state) => state.cartZone);
+  const zoneName = useZoneName(cartZone);
   const isMoving = useCartMapStore((state) => state.isMoving);
   const cartStatus = useCartMapStore((state) => state.cartStatus);
   const navStatus = useCartMapStore((state) => state.navStatus);
@@ -40,13 +42,7 @@ export function MapPage() {
   // 홈의 '이동 취소'와 같은 동작 — 추종·목적지 이동을 가리지 않고 멈춘다
   const stopCart = useStopCart(DEMO_CART_ID);
 
-  // 홈 배지와 같은 우선순위 — 사서를 따라가는 중이면 좌표가 움직이는지와 무관하게 추종으로 표시한다
-  const badge = following
-    ? { label: '사서를 따라가는 중', tone: styles.following }
-    : cartActive
-      ? { label: '카트 이동 중', tone: styles.moving }
-      : { label: '카트 정지', tone: styles.idle };
-
+  // 상단 배지는 두지 않는다 — 바로 아래 '이동 안내' 카드가 같은 내용을 더 자세히 말한다
   const guide = following
     ? '사서를 따라가는 중'
     : followPaused
@@ -63,11 +59,7 @@ export function MapPage() {
         <div>
           <p className={styles.overline}>LIVE CART LOCATION</p>
           <h1 className={styles.pageTitle}>도서관 지도</h1>
-          <p className={styles.pageDesc}>구역을 선택해 카트의 다음 목적지를 정해보세요.</p>
-        </div>
-        <div className={`${styles.statusBadge} ${badge.tone}`}>
-          <span className={styles.dot} />
-          {badge.label}
+          <p className={styles.pageDesc}>평면도에서 카트를 보낼 통로를 눌러 목적지를 정해보세요.</p>
         </div>
       </div>
       <div className={styles.mapArea}>
@@ -85,7 +77,7 @@ export function MapPage() {
               ) : (
                 <>
                   {zoneLabel(cartZone)}
-                  <span className={styles.zoneName}>{ZONE_NAMES[cartZone]}</span>
+                  <span className={styles.zoneName}>{zoneName}</span>
                 </>
               )}
             </strong>

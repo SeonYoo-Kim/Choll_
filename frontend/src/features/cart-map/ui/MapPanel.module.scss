@@ -9,8 +9,11 @@
 .canvas {
   position: relative;
   overflow: hidden;
-  // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다
-  aspect-ratio: 1174 / 631;
+  // assets/map.png 원본 비율 — 다르면 cover 크롭으로 구역 클릭 영역이 어긋난다.
+  // 실제 값은 MapPanel이 FLOOR_PLAN_SIZE로 덮어쓴다 (그림을 바꿔도 한 곳만 고치도록)
+  aspect-ratio: 1000 / 600;
+  // 구역 안팎을 가리지 않고 누른 자리가 목적지가 된다 (BE가 이동 가능 지점으로 스냅)
+  cursor: pointer;
   border: 1px solid $border-panel;
   border-radius: 22px;
   background: #fffdf8;
@@ -23,8 +26,19 @@
   object-fit: cover;
 }
 
+// 지도 정보를 받는 동안의 자리 표시 — 바탕이 없으면 카트·구역을 얹을 수 없다
+.loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  font-size: 14px;
+  color: $text-muted;
+}
+
 .zone {
   position: absolute;
+  cursor: inherit; // 지도 전체가 클릭 대상이라 구역 안이라고 커서를 달리 하지 않는다
   border: 2px dashed transparent;
   border-radius: 16px;
   background: transparent;
@@ -38,7 +52,33 @@
     background: rgba(105, 194, 182, 0.08);
   }
 
-  &:disabled {
+  // disabled가 아니라 aria-disabled인 이유: disabled 버튼은 클릭 이벤트가 발생하지 않아
+  // 눌러도 "이동 중이에요" 안내조차 뜨지 않는다 (MapPanel의 busy 검사 참조)
+  &[aria-disabled='true'] {
+    cursor: wait;
+  }
+}
+
+/**
+ * 사서·반납 테이블 버튼 — 구역이 아니라 고정 정차점으로 보내는 버튼.
+ * 구역과 톤을 나눠(주황) 사서가 "통로로 보내기"와 "테이블로 보내기"를 구분할 수 있게 한다.
+ */
+.landmark {
+  position: absolute;
+  cursor: inherit;
+  border: 2px dashed transparent;
+  border-radius: 14px;
+  background: transparent;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+
+  &:hover {
+    border-color: rgba(232, 160, 84, 0.75);
+    background: rgba(232, 160, 84, 0.1);
+  }
+
+  &[aria-disabled='true'] {
     cursor: wait;
   }
 }

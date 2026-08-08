@@ -144,17 +144,20 @@ class NavigationServiceTest {
 	}
 
 	@Test
-	void usesClickedPixelInsteadOfZoneCenterWhenProvided() {
+	void usesClickedPixelAsIsEvenOutsideZone() {
 		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
 		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
 		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
 		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
 
+		// 구역 폴리곤 밖(통로 한가운데) 좌표 — 스냅 없이 그대로 하행한다.
+		// 장애물 회피는 FE 고정 정차점 + Nav2 거부(status/nav-result)가 맡는다
 		service.start(1L, 7L, 612.0, 431.0);
 
 		ArgumentCaptor<Object> command = ArgumentCaptor.forClass(Object.class);
 		verify(commandPublisher).publish(command.capture());
 		assertThat(command.getValue().toString())
+			.contains("zoneId=7")
 			.contains("pixel=Pixel[x=612.0, y=431.0]");
 	}
 
@@ -222,6 +225,95 @@ class NavigationServiceTest {
 
 		verify(cart, never()).updateStatus(any(), any(), any());
 		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
+	void cancelClearsStaleNavigatingStatusWithoutSession() {
+		// 재시작으로 세션은 사라지고 DB 상태만 NAVIGATING으로 남은 경우
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.NAVIGATING);
+
+		service.cancel(1L);
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		// 취소할 실제 이동이 없으므로 MQTT·WS 발행은 없어야 한다
+		verify(commandPublisher, never()).publish(any());
+		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
+	void cartNavResultSucceededEndsSessionAndPublishesArrived() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson())
+			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+		long navigationId = service.start(1L, 7L).navigationId();
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.NAVIGATING);
+
+		service.applyCartNavResult(1L, "NAVIGATING");
+		service.applyCartNavResult(1L, "SUCCEEDED");
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+		// ACCEPTED(start) → STARTED(NAVIGATING) → ARRIVED(SUCCEEDED)
+		verify(eventPublisher, org.mockito.Mockito.times(3)).publish(
+			eq(1L),
+			eq("NAVIGATION_STATUS_UPDATED"),
+			event.capture()
+		);
+		assertThat(event.getAllValues().get(1).toString()).contains("status=STARTED");
+		assertThat(event.getAllValues().getLast().toString())
+			.contains("status=ARRIVED")
+			.contains("navigationId=" + navigationId);
+		// 세션이 닫혔으므로 새 이동을 다시 받을 수 있다
+		service.start(1L, 7L);
+	}
+
+	@Test
+	void cartNavResultAbortedPublishesFailedWithReason() {
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(zoneRepository.findById(7L)).thenReturn(Optional.of(zone));
+		when(cart.getConnectionStatus()).thenReturn(CartConnectionStatus.ONLINE);
+		when(zone.getPolygonJson())
+			.thenReturn("[[550,410],[1000,410],[1000,600],[550,600]]");
+		when(commandPublisherProvider.getIfAvailable()).thenReturn(commandPublisher);
+		service.start(1L, 7L);
+
+		service.applyCartNavResult(1L, "ABORTED");
+
+		ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
+		verify(eventPublisher, org.mockito.Mockito.times(2)).publish(
+			eq(1L),
+			eq("NAVIGATION_STATUS_UPDATED"),
+			event.capture()
+		);
+		assertThat(event.getAllValues().getLast().toString())
+			.contains("status=FAILED")
+			.contains("주행을 포기");
+	}
+
+	@Test
+	void cartNavResultWithoutSessionOnlyReconcilesCartStatus() {
+		// REST 취소가 먼저 세션을 정리한 뒤 카트의 CANCELED 확인 응답이 도착한 경우 —
+		// 이벤트를 중복 발행하지 않고 DB 상태만 정리한다
+		when(cartRepository.findById(1L)).thenReturn(Optional.of(cart));
+		when(cart.getOperationStatus()).thenReturn(CartOperationStatus.NAVIGATING);
+
+		service.applyCartNavResult(1L, "CANCELED");
+
+		verify(cart).updateStatus(any(), eq(CartOperationStatus.IDLE), any());
+		verify(eventPublisher, never()).publish(any(), any(), any());
+	}
+
+	@Test
+	void cartNavResultIdleAndUnknownAreIgnored() {
+		service.applyCartNavResult(1L, "IDLE");
+		service.applyCartNavResult(1L, "WARMING_UP");
+
+		verify(eventPublisher, never()).publish(any(), any(), any());
+		verify(cart, never()).updateStatus(any(), any(), any());
 	}
 
 	@Test

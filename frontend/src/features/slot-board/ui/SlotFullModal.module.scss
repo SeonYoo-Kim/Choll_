@@ -1,0 +1,146 @@
+@use '@/shared/styles/variables' as *;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  // 연결 끊김(40) · 도착(30)보다 아래. 도착 모달은 "이 구역에 꽂을 책 N권"을 보여주는
+  // 실행 안내이고 만적은 그 실행을 요청하는 알림이라, 같이 뜨면 실행 안내가 위에 있어야 한다
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  padding: $spacing-md;
+  background: rgba(69, 65, 57, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 28px;
+  background: $bg-card;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+
+  @media (min-width: $bp-md) {
+    padding: 32px;
+  }
+}
+
+.close {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f7f0e4;
+  color: #887e71;
+}
+
+// 고장이 아니라 "정리해달라"는 요청이므로 경고(붉은) 대신 포인트(노랑) 톤을 쓴다
+.icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: $accent;
+  color: $accent-text;
+}
+
+.overline {
+  margin: 20px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: $accent-text;
+}
+
+.title {
+  margin: 4px 0 0;
+  font-family: $font-display;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.desc {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: $text-soft;
+
+  strong {
+    color: $accent-text;
+  }
+}
+
+.slotList {
+  margin: 20px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid $slot-book-border;
+  border-radius: 12px;
+  background: $slot-book-bg;
+  padding: 8px 12px;
+}
+
+.slotId {
+  flex-shrink: 0;
+  font-family: $font-mono;
+  font-size: 11px;
+  font-weight: 700;
+  color: $slot-book-text;
+}
+
+.slotTitle {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  // 목록이 길어져도 팝업 폭이 밀리지 않게 한 줄로 자른다
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: $text-main;
+}
+
+.actions {
+  margin-top: 28px;
+  display: flex;
+  gap: 12px;
+}
+
+.primary {
+  flex: 1;
+  border-radius: 12px;
+  background: $primary;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 4px 0 $primary-dark;
+}
+
+.secondary {
+  flex: 1;
+  border: 1px solid $border-panel;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: $text-soft;
+}

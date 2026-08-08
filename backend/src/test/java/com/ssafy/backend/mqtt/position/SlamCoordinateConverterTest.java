@@ -84,6 +84,68 @@ class SlamCoordinateConverterTest {
 		assertThat(result.y()).isEqualByComparingTo("-5.25");
 	}
 
+	/**
+	 * 좌우반전+회전이 섞인 평면도용 아핀 변환 (캘리브레이션 값).
+	 * 예시: 90도 회전 + 반전이 섞인 A=[[0,180],[180,0]], t=(100,50) —
+	 * 행렬식 -32400(<0, 반전 포함)으로 기존 세로반전식으로는 표현 불가한 변환이다.
+	 */
+	private void stubAffine() {
+		when(map.hasAffineTransform()).thenReturn(true);
+		when(map.getAffineA11()).thenReturn(new BigDecimal("0"));
+		when(map.getAffineA12()).thenReturn(new BigDecimal("180"));
+		when(map.getAffineA21()).thenReturn(new BigDecimal("180"));
+		when(map.getAffineA22()).thenReturn(new BigDecimal("0"));
+		when(map.getAffineTx()).thenReturn(new BigDecimal("100"));
+		when(map.getAffineTy()).thenReturn(new BigDecimal("50"));
+	}
+
+	@Test
+	void affineTransformTakesPrecedenceOverLegacyFormula() {
+		stubAffine();
+
+		// world (2, 1) → 픽셀 (0·2 + 180·1 + 100, 180·2 + 0·1 + 50) = (280, 410)
+		SlamCoordinateConverter.ImagePosition result = converter.toImagePixels(
+			new BigDecimal("2"),
+			new BigDecimal("1"),
+			map
+		);
+
+		assertThat(result.x()).isEqualByComparingTo("280");
+		assertThat(result.y()).isEqualByComparingTo("410");
+	}
+
+	@Test
+	void affineRoundTripsPixelToMetersAndBack() {
+		stubAffine();
+
+		SlamCoordinateConverter.SlamPosition meters = converter.toSlamMeters(
+			new BigDecimal("925"),
+			new BigDecimal("138"),
+			map
+		);
+		SlamCoordinateConverter.ImagePosition pixels = converter.toImagePixels(
+			meters.x(),
+			meters.y(),
+			map
+		);
+
+		assertThat(pixels.x().doubleValue()).isCloseTo(925.0, org.assertj.core.data.Offset.offset(0.5));
+		assertThat(pixels.y().doubleValue()).isCloseTo(138.0, org.assertj.core.data.Offset.offset(0.5));
+	}
+
+	@Test
+	void degenerateAffineFailsLoudlyInsteadOfProducingGarbage() {
+		when(map.hasAffineTransform()).thenReturn(true);
+		when(map.getAffineA11()).thenReturn(BigDecimal.ONE);
+		when(map.getAffineA12()).thenReturn(BigDecimal.ONE);
+		when(map.getAffineA21()).thenReturn(BigDecimal.ONE);
+		when(map.getAffineA22()).thenReturn(BigDecimal.ONE);
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+			converter.toSlamMeters(BigDecimal.ONE, BigDecimal.ONE, map)
+		).isInstanceOf(IllegalStateException.class);
+	}
+
 	@Test
 	void pixelToMetersRoundTripsBackToSamePixel() {
 		stubMap("0.05", "-10", "-10", 600);
