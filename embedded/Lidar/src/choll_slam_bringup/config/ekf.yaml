@@ -75,6 +75,23 @@ ekf_filter_node:
     odom1_differential: false
     odom1_relative: false
 
+    # --- 입력 2: ZUPT (zero-velocity update) — 2026-08-09 추가 ---
+    # 엔코더가 양쪽 다 멈춰 있을 때만 발행되는 "확실히 정지" 관측이다.
+    # 🔴 이게 없으면 정지 중에도 rf2o 스캔매칭이 헛돌아 yaw 가 흐른다
+    #    (실측: /cmd_vel 0건인 90초 동안 map->base_link yaw 가 24도 이동).
+    #    휠 yaw 는 슬립 때문에 못 쓰지만 **"안 움직였다"는 슬립과 무관한 사실**이라
+    #    이 경로로는 안전하게 넣을 수 있다.
+    # 분산 1e-4 로 rf2o(0.0025)보다 25배 작아, 정지 중에는 EKF 가 이쪽을 택한다.
+    odom2: /odom_zupt
+    odom2_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom2_queue_size: 10
+    odom2_differential: false
+    odom2_relative: false
+
     # 스파이크 방어. 마할라노비스 거리 기준이며, 값이 작을수록 공격적으로 버린다.
     # STM32 재부팅으로 엔코더가 0 으로 돌아가는 경우가 실기에서 재현됐다(2026-08-08).
     # 이 임계값은 그때의 거대한 속도 스파이크를 걸러 주지만 **근본 대책이 아니다** —

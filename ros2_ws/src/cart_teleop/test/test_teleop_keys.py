@@ -45,11 +45,35 @@ def _state(**kwargs: float) -> TeleopState:
 # ---------------------------------------------------------------------------
 
 
-def test_defaults_match_the_verified_slow_profile_range() -> None:
-    """기본 상한은 2026-08-04 실기에서 확인한 범위와 같다."""
-    assert DEFAULT_MAX_LINEAR_MPS == pytest.approx(0.13)
-    assert DEFAULT_MAX_ANGULAR_RPS == pytest.approx(0.60)
+def test_defaults_match_the_measured_speed_envelope() -> None:
+    """기본 상한은 2026-08-08~09 실기 재배분 값이다 (전진 절반·회전 1.5배).
+
+    🔴 이 값은 `speed_profile:=slow`(max_wheel_rad_s 2.0)로는 낼 수 없다.
+    브리지를 `max_wheel_rad_s:=8.5` 이상으로 띄워야 한다 — 근거는
+    `teleop_keys.py` 기본값 주석 참고. 값을 바꾸면 그 주석도 함께 고칠 것.
+    """
+    assert DEFAULT_MAX_LINEAR_MPS == pytest.approx(0.26)
+    assert DEFAULT_MAX_ANGULAR_RPS == pytest.approx(0.90)
     assert DEFAULT_INPUT_TIMEOUT_SEC == pytest.approx(1.0)
+
+
+def test_defaults_fit_within_the_bridge_cap() -> None:
+    """전진+회전 동시 최악이 브리지 상한 8.5 rad/s 안에 든다.
+
+    무축소 수용을 코드로 고정해 둔다 — 넘으면 `limit_wheel_rad_s()`가 **조용히**
+    비례 축소하므로, 카트가 느려진 이유를 로그 없이 추적하기 어렵다.
+    """
+    wheel_radius_m = 0.065      # 명령 경로 (stm_serial_bridge.yaml)
+    wheel_separation_m = 0.38   # 2026-08-04 실측
+    bridge_cap_rad_s = 8.5
+
+    from_linear = DEFAULT_MAX_LINEAR_MPS / wheel_radius_m
+    from_angular = (
+        DEFAULT_MAX_ANGULAR_RPS * wheel_separation_m / (2.0 * wheel_radius_m)
+    )
+    assert from_linear + from_angular <= bridge_cap_rad_s
+    # 회전만 낼 때 실측 데드존(바닥 PWM 10~12 = 바퀴 1.0~1.2 rad/s)을 확실히 넘는다.
+    assert from_angular > 2.0
 
 
 def test_starts_stopped_at_max_speed_step() -> None:

@@ -1,9 +1,11 @@
 """robot_localization EKF — rf2o + 휠 오도메트리 융합, odom -> base_link TF 발행.
 
-이 런치는 **두 노드**를 띄운다.
+이 런치는 **세 노드**를 띄운다.
   1) `odom_covariance_node.py` : rf2o 가 비워 두는 공분산을 찍어
                                  `/odom_rf2o_cov` 로 중계
-  2) `ekf_filter_node`         : 그 토픽과 `/wheel/odom` 을 융합
+  2) `zupt_node.py`            : 엔코더가 멈춰 있으면 `/odom_zupt` 로
+                                 "확실히 정지"를 알린다 (정지 중 yaw 드리프트 방지)
+  3) `ekf_filter_node`         : 위 둘과 `/wheel/odom` 을 융합
 
 설계·근거는 `config/ekf.yaml` 상단 주석을 정본으로 본다.
 
@@ -52,6 +54,16 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
+    # 엔코더가 멈춰 있을 때만 "확실히 정지"를 알린다 (정지 중 yaw 드리프트 방지).
+    zupt = Node(
+        package='choll_slam_bringup',
+        executable='zupt_node.py',
+        name='zupt',
+        output='screen',
+        emulate_tty=True,
+        parameters=[{'output_topic': '/odom_zupt'}],
+    )
+
     ekf = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -61,4 +73,4 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[ekf_params],
     )
 
-    return LaunchDescription([covariance_stamper, ekf])
+    return LaunchDescription([covariance_stamper, zupt, ekf])
