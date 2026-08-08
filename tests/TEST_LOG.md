@@ -6,6 +6,131 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-08 19:40 — ✅ EKF 융합 배선·실기 검증 완료 (TF 소유권 이전 확인) / 데드존 보상 구현 (기본 비활성) — 매핑은 배터리 충전으로 중단 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `535b33f`. `colcon build` 통과(2패키지).
+- **방향 전환**: 스펀지 타이어는 유효 구름반지름이 하중·속도에 따라 변한다 →
+  "정확한 바퀴 상수"는 원리적으로 존재하지 않는다. **상수 추적을 중단**하고
+  불확실성을 공분산으로 선언해 EKF가 가중 평균하게 맡기는 쪽으로 전환.
+
+### ① ✅ 데드존 보상 구현 (`deadzone_compensator.py`) — 기본값 0 = 비활성
+
+펌웨어가 개루프(`motor_pi_kp=0, motor_pi_ki=0`)라 `PWM = 10 x rad/s` 이고
+바닥 데드존이 PWM 10~12 → **바퀴 1.0~1.2 rad/s 미만 명령은 전송돼도 안 돈다.**
+Nav2 DWB의 작은 조향 보정이 전부 소실되어 bang-bang이 되던 것의 직접 원인.
+
+살아 있는 구간 `[deadzone, max]`로 affine 재사상한다. 좌우 비율은 보존되지 않으며
+(그게 본질이다) `limit_wheel_rad_s()` **뒤에** 적용해야 한다 — 먼저 걸면 제한이
+offset을 도로 축소한다.
+
+```
+[stm_serial_bridge]   max_wheel_rad_s     = 8.0
+[stm_serial_bridge]   deadzone_wheel_rad_s= 0.0  <-- 0 = 보상 비활성(기존 거동). 실측 참고 1.0~1.2
+```
+
+실주행 튜닝은 `deadzone_wheel_rad_s:=1.2` 로 launch 인자를 주면 된다. **아직 실기 미검증.**
+
+### ② ✅ 공분산 설정 — 2026-08-08 실측에서 유도
+
+| 소스 | vx 분산 | vyaw 분산 | 근거 |
+|---|---|---|---|
+| 휠 `/wheel/odom` | **0.0025** (σ 0.05 m/s) | **0.25** (σ 0.5 rad/s) | 스케일 산포 −2.30/−3.54/−4.94% / 좌측 슬립 전진 4.79%·후진 11.86% |
+| rf2o `/odom_rf2o_cov` | 0.001 | **0.0025** | 스캔매칭은 슬립과 무관 |
+
+vyaw가 **100배** 차이나는 것이 설계의 핵심 — EKF가 yaw는 rf2o에서, vx는 휠에서 가져간다.
+
+### ③ 🔴 발견: rf2o는 공분산을 전혀 채우지 않는다
+
+upstream `CLaserOdometry2DNode.cpp:217-225` 에 covariance 대입이 **한 줄도 없다** →
+36원소 전부 0. EKF는 0을 "오차 없음"으로 읽으므로 그대로 넣었으면 rf2o만 절대
+신뢰해 융합이 성립하지 않았다. upstream 수정 금지라 `odom_covariance_node` 중계로 우회.
+
+### ④ ✅ EKF 실기 검증 — TF 소유권 이전 확인
+
+```
+=== rf2o publish_tf ===   Boolean value is: False
+=== EKF publish_tf ===    Boolean value is: True
+
+=== 20.0초 관측 ===
+parent -> child                        건수      Hz
+map -> odom                          1000    50.0
+odom -> base_link                     201    10.0
+✅ odom -> base_link 10.0 Hz — 발행자 하나
+
+/odometry/filtered : 200건 (10.0 Hz)
+  frame=odom child=base_link
+  pose x=+0.6991 y=+0.2415      (2.5분 전 +0.7140/+0.2436 → 정지 드리프트 x −1.5cm, y −0.2cm, 유계)
+  twist vx=-0.0000 vyaw=+0.0188
+```
+
+STM32 재연결 후 융합 실동작:
+
+```
+/wheel/odom         10.1 Hz  (81건)
+/odom_rf2o_cov      10.1 Hz  (81건)
+/odometry/filtered  10.0 Hz  (80건)
+  진단 [0] ekf_filter_node: The robot_localization state estimation node appears to be functioning properly.
+```
+
+EKF 발행이 설정값 20 Hz가 아니라 입력에 맞춰 10 Hz로 나온다. Nav2 요구(≥10 Hz) 충족이라 그대로 둠.
+
+### ⑤ 🔴 도중 발견: STM32 USB가 뽑혀 있었다
+
+```
+[stm_serial_bridge] ERROR: Serial port open failed: port=/dev/ttyACM0,
+  reason=[Errno 2] could not open port /dev/ttyACM0: No such file or directory
+/dev/serial/by-id/ → CP2102(라이다) 하나뿐, ttyACM* 없음
+```
+
+이 상태에서 EKF는 **rf2o 단독**으로 돌고 있었다(융합처럼 보이지만 아니다).
+재연결 후 `usb-STMicroelectronics_STM32_STLink_066FFF...-if02 -> ttyACM0` 확인,
+`/stm/connected: true`, 첫 엔코더 `(L=0, R=-10)` — USB 재연결로 STM이 이미 리셋된 상태.
+
+### ⑥ 단위 테스트
+
+```
+489 passed in 5.13s      (src/stm_serial_bridge/test/, 신규 13개 포함)
+ruff check embedded/Lidar/src/choll_slam_bringup/  → All checks passed!
+```
+
+`test_covariance_is_left_unset` → `test_covariance_diagonal_is_filled` 로 교체.
+그 테스트 자신이 "EKF 연결 단계에서 값을 채우면 함께 바뀌어야 한다"고 명시해 둔 것.
+
+### ⑦ ⏸ 매핑 중단 — 배터리 충전
+
+SLAM 스택을 원점에서 깨끗하게 재기동(`pose x=+0.0068 y=+0.0030`)하고 teleop 직전까지
+갔으나, 사용자가 보조배터리 충전을 위해 젯슨 전원을 내림. **지도 미작성.**
+
+종료는 규약 순서대로: 상위 노드 → `/stm/pwm` 확인 → 브릿지 → 라이다.
+
+```
+=== /cmd_vel 발행자 ===  Publisher count: 0
+pwm 샘플: [[0, 0], [0, 0], [0, 0]]     전부 0인가: True
+=== 남은 프로세스 ===  (비어 있음)
+```
+
+### 재개 방법 (전원 복구 후)
+
+```bash
+D=~/S15P11C101/ros2_ws/log/phase4_20260808
+bash $D/restart_motor.sh                 # 브릿지 + 휠 오도메트리
+bash $D/launch_slam_ekf.sh               # 라이다 + rf2o + EKF + slam_toolbox
+python3 $D/tf_probe.py 10                # odom->base_link 발행자 1개 확인
+bash $D/launch_teleop.sh                 # ← 사용자가 직접 (키 입력)
+bash $D/save_map.sh map_home             # 다 돌면 저장
+bash $D/stop_all.sh                      # 안전 종료
+```
+
+### 남은 일
+
+- [ ] 집 환경 매핑 → `~/maps/map_home` 저장
+- [ ] Nav2 자율주행 재검증. 회전 발진이 남으면 `deadzone_wheel_rad_s:=1.2` 로 브릿지 재기동
+- [ ] STM32 재부팅 탐지 → `wheel_odometry.rebaseline()` 연결 (모터 담당, EKF 신뢰성 전제)
+- [ ] 좌측 구동 슬립 — 커플링 볼트는 조임(2026-08-08). 재측정으로 개선 확인 필요
+
+---
+
 ## 2026-08-08 18:20 — ✅ 휠 오도메트리 실기 검증 완료: `/wheel/odom` 정상·부호 규약 검증 / 🔴 좌측 바퀴 슬립 확정(구동계 문제)·스케일 −3.6% 재보정 필요 (relu 실기 / Claude 실행·기록)
 
 - **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.
