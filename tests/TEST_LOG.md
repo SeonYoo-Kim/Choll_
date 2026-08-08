@@ -6,6 +6,130 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-08 21:30 — ✅ 데드존 보상이 Nav2 회전 발진을 해소 (부호반전 53회 → 2회) / 🔴 카트 치수 좌우·전후 뒤바뀜 정정 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `c54516a`. `colcon build` 통과.
+- **스택**: 라이다 + `scan_mask_node` + rf2o(`publish_tf=false`) + **EKF 융합** + slam_toolbox
+  + 브릿지(`max_wheel_rad_s=8.0`) + `wheel_odometry`. `/cmd_vel` 발행자는 Nav2 내부만.
+
+### ① ✅ 집 환경 매핑 — 중앙 장애물 추가 후 재작성
+
+1차(장애물 없음): 8.2 m², free 2733 / occ 566. **특징이 없어 rf2o가 매칭 해를 못 좁히고
+카트가 제자리에서 조금씩 도는 증상** → 사용자가 중앙에 장애물 배치 후 재작성.
+
+2차(장애물 있음): 80x68 격자, 7.8 m², free 2677 / occ 436, 원점 (-2.43, -2.48).
+PGM을 직접 렌더해 확인 — **벽이 단일 선(겹침·이중벽 없음) + 중앙 장애물 또렷** = 매칭 성공.
+`~/maps/map_home.{yaml,pgm,posegraph,data}` 4파일 저장.
+
+BE 전달값:
+```
+image: map_home.pgm / mode: trinary / resolution: 0.05
+origin: [-2.43, -2.48, 0] / occupied_thresh: 0.65 / free_thresh: 0.25
+```
+
+### ② ✅ 융합 검증 — 같은 주행에서 휠 yaw가 64° 틀렸다
+
+루프 클로저 직후 두 오도메트리 비교 (실제로는 출발점 복귀):
+
+| | x | y | yaw |
+|---|---|---|---|
+| EKF `/odometry/filtered` | −0.072 | −0.073 | **+7.4°** |
+| 휠 `/wheel/odom` | +0.590 | +0.743 | **−56.6°** |
+
+**휠 yaw를 융합에서 빼고 rf2o에 맡긴 설계가 옳았다는 직접 증거.**
+(2차 주행에서도 EKF −53° vs 휠 +121° 로 재현)
+
+### ③ 🔴 데드존 보상 실기 검증 — 회전 발진 해소 (오늘의 핵심 결과)
+
+**같은 목표**(map 좌표 (+0.10, −0.05))로 데드존 보상만 바꿔 2회 비교.
+
+| | A: `deadzone=0.0` (기존) | B: `deadzone=1.2` |
+|---|---|---|
+| `angular.z` **부호반전** | **53회** | **2회** |
+| yaw 거동 | −79° ↔ −94° **±7° 진동** | −180°→+155°→+133°→+112° **단조 회전** |
+| `linear.x` | 거의 항상 0.000 (전진 못 함) | 정렬 진행 중 |
+| 데드존 미만 회전명령 | 33.8% (534/1581) | 37.5% (24/64) |
+| `/stm/pwm = 0,0` | 20.7% | 71.4% |
+| 결과 | 90s 타임아웃, 1.07 m 남기고 제자리 | ABORTED 27s (계획 실패 — ④) |
+
+A의 원본 (리밋 사이클이 그대로 보인다):
+```
+   44.2s  남은거리 1.093 m  pose(-0.15,-1.11) yaw  -77.9°  cmd v=+0.000 w=+0.480  부호반전 18
+   46.2s  남은거리 1.042 m  pose(-0.16,-1.06) yaw  -92.2°  cmd v=+0.000 w=-0.400  부호반전 19
+   48.2s  남은거리 1.088 m  pose(-0.15,-1.11) yaw  -79.3°  cmd v=+0.000 w=+0.240  부호반전 22
+   50.2s  남은거리 1.035 m  pose(-0.16,-1.05) yaw  -94.9°  cmd v=+0.000 w=-0.257  부호반전 23
+```
+
+B의 원본 (같은 지점에서 단조 회전):
+```
+    4.0s  남은거리 1.075 m  pose(-0.15,-1.10) yaw +155.1°  부호반전 0
+    6.0s  남은거리 1.105 m  pose(-0.09,-1.14) yaw +133.3°  부호반전 0
+   14.0s  남은거리 1.174 m  pose(-0.03,-1.22) yaw +112.1°  부호반전 0
+```
+
+→ **2026-08-07 부터 원인 미확정이던 Nav2 회전 발진은 모터 데드존이었다.**
+`deadzone_wheel_rad_s:=1.2` (launch 인자)로 켠다. 기본값 0 은 여전히 비활성.
+
+### ④ 🔴 Nav2 경로 계획 실패 — inflation_radius 가 통로 여유보다 컸다
+
+```
+[planner_server] GridBased: failed to create plan with tolerance 0.50.
+[planner_server] Planning algorithm GridBased failed to generate a valid path to (0.10, -0.05)
+[behavior_server] Collision Ahead - Exiting Spin
+[bt_navigator] Goal failed
+```
+
+지도 전체 최대 여유 **0.75 m** < global `inflation_radius` **1.0 m** →
+자유 셀이 하나도 남지 않아 계획 불가. 이 값들은 원래 `TODO-팀확인`으로 미검증이었다.
+
+### ⑤ 🔴 카트 치수 정정 — 좌우와 전후가 뒤바뀌어 있었다
+
+사용자 실측: **좌우 폭 320 mm / 전후 620 mm**, 트레드 중심선 380 mm, 타이어 접지 폭 60 mm.
+2026-08-07 에 "가로 630 / 세로 330" 을 좌우/전후로 해석해 **두 축을 뒤집어** 넣었던 것.
+
+| 항목 | 이전 | 정정 |
+|---|---|---|
+| `scan_mask_node` 박스 | 전후 ±0.165 / 좌우 ±0.315 | 전후 **±0.31** / 좌우 **±0.16** |
+| Nav2 `footprint` | 0.70 x 0.64 | **0.62 x 0.44** |
+| 내접반지름 | 0.32 m | **0.22 m** |
+| `footprint_padding` | (Nav2 기본 0.01) | **0.0** 명시 |
+| `inflation_radius` local/global | 0.8 / 1.0 | **0.25 / 0.30** |
+
+→ 벽 하나가 잡아먹는 폭이 0.33 m → 0.22 m. 양쪽 합쳐 0.24 m 회복.
+
+**부수 효과 — 두 모순이 동시에 해소됐다:**
+- `base_link->laser_frame x=0.30` vs 전후 치수: 전방 한계가 0.31 m 이므로 라이다가
+  앞단 바로 안쪽에 놓인다 (이전 해석 ±0.165 로는 라이다가 카트 밖에 있어야 했다).
+- `wheel_separation_m 0.38` vs 본체 폭 0.32: 바퀴 안쪽 = 0.19 − 0.03 = **0.16 =
+  본체 반폭과 정확히 일치** → 바퀴가 본체 옆면에 붙어 바깥으로 달린 구조.
+  바퀴 바깥 = 0.22 → 최대 폭 0.44 m. **0.38 은 맞는 값이고 0.265 기각이 옳았다.**
+  footprint 좌우 ±0.22 는 본체가 아니라 이 바퀴 바깥면 기준이다.
+
+### ⑥ 단위 테스트·린트
+
+```
+489 passed in 5.13s      (src/stm_serial_bridge/test/)
+ruff check src/choll_slam_bringup/  → All checks passed!
+colcon build --packages-select choll_nav2 choll_slam_bringup  → 2 packages finished
+```
+
+### ⑦ 아직 검증되지 않은 것 (정직하게)
+
+- **⑤의 새 footprint/inflation 으로 Nav2 를 돌린 결과가 없다.** ④ 실패는 이전 값(0.8/1.0)
+  기준이고, 중간에 시도한 0.35/0.40 은 사용자가 실행 전에 중단했다 — 데이터 없음.
+- 데드존 보상 켠 상태의 **주행 완주(SUCCEEDED) 미달성.** 회전 발진 해소만 확인됐다.
+- 정지 중 map->base_link yaw 가 90초에 24° 움직였다(−77°→−53°, `/cmd_vel` 0건).
+  slam_toolbox 의 map->odom 보정으로 추정하나 **원인 미확정.**
+
+### 다음
+
+- [ ] 넓고 네모난 구간으로 재매핑 → 새 footprint/inflation 으로 포인트-투-포인트 주행
+- [ ] STM32 재부팅 탐지 → `wheel_odometry.rebaseline()` 연결 (모터 담당)
+- [ ] 좌측 구동 슬립 — 커플링 볼트 조임 완료. 개선 확인 필요
+
+---
+
 ## 2026-08-08 19:40 — ✅ EKF 융합 배선·실기 검증 완료 (TF 소유권 이전 확인) / 데드존 보상 구현 (기본 비활성) — 매핑은 배터리 충전으로 중단 (relu 실기 / Claude 실행·기록)
 
 - **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.

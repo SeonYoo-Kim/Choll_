@@ -7,15 +7,16 @@
 # 쫄래쫄래 카트 Nav2 파라미터 (ROS2 Humble)
 #
 # 기반: nav2_bringup 기본 파라미터 구조 + turtlebot3_navigation2(burger) 값 참조.
-# 카트 특성 반영: 차동구동, 직사각 footprint(~0.64m 폭), YDLIDAR X4 Pro(~7Hz,
+# 카트 특성 반영: 차동구동, 직사각 footprint(전후 0.62 x 좌우 0.32 실측 2026-08-08),
+# YDLIDAR X4 Pro(~7Hz,
 # 0.12~10m, BestEffort QoS — Humble costmap은 기본이 센서 QoS라 추가 설정 불필요),
 # 오도메트리는 임시로 rf2o(/odom_rf2o, 10Hz). STM32에는 속도 클램프가 없으므로
 # velocity_smoother가 ROS 쪽 유일한 클램프다 — 값 변경 시 주의.
 #
 # ⚠ TODO-실측/팀확인 표기가 있는 값은 임의 확정 금지 (CLAUDE.md 규칙):
-#   - footprint: 골조 실측 후 갱신 (현재 폭 0.64m 추정, base_link=차축 중점 가정)
+#   - footprint: 2026-08-08 실측 반영 완료 (근거는 nav2_params.yaml local_costmap 주석)
 #   - acc_lim: STM32 램프 4 rad/s²의 기준 축(바퀴/차체) 미확정 → 보수값 사용
-#   - inflation_radius / goal tolerance: 서가 통로 폭 확인 후 조정
+#   - inflation_radius: 2026-08-08 실측 여유 기준 0.25/0.30 으로 조정
 
 amcl:
   ros__parameters:
@@ -164,7 +165,8 @@ local_costmap:
       resolution: 0.05
       # TODO-실측: 폭 0.64m 추정, base_link=차축 중점 가정. 손잡이 돌출 포함
       # 실측 후 갱신할 것 (전후 비대칭 가능: 예 [[0.50,0.32],...,[-0.15,...]])
-      footprint: "[ [0.35, 0.32], [0.35, -0.32], [-0.35, -0.32], [-0.35, 0.32] ]"
+      footprint: "[ [0.31, 0.22], [0.31, -0.22], [-0.31, -0.22], [-0.31, 0.22] ]"
+      footprint_padding: 0.0
       transform_tolerance: 0.5
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
@@ -184,7 +186,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0   # 완만한 기울기 — 좁은 통로에서 경로 확보
-        inflation_radius: 0.8      # TODO-팀확인: 서가 통로 폭 기준 조정
+        inflation_radius: 0.25     # 2026-08-08 실측 (nav2_params.yaml 과 동일)
       always_send_full_costmap: True
 
 global_costmap:
@@ -196,7 +198,8 @@ global_costmap:
       robot_base_frame: base_link
       use_sim_time: false
       # TODO-실측 (local_costmap과 동일 값 유지)
-      footprint: "[ [0.35, 0.32], [0.35, -0.32], [-0.35, -0.32], [-0.35, 0.32] ]"
+      footprint: "[ [0.31, 0.22], [0.31, -0.22], [-0.31, -0.22], [-0.31, 0.22] ]"
+      footprint_padding: 0.0
       resolution: 0.05             # slam_toolbox 지도 해상도와 1:1
       track_unknown_space: true
       transform_tolerance: 0.5
@@ -221,7 +224,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 1.0      # TODO-팀확인
+        inflation_radius: 0.30     # 2026-08-08 실측 (nav2_params.yaml 과 동일)
       always_send_full_costmap: True
 
 map_server:

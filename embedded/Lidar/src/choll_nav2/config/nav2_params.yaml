@@ -1,15 +1,16 @@
 # 쫄래쫄래 카트 Nav2 파라미터 (ROS2 Humble)
 #
 # 기반: nav2_bringup 기본 파라미터 구조 + turtlebot3_navigation2(burger) 값 참조.
-# 카트 특성 반영: 차동구동, 직사각 footprint(~0.64m 폭), YDLIDAR X4 Pro(~7Hz,
-# 0.12~10m, BestEffort QoS — Humble costmap은 기본이 센서 QoS라 추가 설정 불필요),
+# 카트 특성 반영: 차동구동, 직사각 footprint(전후 0.62 x 좌우 0.32 실측 2026-08-08),
+# YDLIDAR X4 Pro(~7Hz, 0.12~10m, BestEffort QoS — Humble costmap은 기본이
+# 센서 QoS라 추가 설정 불필요),
 # 오도메트리는 임시로 rf2o(/odom_rf2o, 10Hz). STM32에는 속도 클램프가 없으므로
 # velocity_smoother가 ROS 쪽 유일한 클램프다 — 값 변경 시 주의.
 #
 # ⚠ TODO-실측/팀확인 표기가 있는 값은 임의 확정 금지 (CLAUDE.md 규칙):
-#   - footprint: 골조 실측 후 갱신 (현재 폭 0.64m 추정, base_link=차축 중점 가정)
+#   - footprint: 2026-08-08 실측 반영 완료 (전후 0.62 / 바퀴 바깥면 0.44). 모순 해소
 #   - acc_lim: STM32 램프 4 rad/s²의 기준 축(바퀴/차체) 미확정 → 보수값 사용
-#   - inflation_radius / goal tolerance: 서가 통로 폭 확인 후 조정
+#   - inflation_radius: 2026-08-08 실측 여유(최대 0.75m) 기준 0.25/0.30 으로 조정
 
 amcl:
   ros__parameters:
@@ -160,9 +161,19 @@ local_costmap:
       width: 4                   # 카트 크기 + 인플레이션이 3m 창에 안 들어감
       height: 4
       resolution: 0.05
-      # TODO-실측: 폭 0.64m 추정, base_link=차축 중점 가정. 손잡이 돌출 포함
-      # 실측 후 갱신할 것 (전후 비대칭 가능: 예 [[0.50,0.32],...,[-0.15,...]])
-      footprint: "[ [0.35, 0.32], [0.35, -0.32], [-0.35, -0.32], [-0.35, 0.32] ]"
+      # 2026-08-08 실측 반영. 카트 본체 **전후 620 x 좌우 320 mm**,
+      # 구동륜 트레드 중심선 간격 380 mm, 타이어 접지 폭 60 mm.
+      # 🔴 이전 값 [±0.35, ±0.32](= 0.70 x 0.64)는 좌우를 2배로 잡고 있었다
+      #    (사용자 표현 "가로/세로"를 좌우/전후로 뒤집어 해석한 것이 원인).
+      #
+      # 좌우 ±0.22 는 본체(±0.16)가 아니라 **바퀴 바깥면** 기준이다:
+      #    바퀴 안쪽 = 0.19 - 0.03 = 0.16  (본체 반폭과 정확히 일치 → 바퀴가
+      #                                     본체 옆면에 붙어 바깥으로 달린 구조)
+      #    바퀴 바깥 = 0.19 + 0.03 = 0.22  → 카트 최대 폭 0.44 m
+      # 이 계산으로 "wheel_separation 0.38 vs 본체 폭 0.32" 모순은 해소됐다.
+      footprint: "[ [0.31, 0.22], [0.31, -0.22], [-0.31, -0.22], [-0.31, 0.22] ]"
+      # 내접반지름 = 0.22 m (이전 0.32). 카트 중심이 장애물에서 이만큼 떨어져야 한다.
+      footprint_padding: 0.0
       transform_tolerance: 0.5
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
@@ -182,7 +193,11 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0   # 완만한 기울기 — 좁은 통로에서 경로 확보
-        inflation_radius: 0.8      # TODO-팀확인: 서가 통로 폭 기준 조정
+        # 2026-08-08 실측으로 0.8 -> 0.25. inflation_radius 가 실제 통로 여유보다
+        # 크면 자유 셀이 하나도 남지 않아 GridBased 가 경로를 못 만든다 — 집 환경
+        # (최대 여유 0.75 m) 에서 "failed to create plan with tolerance 0.50" 로 재현됨.
+        # 내접반지름(0.22)보다는 커야 inflation 이 의미가 있으므로 0.25 로 둔다.
+        inflation_radius: 0.25
       always_send_full_costmap: True
 
 global_costmap:
@@ -193,8 +208,9 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: false
-      # TODO-실측 (local_costmap과 동일 값 유지)
-      footprint: "[ [0.35, 0.32], [0.35, -0.32], [-0.35, -0.32], [-0.35, 0.32] ]"
+      # local_costmap과 동일 값 유지 (근거는 local_costmap 쪽 주석)
+      footprint: "[ [0.31, 0.22], [0.31, -0.22], [-0.31, -0.22], [-0.31, 0.22] ]"
+      footprint_padding: 0.0
       resolution: 0.05             # slam_toolbox 지도 해상도와 1:1
       track_unknown_space: true
       transform_tolerance: 0.5
@@ -219,7 +235,9 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 1.0      # TODO-팀확인
+        # 2026-08-08 실측으로 1.0 -> 0.30 (global 은 local 보다 약간 크게 두어
+        # 경로가 벽에 붙지 않게 한다). 근거는 local inflation_layer 주석 참고.
+        inflation_radius: 0.30
       always_send_full_costmap: True
 
 map_server:
