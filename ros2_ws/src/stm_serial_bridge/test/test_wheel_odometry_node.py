@@ -31,7 +31,9 @@ from stm_serial_bridge.stm_serial_bridge_node import (
 )
 from stm_serial_bridge.wheel_odometry import WheelGeometry
 from stm_serial_bridge.wheel_odometry_node import (
+    COVARIANCE_DIAGONAL_INDICES,
     ENCODER_TOTAL_TOPIC,
+    UNOBSERVED_VARIANCE,
     WHEEL_ODOM_TOPIC,
     WheelOdometryNode,
     extract_encoder_counts,
@@ -411,11 +413,11 @@ def test_published_frames_come_from_parameters(
     assert message.child_frame_id == "cart_base"
 
 
-def test_covariance_is_left_unset(node_factory: Any) -> None:  # noqa: ANN401
-    """공분산은 아직 0이다 — 근거 있는 값이 없어 채우지 않았다.
+def test_covariance_diagonal_is_filled(node_factory: Any) -> None:  # noqa: ANN401
+    """공분산 대각이 파라미터 값으로 채워진다 (2026-08-08 EKF 준비 단계에서 설정).
 
-    ⚠️ 이 테스트는 "0이 맞다"가 아니라 **"아직 설정하지 않았다"는 현재 상태를 고정**한다.
-    EKF 연결 단계에서 값을 채우면 이 테스트도 함께 바뀌어야 한다.
+    이전에는 "아직 0"을 고정하는 테스트였다. EKF 연결을 위해 값을 채웠으므로 함께
+    바뀌었다 — 값의 근거는 `wheel_odometry_node.py` 모듈 docstring §공분산.
     """
     node = node_factory()
 
@@ -423,8 +425,29 @@ def test_covariance_is_left_unset(node_factory: Any) -> None:  # noqa: ANN401
     _feed(node, 100, 100, at_sec=0.1)
 
     message = _captured(node)[0]
-    assert list(message.pose.covariance) == [0.0] * 36
-    assert list(message.twist.covariance) == [0.0] * 36
+    pose = list(message.pose.covariance)
+    twist = list(message.twist.covariance)
+
+    assert pose[0] == pose[7] == 0.05
+    assert pose[35] == 0.25
+    assert twist[0] == twist[7] == 0.0025
+    assert twist[35] == 0.25
+    # 관측되지 않는 자유도(z, roll, pitch)는 큰 유한값이다 — 무한대를 쓰면
+    # robot_localization 이 행렬을 뒤집을 때 수치적으로 터질 수 있다.
+    for index in (14, 21, 28):
+        assert pose[index] == UNOBSERVED_VARIANCE
+        assert twist[index] == UNOBSERVED_VARIANCE
+    # 축 간 상관은 측정하지 않았으므로 대각 외는 전부 0이다.
+    for index in range(36):
+        if index not in COVARIANCE_DIAGONAL_INDICES:
+            assert pose[index] == 0.0
+            assert twist[index] == 0.0
+
+
+def test_zero_variance_is_rejected(node_factory: Any) -> None:  # noqa: ANN401
+    """분산 0은 거부한다 — '오차 없음'으로 읽혀 융합기가 이 소스만 신뢰하게 된다."""
+    with pytest.raises(ValueError, match="twist_linear_variance"):
+        node_factory(twist_linear_variance=0.0)
 
 
 # ---------------------------------------------------------------------------

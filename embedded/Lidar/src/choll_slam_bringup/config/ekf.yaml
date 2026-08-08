@@ -1,0 +1,86 @@
+# robot_localization EKF — rf2o(레이저) + 휠 오도메트리 융합.
+#
+# 실행: ros2 launch choll_slam_bringup ekf.launch.py
+#       (또는 bringup.launch.py ekf:=true 로 스택 전체와 함께)
+#
+# ============================================================================
+# 설계 — 무엇을 어디서 가져오는가 (2026-08-08 실기 근거)
+# ============================================================================
+#
+#   yaw / yaw rate  <- rf2o 스캔매칭   : 바퀴 슬립·타이어 변형과 **무관**
+#   vx              <- 휠 오도메트리    : rf2o 가 특징 없는 벽·복도에서 죽을 때 버팀
+#   휠 yaw          <- **버린다**       : 좌측 구동 슬립 전진 4.79% / 후진 11.86%
+#                                        (밀기 대조는 0.74% → 센서가 아니라 구동계)
+#
+# 이 비대칭은 각 소스의 공분산으로 표현된다 — 여기 config 가 아니라
+# 발행 노드 쪽에 있다:
+#   - 휠  : ros2_ws/src/stm_serial_bridge/config/wheel_odometry.yaml
+#           twist_angular_variance 0.25   (일부러 크게 = 못 믿는다)
+#   - rf2o: scripts/odom_covariance_node.py 가 찍는다
+#           twist_angular_variance 0.0025 (100배 작게 = 믿는다)
+#   ⚠️ rf2o 는 공분산을 전혀 채우지 않아(upstream 확인) 스탬퍼 중계가 필수다.
+#
+# ⚠️ 스펀지 타이어라 유효 구름반지름이 하중·속도에 따라 변한다. "정확한 바퀴 상수"는
+#    원리적으로 존재하지 않으므로 더 쫓지 않고, 공분산으로 불확실성을 선언해 EKF 가
+#    가중 평균하게 맡긴다. 이것이 2026-08-08 에 방향을 바꾼 이유다.
+#
+# ============================================================================
+# TF 소유권 — 반드시 하나만
+# ============================================================================
+#   EKF 를 켜면 이 노드가 odom -> base_link 를 발행한다.
+#   따라서 rf2o 의 publish_tf 는 **반드시 False** 여야 한다
+#   (laser_odom.launch.py 의 publish_tf 인자, ekf.launch.py 가 자동으로 넘긴다).
+#   둘 다 발행하면 TF 트리가 깨지고 slam_toolbox 가 튄다.
+# ============================================================================
+ekf_filter_node:
+  ros__parameters:
+    frequency: 20.0
+    sensor_timeout: 0.5
+    # 평면 로봇 — z / roll / pitch 를 강제로 0 으로 묶는다. 라이다 1개 + 휠뿐이라
+    # 그 축들에는 정보가 없으므로, 풀어 두면 잡음이 그대로 자유도로 샌다.
+    two_d_mode: true
+    publish_tf: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    # odom 프레임 EKF 다 — 연속적이고 점프하지 않는 지역 추정을 만든다.
+    # map -> odom 은 slam_toolbox(매핑) 또는 AMCL(내비) 의 몫이며 여기서 건드리지 않는다.
+    world_frame: odom
+
+    # --- 입력 0: rf2o 레이저 스캔매칭 (공분산 스탬퍼를 거친 토픽) ---
+    odom0: /odom_rf2o_cov
+    # 순서: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
+    # **속도만** 융합한다. 절대 포즈까지 융합하면 EKF 가 사실상 rf2o 복사본이 되어
+    # 휠이 기여할 자리가 없어진다. 속도 단계에서 섞어야 두 소스가 실제로 평균된다.
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # --- 입력 1: 휠 오도메트리 ---
+    odom1: /wheel/odom
+    # 🔴 vx 하나만 true 다. vyaw 를 켜지 않는 것이 이 설정에서 가장 중요한 한 줄이다 —
+    #    좌측 슬립 때문에 "오도메트리는 우회전인데 카트는 좌회전"이 실제로 관측됐다.
+    odom1_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_queue_size: 10
+    odom1_differential: false
+    odom1_relative: false
+
+    # 스파이크 방어. 마할라노비스 거리 기준이며, 값이 작을수록 공격적으로 버린다.
+    # STM32 재부팅으로 엔코더가 0 으로 돌아가는 경우가 실기에서 재현됐다(2026-08-08).
+    # 이 임계값은 그때의 거대한 속도 스파이크를 걸러 주지만 **근본 대책이 아니다** —
+    # wheel_odometry 쪽 rebaseline() 연결이 별도로 필요하다.
+    odom0_twist_rejection_threshold: 5.0
+    odom1_twist_rejection_threshold: 5.0
+
+    print_diagnostics: true
+    debug: false

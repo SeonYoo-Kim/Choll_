@@ -20,6 +20,9 @@
   <!-- scan_mask_node.py -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <!-- odom_covariance_node.py 중계 + EKF 융합 (ekf.launch.py) -->
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

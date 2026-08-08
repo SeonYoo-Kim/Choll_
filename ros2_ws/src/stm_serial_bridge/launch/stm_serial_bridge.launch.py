@@ -100,6 +100,9 @@ def _launch_setup(context, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, AN
     serial_port = LaunchConfiguration("serial_port").perform(context)
     speed_profile = LaunchConfiguration("speed_profile").perform(context)
     max_wheel_rad_s = LaunchConfiguration("max_wheel_rad_s").perform(context)
+    deadzone_wheel_rad_s = LaunchConfiguration("deadzone_wheel_rad_s").perform(
+        context
+    )
     mock_pty_link = LaunchConfiguration("mock_pty_link").perform(context)
     mock_stop_after_sec = LaunchConfiguration("mock_stop_after_sec").perform(context)
     mock_fault_after_sec = LaunchConfiguration("mock_fault_after_sec").perform(context)
@@ -141,6 +144,16 @@ def _launch_setup(context, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, AN
         except ValueError as error:
             msg = (
                 f"max_wheel_rad_s must be a float, got '{max_wheel_rad_s}'"
+            )
+            raise RuntimeError(msg) from error
+
+    if deadzone_wheel_rad_s:
+        try:
+            overrides["deadzone_wheel_rad_s"] = float(deadzone_wheel_rad_s)
+        except ValueError as error:
+            msg = (
+                "deadzone_wheel_rad_s must be a float, got "
+                f"'{deadzone_wheel_rad_s}'"
             )
             raise RuntimeError(msg) from error
 
@@ -260,6 +273,16 @@ def generate_launch_description() -> LaunchDescription:
                     "바퀴 각속도 상한을 직접 지정한다 [rad/s]. "
                     "비우면 speed_profile 값을 쓴다. 지정하면 프로파일보다 우선 — "
                     "실기에서 단계적으로 올릴 때 사용"
+                ),
+            ),
+            DeclareLaunchArgument(
+                "deadzone_wheel_rad_s",
+                default_value="",
+                description=(
+                    "모터 데드존 보상 임계값 [rad/s]. 비우거나 0이면 보상하지 않는다"
+                    "(기존 거동). 이 값 미만의 명령을 살아 있는 구간으로 재사상해 "
+                    "Nav2 의 작은 조향 보정이 실제 회전을 만들게 한다. "
+                    "실측 참고: 바닥 데드존 PWM 10~12 = 바퀴 1.0~1.2 rad/s"
                 ),
             ),
             DeclareLaunchArgument(

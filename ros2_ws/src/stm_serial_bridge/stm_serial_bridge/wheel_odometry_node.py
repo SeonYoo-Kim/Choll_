@@ -33,11 +33,27 @@ STM32 -> stm_serial_bridge -> /stm/encoder_total -> wheel_odometry -> /wheel/odo
 STATUS 가 끊기지 않을 만큼 빠른 재부팅이나, 연결이 유지된 채 카운터만 초기화되는 경로를
 놓칠 수 있다. 탐지 방법을 확정한 뒤 별도 단계에서 붙인다.
 
-## ⚠️ 공분산은 0으로 남아 있다
+## 공분산 — 2026-08-08 실기 측정에서 유도했다
 
-`nav_msgs/Odometry` 의 `pose.covariance` / `twist.covariance` 를 채우지 않았다. 근거 있는
-값이 없는 상태에서 숫자를 지어내지 않기 위해서다. **EKF 에 연결하기 전에 반드시 설정해야
-한다** — 0 을 "오차가 없다"로 해석하는 융합기가 있다.
+대각 성분만 채운다(축 간 상관은 측정하지 않았으므로 0으로 둔다). 각 값의 근거:
+
+- `twist_linear_variance = 0.0025` (σ = 0.05 m/s)
+  거리 스케일 실측 3회가 −2.30% / −3.54% / −4.94% 로 흩어졌다. 대표 주행속도
+  0.15~0.3 m/s 에서 이 산포는 약 0.01 m/s 이고, 여기에 좌우 슬립의 전진 성분과
+  dt 지터를 얹어 0.05 m/s 로 잡았다. **EKF 가 실제로 융합할 유일한 값이다.**
+- `twist_angular_variance = 0.25` (σ = 0.5 rad/s) — 의도적으로 크다.
+  좌측 바퀴 구동 슬립이 전진 4.79% / 후진 11.86% 였고(밀기 대조는 0.74%), 그 결과
+  "오도메트리는 우회전이라는데 카트는 좌회전"하는 모순이 실제로 관측됐다. 휠 yaw 는
+  **못 믿는 값**이므로 크게 두어 융합기가 rf2o 스캔매칭 yaw 를 택하게 한다.
+- `pose_xy_variance = 0.05`, `pose_yaw_variance = 0.25`
+  적분 포즈의 오차는 시간에 따라 무한히 누적되므로 어떤 상수도 정확할 수 없다.
+  EKF 설정에서 이 포즈는 융합하지 않을 예정이라(속도만 쓴다) 방어적으로 크게 둔다.
+- z / roll / pitch = `UNOBSERVED_VARIANCE` (1e6)
+  평면 차동구동에서 관측되지 않는 자유도다. 무한대 대신 큰 유한값을 쓴다.
+
+⚠️ **스펀지 타이어라 "정확한 상수"는 원리적으로 존재하지 않는다.** 유효 구름반지름이
+하중과 속도에 따라 변하기 때문이다. 그래서 스케일을 더 쫓지 않고, 위 분산으로 불확실성을
+선언해 EKF 가 rf2o 와 가중 평균하도록 맡긴다.
 """
 
 import math
@@ -74,10 +90,15 @@ EXIT_FAILURE = 1
 #: `main()` 의 spin 루프가 한 번에 대기하는 시간(초).
 SPIN_TIMEOUT_SEC = 0.1
 
-COVARIANCE_NOTICE = (
-    "pose/twist covariance는 0으로 남겨둔다 — 근거 있는 값이 아직 없다. "
-    "EKF에 연결하기 전에 반드시 설정할 것 (0을 '오차 없음'으로 읽는 융합기가 있다)."
-)
+#: 평면 차동구동에서 관측되지 않는 자유도(z, roll, pitch)에 넣는 분산.
+#: 융합기가 "이 축은 정보 없음"으로 읽도록 크게 두되, 무한대는 쓰지 않는다 —
+#: robot_localization 이 행렬을 뒤집을 때 수치적으로 터질 수 있다.
+UNOBSERVED_VARIANCE = 1e6
+
+#: `nav_msgs/Odometry` 공분산은 6x6 행 우선(row-major) 36원소다.
+COVARIANCE_SIZE = 36
+#: 6x6 대각 성분의 평탄화 인덱스: x, y, z, roll, pitch, yaw 순.
+COVARIANCE_DIAGONAL_INDICES = (0, 7, 14, 21, 28, 35)
 
 
 def extract_encoder_counts(data: Sequence[int]) -> tuple[int, int]:
@@ -145,12 +166,23 @@ class WheelOdometryNode(Node):
         # odom -> base_link 변환을 실제로 방송하는 것은 이후의 EKF 다.
         self.declare_parameter("odom_frame_id", "odom")
         self.declare_parameter("base_frame_id", "base_link")
+        # --- 공분산 (대각 성분의 분산). 근거는 모듈 docstring §공분산 참고. ---
+        # 포즈는 EKF 에서 융합하지 않을 값이므로 크게 둔다(적분 오차가 무한히 누적).
+        self.declare_parameter("pose_xy_variance", 0.05)
+        self.declare_parameter("pose_yaw_variance", 0.25)
+        # 속도는 실제로 융합할 값이다 — vx 는 믿을 만하고, vyaw 는 좌측 슬립 때문에
+        # 못 믿는다. 이 비대칭이 "rf2o 가 yaw 를 잡고 휠이 vx 를 잡는" 설계의 핵심이다.
+        self.declare_parameter("twist_linear_variance", 0.0025)
+        self.declare_parameter("twist_angular_variance", 0.25)
 
         self._log_parameters()
 
         self._geometry: WheelGeometry | None = None
         self._odom_frame_id = ""
         self._base_frame_id = ""
+        # start()에서 파라미터를 검증하며 채운다. 그 전에는 발행 자체가 없다.
+        self._pose_covariance: tuple[float, ...] = ()
+        self._twist_covariance: tuple[float, ...] = ()
 
         # None = 아직 첫 encoder_total 을 받지 않음.
         self._state: OdometryState | None = None
@@ -179,6 +211,13 @@ class WheelOdometryNode(Node):
         self._odom_frame_id = self._validated_frame_id("odom_frame_id")
         self._base_frame_id = self._validated_frame_id("base_frame_id")
 
+        self._pose_covariance = self._build_covariance(
+            "pose_xy_variance", "pose_yaw_variance"
+        )
+        self._twist_covariance = self._build_covariance(
+            "twist_linear_variance", "twist_angular_variance"
+        )
+
         self._odom_publisher = self.create_publisher(
             Odometry, WHEEL_ODOM_TOPIC, ODOM_QOS_DEPTH
         )
@@ -194,7 +233,14 @@ class WheelOdometryNode(Node):
             f"(m/count={self._geometry.meters_per_count:.9f})"
         )
         self.get_logger().info("TF는 발행하지 않는다 — odom -> base_link는 EKF의 몫이다.")
-        self.get_logger().warning(COVARIANCE_NOTICE)
+        self.get_logger().info(
+            "공분산 대각(2026-08-08 실측 유도): "
+            f"pose xy={self._pose_covariance[0]:.4g} "
+            f"yaw={self._pose_covariance[35]:.4g} / "
+            f"twist vx={self._twist_covariance[0]:.4g} "
+            f"vyaw={self._twist_covariance[35]:.4g} "
+            "— vyaw가 큰 것은 좌측 슬립 때문이며 의도된 값이다(rf2o가 yaw를 잡는다)."
+        )
 
     def _on_encoder_total(self, message: Int32MultiArray) -> None:
         """Integrate one encoder sample and publish the resulting odometry.
@@ -251,8 +297,8 @@ class WheelOdometryNode(Node):
     ) -> None:
         """Fill and publish one `nav_msgs/Odometry` message.
 
-        ⚠️ `pose.covariance` / `twist.covariance` 는 **0으로 남긴다.** 근거 있는 값이
-        없어서이며, EKF 연결 전에 반드시 채워야 한다(모듈 docstring 참고).
+        `pose.covariance` / `twist.covariance` 는 `start()` 에서 한 번 만든 대각 행렬을
+        매번 그대로 싣는다(값의 근거는 모듈 docstring §공분산).
 
         Args:
             state: 적분된 포즈.
@@ -280,7 +326,52 @@ class WheelOdometryNode(Node):
         message.twist.twist.linear.x = linear_x_mps
         message.twist.twist.angular.z = angular_z_rps
 
+        message.pose.covariance = list(self._pose_covariance)
+        message.twist.covariance = list(self._twist_covariance)
+
         self._odom_publisher.publish(message)
+
+    def _build_covariance(
+        self, planar_parameter: str, yaw_parameter: str
+    ) -> tuple[float, ...]:
+        """Build one flattened 6x6 diagonal covariance from two parameters.
+
+        x 와 y 에 같은 분산을 넣는다 — 차동구동은 옆으로 미끄러지지 않으므로 두 축의
+        오차 특성을 따로 측정할 근거가 없다. z/roll/pitch 는 관측되지 않는 자유도라
+        `UNOBSERVED_VARIANCE` 로 채운다.
+
+        Args:
+            planar_parameter: x·y 축 분산을 담은 파라미터 이름.
+            yaw_parameter: yaw 축 분산을 담은 파라미터 이름.
+
+        Returns:
+            36원소 행 우선 공분산. 대각 외 성분은 0이다.
+
+        Raises:
+            ValueError: 둘 중 하나라도 유한하지 않거나 0 이하일 때. 0을 허용하면
+                "오차가 전혀 없다"는 뜻이 되어 융합기가 이 소스만 신뢰하게 된다.
+        """
+        planar = float(self._param_value(planar_parameter))
+        yaw = float(self._param_value(yaw_parameter))
+        for name, value in ((planar_parameter, planar), (yaw_parameter, yaw)):
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"{name} must be a finite value greater than 0.0, got {value} "
+                    "(0은 '오차 없음'으로 읽혀 융합기가 이 소스만 신뢰하게 된다)"
+                )
+
+        diagonal = (
+            planar,
+            planar,
+            UNOBSERVED_VARIANCE,
+            UNOBSERVED_VARIANCE,
+            UNOBSERVED_VARIANCE,
+            yaw,
+        )
+        covariance = [0.0] * COVARIANCE_SIZE
+        for index, value in zip(COVARIANCE_DIAGONAL_INDICES, diagonal, strict=True):
+            covariance[index] = value
+        return tuple(covariance)
 
     @staticmethod
     def _now_sec() -> float:
@@ -341,6 +432,22 @@ class WheelOdometryNode(Node):
         )
         logger.info(f"  odom_frame_id        = {self._param_value('odom_frame_id')}")
         logger.info(f"  base_frame_id        = {self._param_value('base_frame_id')}")
+        logger.info(
+            f"  pose_xy_variance     = {self._param_value('pose_xy_variance')}"
+        )
+        logger.info(
+            f"  pose_yaw_variance    = {self._param_value('pose_yaw_variance')}"
+        )
+        logger.info(
+            f"  twist_linear_variance = "
+            f"{self._param_value('twist_linear_variance')}"
+            "  <-- EKF가 실제로 융합할 값"
+        )
+        logger.info(
+            f"  twist_angular_variance= "
+            f"{self._param_value('twist_angular_variance')}"
+            "  <-- ⚠️ 크게 둔 것이 의도다(좌측 슬립). yaw는 rf2o가 잡는다"
+        )
 
     @property
     def state(self) -> OdometryState | None:

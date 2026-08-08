@@ -64,11 +64,14 @@
 | `/cart/cancel` / `/cart/nav_status` | String / String | 구독/발행(래치) | 제안 ROS2-15/16. cancel data=requestId(선택) |
 | `/scan` | LaserScan | 발행 ~11Hz | `scan_mask_node`가 자기차폐 7섹터를 NaN으로. 구독 측 **BestEffort** 필수 |
 | `/scan_raw` | LaserScan | 발행 ~11Hz | 드라이버 원본. **rf2o 전용** — 마스킹된 `/scan`을 주면 정지 드리프트 −0.4°/s |
-| `/odom_rf2o` | Odometry | 발행 10Hz | 임시. `/odom`은 휠 오도메트리 예약 |
+| `/odom_rf2o` | Odometry | 발행 10Hz | ⚠️ **공분산 전부 0** (upstream이 안 채움) → EKF엔 `odom_covariance_node` 중계본 `/odom_rf2o_cov`를 준다 |
+| `/wheel/odom` | Odometry | 구독 | 휠 오도메트리 (`ros2_ws`의 `wheel_odometry_node`). EKF가 **vx만** 융합 — yaw는 좌측 슬립으로 못 씀 |
+| `/odometry/filtered` | Odometry | EKF 발행 20Hz | `ekf:=true`일 때. 융합 설계 정본은 `config/ekf.yaml` 상단 주석 |
 | `/cmd_vel` | Twist | Nav2 발행 20Hz | ⚠ AI control_node와 발행 주체 충돌 — 동시 구동 금지 |
 
-TF: `map→(slam_toolbox|AMCL 중 하나만)→odom→(rf2o)→base_link→(정적, z=0.20
-TODO-실측)→laser_frame`. odom→base_link 발행자는 항상 하나. 카메라 장착 시
+TF: `map→(slam_toolbox|AMCL 중 하나만)→odom→(rf2o **또는** EKF 중 하나만)→base_link
+→(정적, z=0.32 실측)→laser_frame`. odom→base_link 발행자는 항상 하나 —
+`bringup.launch.py ekf:=true`가 rf2o `publish_tf`를 자동으로 내린다. 카메라 장착 시
 `base_link→camera_frame` 정적 TF 추가.
 
 MQTT 연동(`choll_mqtt_bridge`, 정본: 패키지 README): 브로커
