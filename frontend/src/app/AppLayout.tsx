@@ -2,9 +2,12 @@ import { Home, MapPin, PackageOpen, Search } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
 import logo from '@/assets/logo.svg';
+import { useCartConnectionEvents } from '@/features/cart-control/model/useCartConnectionEvents';
 import { useCartControlEvents } from '@/features/cart-control/model/useCartControlEvents';
+import { CartOfflineModal } from '@/features/cart-control/ui/CartOfflineModal';
 import { useCartMapEvents } from '@/features/cart-map/model/useCartMapEvents';
 import { useSlotBoardEvents } from '@/features/slot-board/model/useSlotBoardEvents';
+import { SlotFullModal } from '@/features/slot-board/ui/SlotFullModal';
 import { CartSocketProvider } from '@/shared/api/ws/CartSocketProvider';
 import { DEMO_CART_ID } from '@/shared/config/cart';
 import { Toast } from '@/shared/ui/toast/Toast';
@@ -27,6 +30,7 @@ const MOBILE_NAV_ITEMS = [...NAV_ITEMS];
 function CartRealtimeSync() {
   useCartMapEvents(DEMO_CART_ID);
   useCartControlEvents();
+  useCartConnectionEvents(DEMO_CART_ID);
   useSlotBoardEvents(DEMO_CART_ID);
   useTaskProgressEvents(DEMO_CART_ID);
 
@@ -79,6 +83,8 @@ export function AppLayout() {
             ))}
           </nav>
         </section>
+        <CartOfflineModal />
+        <SlotFullModal />
         <Toast />
       </main>
     </CartSocketProvider>

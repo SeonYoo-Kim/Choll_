@@ -102,6 +102,16 @@ public class VideoRelayHandler extends BinaryWebSocketHandler {
 		}
 	}
 
+	/**
+	 * 해당 카트의 영상 시청자가 하나라도 열려 있는지.
+	 * FE는 추종 대상 선택 모달을 여는 동안만 시청자로 붙으므로,
+	 * TRACKS_UPDATED 중계를 "선택 중일 때만"으로 제한하는 게이트로 쓴다.
+	 */
+	public boolean hasViewers(long cartId) {
+		Set<WebSocketSession> viewers = viewersByCartId.get(cartId);
+		return viewers != null && viewers.stream().anyMatch(WebSocketSession::isOpen);
+	}
+
 	@Override
 	public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
 		Long cartId = (Long) session.getAttributes().get("cartId");

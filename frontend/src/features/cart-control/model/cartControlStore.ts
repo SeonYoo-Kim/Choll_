@@ -12,14 +12,13 @@ const RUN_STATE_BY_FOLLOW: Record<FollowStatus, CartRunState> = {
   STOPPED: 'STOPPED',
 };
 
+// 카트 연결 여부는 cartConnectionStore(WS-FE-03)가 담당한다 — 여기 있던 connected/setConnected는
+// 아무도 쓰지 않는 값이어서 제거했다.
 interface CartControlState {
   runState: CartRunState;
-  /** WS 연결 여부 — 화면에 연결 끊김 표시용 */
-  connected: boolean;
   setRunState: (state: CartRunState) => void;
   /** 추종 명령 응답·WS FOLLOW_STATUS_UPDATED(WS-FE-07) 반영 */
   applyFollowStatus: (status: FollowStatus) => void;
-  setConnected: (connected: boolean) => void;
 }
 
 /**
@@ -29,8 +28,6 @@ interface CartControlState {
  */
 export const useCartControlStore = create<CartControlState>()((set) => ({
   runState: 'STOPPED',
-  connected: false,
   setRunState: (runState) => set({ runState }),
   applyFollowStatus: (status) => set({ runState: RUN_STATE_BY_FOLLOW[status] }),
-  setConnected: (connected) => set({ connected }),
 }));

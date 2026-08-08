@@ -5,6 +5,12 @@
       "name": "frontend-dev",
       "url": "http://localhost:5173",
       "port": 5173
+    },
+    {
+      "name": "frontend-dev-8081",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "frontend", "dev", "--port", "8081", "--strictPort"],
+      "port": 8081
     }
   ]
 }

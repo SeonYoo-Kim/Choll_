@@ -34,7 +34,10 @@ import tools.jackson.databind.ObjectMapper;
  * 이동 상태는 인메모리(카트당 1건) — 카트의 상행 결과 토픽이 확정되면
  * STARTED/ARRIVED/FAILED 전환을 붙일 자리다.
  *
- * 목적지 좌표: FE가 픽셀(x,y)을 주면 그 지점, 없으면 구역 bbox 중심.
+ * 목적지 좌표: FE가 픽셀(x,y)을 주면 **그 지점 그대로**, 없으면 구역 bbox 중심.
+ * 통로 한가운데 같은 구역 밖 좌표도 목적지가 될 수 있으므로 BE는 스냅하지 않는다(2026-08-07) —
+ * 장애물(서가·테이블) 클릭을 고정 정차점으로 바꾸는 책임은 FE 평면도에 있고,
+ * 그래도 도달 불가한 goal은 Nav2가 거부해 status/nav-result(ABORTED·REJECTED)로 FAILED가 전달된다.
  * mqtt.position-unit=meters면 지도 메타(resolution·origin)로 SLAM 미터 target을
  * 함께 하행한다 (EM SLAM Nav의 goal 좌표). pixels 모드(메타 미입력)에선 target=null.
  */
@@ -156,6 +159,17 @@ public class NavigationService {
 			.orElseThrow(() -> new ResourceNotFoundException("카트", cartId));
 		ActiveNavigation active = activeByCartId.remove(cartId);
 		if (active == null) {
+			// 세션은 인메모리라 재시작하면 사라지는데 DB 상태만 NAVIGATING으로
+			// 남을 수 있다 — 취소 요청이 오면 그 고아 상태도 청소한다
+			if (cart.getOperationStatus() == CartOperationStatus.NAVIGATING) {
+				cart.updateStatus(
+					cart.getConnectionStatus(),
+					CartOperationStatus.IDLE,
+					cart.getLastCommunicationAt()
+				);
+				log.info("세션 없는 NAVIGATING 상태 정리 (재시작 잔재) cartId={}", cartId);
+				return;
+			}
 			log.info("취소할 진행 중 이동이 없습니다. cartId={} (무시)", cartId);
 			return;
 		}
@@ -167,6 +181,68 @@ public class NavigationService {
 		publishCommand(new MoveCommand(active.navigationId(), "CANCEL", active.zoneId(), null, null));
 		publishNavigationEvent(cartId, active.navigationId(), "CANCELLED", active.zoneId(), null);
 		log.info("이동 취소 cartId={}, navigationId={}", cartId, active.navigationId());
+	}
+
+	/**
+	 * 카트(EM SLAM Nav)의 주행 결과(status/nav-result) 반영 — ROS2 /cart/nav_status 7종.
+	 *
+	 * NAVIGATING은 진행 중 세션에 STARTED를 중계하고, SUCCEEDED/CANCELED/ABORTED/REJECTED/
+	 * NAV2_UNAVAILABLE은 세션을 종료한다. IDLE은 노드 기동 신호라 세션과 무관 — 무시.
+	 * 세션이 없어도(BE 재시작·REST 취소 선행) DB의 NAVIGATING 잔재는 정리한다.
+	 */
+	@Transactional
+	public void applyCartNavResult(Long cartId, String navResult) {
+		switch (navResult) {
+			case "IDLE" -> {
+				// 노드 기동 직후의 대기 신호 — 이동 세션과 무관하다
+			}
+			case "NAVIGATING" -> {
+				ActiveNavigation active = activeByCartId.get(cartId);
+				if (active == null) {
+					log.warn("진행 중 세션이 없는 NAVIGATING 수신 (무시) cartId={}", cartId);
+					return;
+				}
+				publishNavigationEvent(cartId, active.navigationId(), "STARTED", active.zoneId(), null);
+				log.info("카트 주행 시작 cartId={}, navigationId={}", cartId, active.navigationId());
+			}
+			case "SUCCEEDED" -> completeFromCart(cartId, "ARRIVED", null);
+			case "CANCELED" -> completeFromCart(cartId, "CANCELLED", null);
+			case "ABORTED" -> completeFromCart(cartId, "FAILED", "경로를 찾지 못해 주행을 포기했습니다");
+			case "REJECTED" -> completeFromCart(cartId, "FAILED", "카트가 이동 명령을 거부했습니다");
+			case "NAV2_UNAVAILABLE" ->
+				completeFromCart(cartId, "FAILED", "카트 주행 시스템이 꺼져 있습니다");
+			default -> log.warn("알 수 없는 주행 결과 (무시) cartId={}, navResult={}", cartId, navResult);
+		}
+	}
+
+	/**
+	 * 주행 종료 처리 — 카트를 대기 상태로 되돌리고, 세션이 있으면 종료 이벤트를 FE에 알린다.
+	 * 세션이 없으면(REST 취소가 먼저 정리했거나 BE 재시작) DB 상태 정리만 하고 조용히 끝낸다 —
+	 * REST 취소 직후 카트가 CANCELED를 확인 응답하는 정상 흐름에서 이벤트가 중복되지 않게.
+	 */
+	private void completeFromCart(Long cartId, String status, String failReason) {
+		Cart cart = cartRepository.findById(cartId)
+			.orElseThrow(() -> new ResourceNotFoundException("카트", cartId));
+		ActiveNavigation active = activeByCartId.remove(cartId);
+		if (cart.getOperationStatus() == CartOperationStatus.NAVIGATING) {
+			cart.updateStatus(
+				cart.getConnectionStatus(),
+				CartOperationStatus.IDLE,
+				cart.getLastCommunicationAt()
+			);
+		}
+		if (active == null) {
+			log.info("세션 없는 주행 종료 수신 — DB 상태만 정리 cartId={}, status={}", cartId, status);
+			return;
+		}
+		publishNavigationEvent(cartId, active.navigationId(), status, active.zoneId(), failReason);
+		log.info(
+			"카트 주행 종료 cartId={}, navigationId={}, status={}, failReason={}",
+			cartId,
+			active.navigationId(),
+			status,
+			failReason
+		);
 	}
 
 	private void publishCommand(MoveCommand command) {

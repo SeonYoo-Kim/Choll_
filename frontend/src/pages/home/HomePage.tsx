@@ -1,10 +1,13 @@
 import { ShoppingCart } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
+import { useCartConnectionStore } from '@/features/cart-control/model/cartConnectionStore';
 import { useCartControlStore } from '@/features/cart-control/model/cartControlStore';
 import { CartControlCard } from '@/features/cart-control/ui/CartControlCard';
 import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
-import { ZONE_NAMES, zoneLabel } from '@/features/cart-map/model/zones';
+import { zoneLabel } from '@/features/cart-map/model/zones';
+import { useZoneName, zoneIdOf } from '@/features/cart-map/model/zoneStore';
+import { isSlotForZone } from '@/features/slot-board/model/slotTargeting';
 import { TaskProgressCard } from '@/features/sorting-task/ui/TaskProgressCard';
 import { useListSlots } from '@/shared/api/generated/slots/slots';
 import { DEMO_CART_ID } from '@/shared/config/cart';
@@ -16,6 +19,9 @@ import styles from './HomePage.module.scss';
  * 사서를 따라가는 중이면 좌표가 움직이는지와 무관하게 추종으로 표시한다.
  */
 const CART_BADGE = {
+  // 연결이 끊기면 나머지는 다 옛날 정보라 가장 먼저 알린다.
+  // CartOfflineModal은 닫으면 사라지므로, 끊긴 동안 남아 있는 표시는 이 배지뿐이다.
+  offline: { label: '카트와 연결이 끊겼어요', tone: styles.offline },
   following: { label: '카트가 따라오는 중', tone: styles.on },
   moving: { label: '카트가 이동 중이에요', tone: styles.moving },
   idle: { label: '카트가 잠시 멈췄어요', tone: styles.off },
@@ -25,8 +31,10 @@ const CART_BADGE = {
 export function HomePage() {
   const navigate = useNavigate();
   const runState = useCartControlStore((state) => state.runState);
+  const online = useCartConnectionStore((state) => state.online);
   // 지도 좌표는 홈에서 쓰지 않으므로, 좌표 갱신이 홈 전체 리렌더로 번지지 않게 필요한 값만 고른다
   const cartZone = useCartMapStore((state) => state.cartZone);
+  const zoneName = useZoneName(cartZone);
   const isMoving = useCartMapStore((state) => state.isMoving);
   const cartStatus = useCartMapStore((state) => state.cartStatus);
   const { data: slots } = useListSlots(DEMO_CART_ID);
@@ -34,13 +42,13 @@ export function HomePage() {
   const following = runState === 'FOLLOWING';
   // 이동 명령 세션(isMoving) 또는 위치 변화로 감지한 움직임(cartStatus)
   const cartActive = isMoving || cartStatus === 'MOVING';
-  const badge = CART_BADGE[following ? 'following' : cartActive ? 'moving' : 'idle'];
+  const badge =
+    CART_BADGE[!online ? 'offline' : following ? 'following' : cartActive ? 'moving' : 'idle'];
   // 이동 중(구역 밖)이면 null — 구역 표시 대신 이동 중 문구를 쓴다
   const currentArea = cartZone === null ? null : zoneLabel(cartZone);
-  const areaBookCount =
-    currentArea === null
-      ? 0
-      : (slots?.filter((slot) => slot.book?.zoneName === currentArea).length ?? 0);
+  // 구역 이름이 아니라 구역 id로 맞춘다 (slotTargeting 참고)
+  const currentZoneId = cartZone === null ? null : zoneIdOf(cartZone);
+  const areaBookCount = slots?.filter((slot) => isSlotForZone(slot, currentZoneId)).length ?? 0;
 
   return (
     <>
@@ -73,7 +81,7 @@ export function HomePage() {
                 ) : (
                   <>
                     {currentArea}
-                    <span className={styles.heroZoneName}>{ZONE_NAMES[cartZone]}</span>
+                    <span className={styles.heroZoneName}>{zoneName}</span>
                   </>
                 )}
               </h2>

@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 
 import { useCartMapStore } from '@/features/cart-map/model/cartMapStore';
 import { zoneLabel } from '@/features/cart-map/model/zones';
+import { zoneIdOf } from '@/features/cart-map/model/zoneStore';
+import { isSlotForZone } from '@/features/slot-board/model/slotTargeting';
 import { SlotDetailModal } from '@/features/slot-board/ui/SlotDetailModal';
 import { SlotTile } from '@/features/slot-board/ui/SlotTile';
 import { SlotStatus } from '@/shared/api/generated/model';
@@ -10,7 +12,7 @@ import { DEMO_CART_ID } from '@/shared/config/cart';
 
 import styles from './SlotsPage.module.scss';
 
-type SlotFilter = 'all' | 'book' | 'empty' | 'error' | 'currentArea';
+type SlotFilter = 'all' | 'book' | 'empty' | 'currentArea';
 
 /** 슬롯 관리 — 12개 슬롯 보드 + 상태 필터 + 슬롯 상세. */
 export function SlotsPage() {
@@ -24,6 +26,7 @@ export function SlotsPage() {
   // 선택 슬롯은 번호로만 기억하고 내용은 항상 최신 목록에서 찾는다 — WS 갱신이 모달에도 반영되게
   const selected = allSlots.find((s) => s.slotNumber === selectedSlotNumber) ?? null;
   const currentArea = cartZone === null ? null : zoneLabel(cartZone);
+  const currentZoneId = cartZone === null ? null : zoneIdOf(cartZone);
   // 구역을 벗어나면 현재 구역 필터가 성립하지 않으므로 전체로 간주한다
   const effectiveFilter: SlotFilter =
     filter === 'currentArea' && currentArea === null ? 'all' : filter;
@@ -33,7 +36,6 @@ export function SlotsPage() {
       all: allSlots.length,
       book: allSlots.filter((s) => s.status === SlotStatus.OCCUPIED).length,
       empty: allSlots.filter((s) => s.status === SlotStatus.EMPTY).length,
-      error: allSlots.filter((s) => s.status === SlotStatus.RECOGNITION_FAILED).length,
     }),
     [allSlots],
   );
@@ -44,23 +46,21 @@ export function SlotsPage() {
         return allSlots.filter((s) => s.status === SlotStatus.OCCUPIED);
       case 'empty':
         return allSlots.filter((s) => s.status === SlotStatus.EMPTY);
-      case 'error':
-        return allSlots.filter((s) => s.status === SlotStatus.RECOGNITION_FAILED);
       case 'currentArea':
-        // currentArea가 null이면 zoneName이 없는 책들이 걸리므로 비교하지 않는다
-        return currentArea === null
+        // 구역 밖이면 이 필터가 성립하지 않는다(위 effectiveFilter에서 이미 걸러지지만 방어).
+        // 구역 이름이 아니라 구역 id로 맞춘다 (slotTargeting 참고)
+        return currentZoneId === null
           ? allSlots
-          : allSlots.filter((s) => s.book?.zoneName === currentArea);
+          : allSlots.filter((s) => isSlotForZone(s, currentZoneId));
       default:
         return allSlots;
     }
-  }, [allSlots, effectiveFilter, currentArea]);
+  }, [allSlots, effectiveFilter, currentZoneId]);
 
   const filters: { id: SlotFilter; label: string }[] = [
     { id: 'all', label: `전체 ${counts.all}` },
     { id: 'book', label: `책 있음 ${counts.book}` },
     { id: 'empty', label: `비어 있음 ${counts.empty}` },
-    { id: 'error', label: `인식 실패 ${counts.error}` },
     // 구역 밖에서는 현재 구역 필터가 의미 없으므로 칩을 감춘다
     ...(currentArea === null ? [] : [{ id: 'currentArea' as const, label: currentArea }]),
   ];
