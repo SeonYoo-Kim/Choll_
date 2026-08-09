@@ -65,6 +65,8 @@ class MqttBridge(Node):
         self._cmd_queue: queue.Queue[dict] = queue.Queue()
         self._last_position_pub_sec: float | None = None
         self._last_nav_status: str | None = None
+        # MQTT 접속 전에 도착한 래치 상태를 담아 두는 자리 (접속 후 타이머가 비운다)
+        self._pending_nav_status: str | None = None
 
         self._target_pose_pub = self.create_publisher(
             PoseStamped, str(self.get_parameter("target_pose_topic").value), 10
@@ -148,7 +150,10 @@ class MqttBridge(Node):
     # ── ROS 측 ────────────────────────────────────────────────────────
 
     def _drain_cmd_queue(self) -> None:
-        """큐에 쌓인 MQTT 명령을 ROS 토픽으로 발행한다."""
+        """큐에 쌓인 MQTT 명령을 ROS 토픽으로 발행하고, 보류 상태를 함께 비운다."""
+        # 접속이 늦어 보류된 주행 상태가 있으면 여기서 내보낸다. paho 콜백 스레드가
+        # 아니라 ROS 타이머에서 처리해 발행 지점을 한 곳으로 모은다.
+        self._flush_pending_nav_status()
         while True:
             try:
                 cmd = self._cmd_queue.get_nowait()
@@ -209,28 +214,43 @@ class MqttBridge(Node):
         위치와 달리 **상태 전이 이벤트**라 스로틀하지 않고 변화 시에만 보낸다.
         QoS1인 이유는 유실되면 BE의 이동 세션이 끝나지 않아 FE에서 카트가
         영원히 "이동 중"으로 남기 때문이다.
+
+        MQTT 미접속이면 버리지 않고 **보류**했다가 접속 후 타이머가 보낸다
+        (`_flush_pending_nav_status`). 그 이유는 이 토픽이 **래치**라서다 —
+        노드 기동 시 한 번 오고, 이후에는 상태가 바뀔 때만 온다. 그 한 번을
+        놓치면 다음 전이까지 BE가 현재 상태를 영영 모른다.
+        (2026-08-10 실기에서 실제로 발생: 구독이 MQTT 접속보다 10ms 빨랐다)
         """
         status = msg.data.strip().upper()
         if status == self._last_nav_status:
             return
 
-        payload = build_nav_result_payload(status)
-        if payload is None:
+        if build_nav_result_payload(status) is None:
             self.get_logger().warning(
                 f"계약 밖 주행 상태라 발행하지 않음: {msg.data!r} "
                 "(BE는 모르는 값을 조용히 버려 이동 세션이 안 끝난다)"
             )
             return
 
+        self._pending_nav_status = status
+        self._flush_pending_nav_status()
+
+    def _flush_pending_nav_status(self) -> None:
+        """보류 중인 주행 상태를 MQTT 접속이 살아 있을 때 발행한다."""
+        status = self._pending_nav_status
+        if status is None:
+            return
         if not self._mqtt.is_connected():
-            self.get_logger().warning(
-                f"MQTT 미접속 — 주행 상태 {status} 유실. "
-                "재접속 후 다음 전이부터 반영된다"
-            )
+            return
+
+        payload = build_nav_result_payload(status)
+        if payload is None:  # 보류 시점에 이미 검증했으므로 도달하지 않는다
+            self._pending_nav_status = None
             return
 
         self._mqtt.publish(self._nav_result_topic, payload, qos=1)
         self._last_nav_status = status
+        self._pending_nav_status = None
         self.get_logger().info(f"/cart/nav_status {status} → {self._nav_result_topic}")
 
     def shutdown_mqtt(self) -> None:
