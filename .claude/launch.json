@@ -11,6 +11,15 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--dir", "frontend", "dev", "--port", "8081", "--strictPort"],
       "port": 8081
+    },
+    {
+      "name": "frontend-dev-msw",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-Command",
+        "$env:VITE_ENABLE_MSW='true'; pnpm --dir frontend dev --port 8082 --strictPort"
+      ],
+      "port": 8082
     }
   ]
 }

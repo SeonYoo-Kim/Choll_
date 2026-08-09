@@ -9,3 +9,12 @@ export const DEMO_CART_ID = 1;
  * 리더를 더 달면 이 값만 올리면 된다.
  */
 export const PHYSICAL_SLOT_COUNT = 5;
+
+/**
+ * 만적 알림을 띄우는 적재 권수 — 실물 슬롯 중 이 개수 이상 차면 "카트 가득 참"으로 본다.
+ *
+ * 실물 슬롯 수(5)보다 1 낮게 둔 이유(2026-08-10): 마지막 한 칸까지 채우고 나서야 알리면
+ * 사서가 정리하러 가는 동안 카트에 책을 얹을 자리가 없다. 리더 5개가 전부 차기 전에
+ * 미리 알리는 운영 임계값이므로, PHYSICAL_SLOT_COUNT와 달리 하드웨어 구성이 아니다.
+ */
+export const CART_FULL_THRESHOLD = 4;

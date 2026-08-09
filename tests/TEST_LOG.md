@@ -15,6 +15,50 @@
 
 ---
 
+## 2026-08-10 — ✅ FE: 만적 팝업 임계값 5→4 (Claude)
+
+- **배경**: RFID 5개(실물 슬롯 전부)가 찍혀야 만적 팝업이 떴는데, 4개가 찍히면 미리 뜨도록 요청
+- **변경**:
+  - `shared/config/cart.ts`: `CART_FULL_THRESHOLD = 4` 신규 (실물 슬롯 수 5는 그대로 —
+    슬롯 필터링 용도라 분리)
+  - `slotCapacity.isCartFull`: "실물 슬롯 전부 비어있지 않음" → "찬 슬롯 ≥ 임계값" 카운트로 변경.
+    부분 응답 가드는 제거 — 카운트 방식은 실제보다 적게 셀 수만 있어 거짓 경고가 없음
+  - `SlotFullModal`: 목록에 찬 슬롯만 표시(빈 칸이 "인식 중"으로 나오던 문제 예방),
+    문구 "슬롯이 모두 찼어요/5개 가득" → "카트가 가득 찼어요/N개 담김"
+- **환경**: Windows 11, pnpm + Vitest 4.1.10, 커밋 b7df980 (develop)
+- **명령·결과**: `pnpm vitest run src/features/slot-board` → **7 files, 35 tests, 0 failures** /
+  `pnpm eslint src/features/slot-board src/shared/config/cart.ts` → 0 problems
+
+<details>
+<summary>pnpm vitest run src/features/slot-board</summary>
+
+```
+ RUN  v4.1.10 C:/SSAFY/workspace/Choll/frontend
+
+ Test Files  7 passed (7)
+      Tests  35 passed (35)
+   Start at  08:08:04
+   Duration  31.06s (transform 7.85s, setup 36.87s, import 25.51s, tests 818ms, environment 119.94s)
+```
+
+</details>
+
+## 2026-08-09 — ✅ FE: 구역 진입 즉시 도착 팝업 (Claude)
+
+- **배경**: 도착 모달이 이동 명령의 ARRIVED 이벤트에만 묶여 있어, 추종·수동 위치 발행처럼
+  명령 없이 위치만 움직여 구역에 들어가는 경우(=시연 핵심 시나리오) 팝업이 안 떴다
+- **변경** (`frontend/fix/arrival-on-zone-entry`):
+  - `cartMapStore.announcedZone` 신규 — 좌표가 구역 안으로 들어오는 **진입 순간** 모달을 열고,
+    그 구역을 벗어나 재진입할 때까지 다시 열지 않는다 (경계 흔들림 소음 방지)
+  - 억제 규칙: 첫 로드(REST 복구)는 진입 아님 / 테이블행 이동 중 경유 구역은 알림 없이
+    기록만 (정차점이 구역 안이라 지나는 길에 뜨면 안 됨) / ARRIVED 도착도 announcedZone 기록
+- **manual_position.py 개선**: 직선 활주가 중간 구역을 관통해 엉뚱한 진입 팝업을 만들던 것
+  → 상단 통로(y=117px) 경유 경로로 변경 (MSW 시뮬레이터와 같은 동선)
+- **명령·결과**: `pnpm test --run` → **20 files, 143 tests, 0 failures** (신규 5) / `tsc` 0 / `eslint` 0
+- **브라우저 검증** (실 BE + 수동 발행기): start(구역 밖) → z3 통로 경유 활주 →
+  **Z3 경계를 넘는 순간** "3구역에 도착했어요!" 1회만 표시 (Z2 관통 팝업 없음),
+  이동 계속 중에도 모달 유지, 구역 밖 이탈 후 재진입 시 재표시
+
 ## 2026-08-09 — ✅ BE: 위치 yaw 수신·변환·중계 (Claude)
 
 - **배경**: EM ROS2_API.md(2026-08-09 실측)의 🔴 지적 — EM은 `status/position`에 yaw(라디안,
