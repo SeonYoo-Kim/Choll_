@@ -63,6 +63,7 @@ public class MqttPositionMessageHandler {
 				cartId,
 				payload.x(),
 				payload.y(),
+				payload.yaw(),
 				payload.timestamp() == null ? Instant.now() : payload.timestamp()
 			));
 		} catch (JacksonException | IllegalArgumentException exception) {
@@ -75,9 +76,11 @@ public class MqttPositionMessageHandler {
 		}
 	}
 
+	// yaw: 라디안(CCW+), EM 2026-08-09 실기 확정 페이로드. 구버전(yaw 없음)도 계속 수용
 	private record PositionPayload(
 		BigDecimal x,
 		BigDecimal y,
+		BigDecimal yaw,
 		Instant timestamp
 	) {
 	}

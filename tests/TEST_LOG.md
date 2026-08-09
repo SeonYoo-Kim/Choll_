@@ -15,6 +15,24 @@
 
 ---
 
+## 2026-08-09 — ✅ BE: 위치 yaw 수신·변환·중계 (Claude)
+
+- **배경**: EM ROS2_API.md(2026-08-09 실측)의 🔴 지적 — EM은 `status/position`에 yaw(라디안,
+  CCW+)를 실기 발행 중인데 BE `PositionPayload`에 필드가 없어 버려지고, FE에는
+  `TEMPORARY_YAW=0`이 나가 마커가 항상 오른쪽을 봤다
+- **변경** (`backend/fix/position-yaw`):
+  - `PositionPayload`·`PositionSample`에 `yaw` 추가 (없으면 null — 구버전 페이로드 호환)
+  - `SlamCoordinateConverter.toImageYaw`: **방향도 좌표와 같은 변환을 적용** — 방향 벡터
+    (cos,sin)에 변환 선형부를 곱해 재계산. 아핀 지도는 회전·반전 반영, 기본식 지도는 부호
+    반전(-yaw, 세로반전), pixels 모드는 원값 중계
+  - `TEMPORARY_YAW` 제거, WS CART_POSITION_UPDATE에 변환된 yaw 실림 (FE는 수정 불요 —
+    이미 yaw로 마커 회전)
+- **명령·결과**: `gradlew.bat test` → 1차 **97개 중 96개 통과** (실패 1 =
+  `contextLoads`, 로컬 MySQL80 서비스 중지가 원인 — 변경과 무관).
+  MySQL80 기동 후 재실행 → **contextLoads 포함 전부 통과 (97/97)**
+- **신규 테스트**: EM 실측 페이로드(yaw 포함) 파싱 / 구버전(yaw 없음) 호환 / pixels 원값 중계 /
+  meters 세로반전(-0.5) / 아핀 회전 방향(+90°) / yaw 미수신 시 0
+
 ## 2026-08-08 00:30 — ✅ E2E: 실좌표(아핀 초기값)로 전체 사슬 재검증 (Claude)
 
 - **배경**: 사람이 제공한 이미지 3장(RViz 스크린샷 원본 2732×1799 / 좌우반전본 906×645 /
