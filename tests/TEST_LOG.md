@@ -573,6 +573,98 @@ RESULT: PASS
 
 ---
 
+## 2026-08-09 19:50 — ✅ `status/nav-result` 상행 중계 구현·실브로커 E2E 통과 / 🔴 실기 미기동으로 정지 캡처 보류 (Claude, 노트북)
+
+- **환경**: 노트북 Ubuntu 22.04 + ROS2 Humble, `~/choll/embeded`. 브랜치 `em/feature/motor-Lidar-integrated` @ `9e5ee56`.
+- **범위**: 노트북 단독 가능한 것만. 카트 실기는 미기동 상태였다.
+
+### ① 🔴 팀원 요청(정지 중 `status/position` 30초 캡처) — **불가, 카트 offline**
+
+실브로커 `your-server.example.com:1883`에 붙어 `status/#` + `cmd/#`를 30초 구독:
+
+```
+[connect] rc=0 (성공)
+[subscribe] status/# (QoS1)
+19:46:48.853 [  1.42s] status/cart {"status": "offline"}     <- retained
+============================================================
+총 수신 1건 / 30초
+  status/cart                     1건   0.03 Hz
+```
+
+`status/position` **0건**. 젯슨 스택이 안 떠 있어서다. 브로커·인증은 정상.
+캡처 스크립트는 준비돼 있으므로 실기 기동 후 노트북에서 그대로 재실행하면 된다.
+
+⚠️ `status/cart {"status":"offline"}`는 **리테인 잔재**다. `embedded/CLAUDE.md` 표에도
+"하트비트 미구현"으로 적혀 있는데 브로커에 값이 남아 있어 오해하기 쉽다.
+
+### ② ✅ `status/nav-result` 계약 확인 — BE에 이미 수신부가 있었다
+
+`status/nav`를 신설 제안 중이었으나, BE 소스에 **이미 구현돼 있었다**:
+
+| BE 파일 | 내용 |
+|---|---|
+| `MqttProperties.java:20` | `navResultTopic = "status/nav-result"` |
+| `MqttNavResultMessageHandler` | `{"status":...}` 우선, 아니면 페이로드 전체를 상태로 파싱 |
+| `NavigationService.applyCartNavResult` | switch 7종 |
+
+받는 7종(`IDLE`/`NAVIGATING`/`SUCCEEDED`/`ABORTED`/`CANCELED`/`REJECTED`/
+`NAV2_UNAVAILABLE`)이 ROS `/cart/nav_status` 7종과 **정확히 일치** → 신규 계약 협의
+없이 **중계만** 붙이면 됐다. 제안했던 `requestId` 필드는 불필요.
+
+🔴 BE는 `default -> log.warn` 으로 **모르는 상태를 조용히 버린다.** 그러면 이동 세션이
+끝나지 않아 FE에서 카트가 영원히 "이동 중"으로 남는다. 그래서 브릿지 쪽에서
+계약 밖 문자열을 걸러 내고 경고를 남기도록 했다.
+
+### ③ ✅ 구현 — `/cart/nav_status` → `status/nav-result`
+
+- `bridge_logic.build_nav_result_payload()` (순수 함수) + `NAV_RESULT_STATES`
+- `mqtt_bridge._on_nav_status()` — **상태 전이 시에만** 발행(위치처럼 스로틀하지 않음)
+- 구독 QoS를 `TRANSIENT_LOCAL`로 맞춤 — `goal_forwarder`가 래치 발행이라
+  **브릿지가 늦게 떠도 현재 상태를 즉시 받아** BE와 동기화된다
+- 발행 QoS1 — 유실되면 BE 세션이 안 끝나므로 위치(QoS0)와 다르게 간다
+
+### ④ ✅ 단위 테스트 27개 통과 (신규 6개)
+
+```
+$ PYTHONPATH=. python3 -m pytest test/ -q
+...........................                                              [100%]
+27 passed in 0.03s
+$ ruff check --output-format=concise embedded/Lidar/src/choll_mqtt_bridge/
+All checks passed!
+```
+
+신규 테스트에 **BE switch case 7종과의 집합 일치**를 강제하는 항목을 넣었다
+(`test_nav_result_states_match_backend_contract`). 한쪽만 바뀌면 여기서 깨진다.
+
+### ⑤ ✅ 실브로커 E2E — 테스트 토픽으로 BE 영향 없이 검증
+
+BE 상태를 건드리지 않으려고 `nav_result_topic:=status/nav-result-emtest`로 우회했다.
+
+```
+[ROS 발행] /cart/nav_status = IDLE
+  [MQTT 수신] status/nav-result-emtest {"status":"IDLE"}
+[ROS 발행] /cart/nav_status = NAVIGATING
+  [MQTT 수신] status/nav-result-emtest {"status":"NAVIGATING"}
+[ROS 발행] /cart/nav_status = NAVIGATING          <- 중복, 발행 안 됨 ✅
+[ROS 발행] /cart/nav_status = SUCCEEDED
+  [MQTT 수신] status/nav-result-emtest {"status":"SUCCEEDED"}
+[ROS 발행] /cart/nav_status = PAUSED              <- 계약 밖, 걸러짐 ✅
+[ROS 발행] /cart/nav_status = CANCELED
+  [MQTT 수신] status/nav-result-emtest {"status":"CANCELED"}
+
+ROS 발행 6건 -> MQTT 수신 4건
+RESULT: PASS
+```
+
+### 미검증 (젯슨 실기 필요)
+
+1. 실제 Nav2 주행에서 `/cart/nav_status` 전이가 그대로 상행되는지
+2. BE가 `status/nav-result`를 받아 FE `NAVIGATION_STATUS_UPDATED`까지 흘리는지
+   (⚠️ `mqtt.enabled`·`position-unit` 블로커가 먼저 풀려야 함)
+3. 정지 중 `status/position` 30초 캡처 (팀원 요청분)
+
+---
+
 ## 2026-08-09 03:30 — ✅ EM→BE 위치 발행 배선 검증 + ZUPT 실측 / 🔴 BE 단위 설정이 블로커 (relu 실기 / Claude 실행·기록)
 
 Nav2 P2P 가 막혀 있어, 그보다 낮은 층의 MVP —**카트가 자기 위치를 BE 로 계속 보내는 것**—
