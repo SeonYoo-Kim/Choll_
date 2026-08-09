@@ -147,13 +147,33 @@ controller_server:
         [
           "RotateToGoal",
           "Oscillation",
-          "BaseObstacle",
+          "ObstacleFootprint",
           "GoalAlign",
           "PathAlign",
           "PathDist",
           "GoalDist",
         ]
-      BaseObstacle.scale: 0.02
+      # 🔴 2026-08-09 BaseObstacle -> ObstacleFootprint 교체.
+      #    BaseObstacleCritic 은 Humble 헤더 원문대로 "can only be used to figure out
+      #    if a **circular** robot is in collision" — 궤적 각 pose 의 **중심 셀 1개**만
+      #    본다. 우리 카트는 원형도 아니고 base_link 가 차체 중심도 아닌
+      #    비대칭 직사각형(앞 +0.10 / 뒤 -0.50)이라 중심 셀이 깨끗해도 후방 모서리
+      #    (외접반지름 0.546 m)가 벽 안에 들어가 있을 수 있다.
+      #    ObstacleFootprintCritic 은 getOrientedFootprint() 로 자세에 맞춰 회전시킨
+      #    실제 폴리곤 **외곽선을 래스터라이즈**해 검사한다.
+      #    ⚠️ scale 은 A/B 최소 변경 원칙으로 기존 BaseObstacle 과 동일한 0.02 로 시작.
+      #    (ObstacleFootprintCritic::getScale() 이 resolution 을 한 번 더 곱하므로
+      #     같은 0.02 라도 실효 가중치는 BaseObstacle 과 다르다 — 실주행 후 재조정.)
+      #
+      # 2026-08-09 0.02 -> 0.20 A/B 시험 완료 — **효과 없어 0.02 로 복원.**
+      #    두 주행 모두 SUCCEEDED·충돌 0·rejection 0 이었고 여유는 0.051 -> 0.059 m.
+      #    다만 두 시험의 **경로가 달라 통제된 비교가 아니며** 8 mm 는 개선의 증거가
+      #    못 된다. 기전상으로도 무력하다: `getScale()` 이 resolution(0.05)을 곱해
+      #    실효 가중치가 0.01 이라 PathAlign/PathDist(32.0) 의 3000분의 1이다.
+      #    rejection 이 두 번 다 0 이었다는 것은 이 critic 이 연속적인 척력이 아니라
+      #    **lethal 침범 시의 거부권으로만** 작동한다는 뜻이다 — scale 을 올려 여유를
+      #    벌려면 path 추종 항과 겨룰 명목 수백대가 필요해 현실적이지 않다.
+      ObstacleFootprint.scale: 0.02
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.325
       GoalAlign.scale: 24.0
@@ -186,9 +206,35 @@ local_costmap:
       #                                     본체 옆면에 붙어 바깥으로 달린 구조)
       #    바퀴 바깥 = 0.19 + 0.03 = 0.22  → 카트 최대 폭 0.44 m
       # 이 계산으로 "wheel_separation 0.38 vs 본체 폭 0.32" 모순은 해소됐다.
-      footprint: "[ [0.31, 0.22], [0.31, -0.22], [-0.31, -0.22], [-0.31, 0.22] ]"
-      # 내접반지름 = 0.22 m (이전 0.32). 카트 중심이 장애물에서 이만큼 떨어져야 한다.
-      footprint_padding: 0.0
+      #
+      # 🔴 2026-08-09 실측 정정 — **원점 위치가 틀려 있었다.**
+      #    이전 값 [±0.31, ±0.22] 는 전후 길이(0.62)는 대략 맞았지만 base_link 를
+      #    차체 기하 중심으로 **가정**해 앞뒤를 대칭으로 잡았다. 실제로는
+      #    **전륜 구동**이라 base_link(= 좌우 구동륜 차축 정중앙) 가 차체 앞쪽에
+      #    치우쳐 있다. 사용자 줄자 실측:
+      #        base_link -> 최전방  +0.10   (이전 가정 +0.31 -> 0.21 m 과대)
+      #        base_link -> 최후방  -0.50   (이전 가정 -0.31 -> 0.19 m 과소)
+      #        base_link -> 좌/우   ±0.22   (변경 없음 — 바퀴 바깥면 기준)
+      #    즉 카트 몸통의 대부분은 base_link **뒤쪽**에 있다. 이전 footprint 는
+      #    존재하지 않는 전방 0.21 m 를 차지한다고 보고, 실재하는 후방 0.19 m 를
+      #    비어 있다고 봤다. 후진 시 후방 충돌 · 제자리 회전 시 후미 스윙 충돌이
+      #    설명된다.
+      footprint: "[ [0.10, 0.22], [0.10, -0.22], [-0.50, -0.22], [-0.50, 0.22] ]"
+      # 내접반지름 = 0.10 m (전방 한계, 이전 0.22). 원점이 앞쪽에 치우쳐 이 값이
+      # 작아졌다 — 중심 셀 판정만으로는 차체를 못 지킨다. ObstacleFootprint critic 필수.
+      # 외접반지름 = sqrt(0.50^2 + 0.22^2) = 0.546 m (후방 모서리).
+      #
+      # 🔴 2026-08-09 0.0 -> 0.05 (A/B 시험). 벽 여유를 **비용으로 유도**하는 방법
+      #    (inflation_radius / cost_scaling_factor / ObstacleFootprint.scale)이 셋 다
+      #    실패했으므로, 이번엔 안전거리를 **기하로 명시**한다. padding 은 위 polygon 을
+      #    바깥으로 5 cm 부풀린 **가상 충돌 봉투**를 만들고 DWB/ObstacleFootprint 가
+      #    그것으로 충돌을 판정하게 한다 — 가상 봉투가 벽에 닿는 순간 실제 차체는
+      #    아직 5 cm 떨어져 있다.
+      #    ⚠️ 이 값은 **local 에만** 준다. global 은 실제 기하를 유지해야 도달 가능성이
+      #       줄지 않는다 (robot_radius 0.55 A/B 에서 확인된 교훈).
+      #    ⚠️ `/local_costmap/published_footprint` 는 이제 **padded** 폴리곤이다.
+      #       clearance 를 잴 때 그것을 실제 차체로 착각하면 안 된다.
+      footprint_padding: 0.05
       transform_tolerance: 0.5
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
@@ -212,7 +258,18 @@ local_costmap:
         # 크면 자유 셀이 하나도 남지 않아 GridBased 가 경로를 못 만든다 — 집 환경
         # (최대 여유 0.75 m) 에서 "failed to create plan with tolerance 0.50" 로 재현됨.
         # 내접반지름(0.22)보다는 커야 inflation 이 의미가 있으므로 0.25 로 둔다.
-        inflation_radius: 0.25
+        #
+        # 🔴 2026-08-09 0.25 -> 0.60. footprint 정정으로 기준이 바뀌었다.
+        #    내접 0.10 / **외접 0.546** (후방 모서리). 0.25 는 외접의 절반도 안 돼
+        #    차체의 가장 먼 부분이 포텐셜 필드 **밖**에 있었다 — 벽에서 0.26 m 만
+        #    벗어나면 cost 가 0 이라 경로가 벽에 붙을 이유도 떨어질 이유도 없었다.
+        #    0.60 은 외접 0.546 을 막 넘기는 값이다.
+        #    ⚠️ inflation_radius 는 "주행 금지 반경"이 아니다. `computeCost()` 상
+        #    내접(0.10) 이내만 253(INSCRIBED)이고 그 밖은 전부 252 이하의 **gradient**
+        #    라 통과 가능하다. 즉 이 값을 키워도 lethal 셀은 하나도 늘지 않는다
+        #    (위 08-08 주석의 "자유 셀이 사라진다" 는 내접반지름이 0.22 이던 시절의
+        #     이야기다 — 지금은 내접이 0.10 이라 같은 문제가 재현되지 않는다).
+        inflation_radius: 0.60
       always_send_full_costmap: True
 
 global_costmap:
@@ -223,8 +280,21 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: false
-      # local_costmap과 동일 값 유지 (근거는 local_costmap 쪽 주석)
-      footprint: "[ [0.31, 0.22], [0.31, -0.22], [-0.31, -0.22], [-0.31, 0.22] ]"
+      # local_costmap과 동일 값 유지 (근거는 local_costmap 쪽 주석).
+      # 🔴 2026-08-09 실측 정정: base_link 는 차체 중심이 아니라 **전륜 차축 중심**.
+      #    앞 +0.10 / 뒤 -0.50 (좌우 ±0.22 는 그대로). local 과 반드시 같아야 한다.
+      #
+      # 2026-08-09 A/B 시험 완료 — **보수적 원형(`robot_radius: 0.55`)은 채택하지 않았다.**
+      #    동기는 타당했다: NavFn 은 점으로 계획해 내접(0.10)만 보장하는데 차체는 어느
+      #    yaw 로도 외접 0.546 m 가 필요하다. 그래서 전역만 원형으로 두면 그 간극이
+      #    사라진다. 그러나 이 집 지도에서는 **너무 보수적이었다** (주행 없이
+      #    ComputePathToPose 로만 비교):
+      #        A 넓은 공간(실제로 SUCCEEDED 했던 경로) : polygon 성공 -> **원형 실패**
+      #        B 대표 free-space                      : 둘 다 성공 (중심여유 0.600 -> 0.605)
+      #        C 좁은 통로                            : polygon 성공 -> 원형 실패
+      #    실제로 완주한 경로마저 계획 불가가 되므로 되돌린다. 후방이 긴 비대칭 차체를
+      #    전역 단계에서 다루려면 원형 근사가 아니라 yaw 를 아는 플래너가 필요하다.
+      footprint: "[ [0.10, 0.22], [0.10, -0.22], [-0.50, -0.22], [-0.50, 0.22] ]"
       footprint_padding: 0.0
       resolution: 0.05             # slam_toolbox 지도 해상도와 1:1
       track_unknown_space: true
@@ -250,7 +320,11 @@ global_costmap:
         cost_scaling_factor: 3.0
         # 2026-08-08 실측으로 1.0 -> 0.30 (global 은 local 보다 약간 크게 두어
         # 경로가 벽에 붙지 않게 한다). 근거는 local inflation_layer 주석 참고.
-        inflation_radius: 0.30
+        # 🔴 2026-08-09 0.30 -> 0.60. 근거는 local inflation_layer 주석 참고
+        #    (외접반지름 0.546 을 넘기는 gradient 확보). local 과 같은 값으로 둔다 —
+        #    전역 경로와 지역 궤적이 서로 다른 포텐셜을 보면 DWB 가 전역 경로를
+        #    따라가려는 힘과 벽을 피하려는 힘이 어긋난다.
+        inflation_radius: 0.60
       always_send_full_costmap: True
 
 map_server:

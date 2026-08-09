@@ -6,6 +6,481 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-09 — ⚠️ wheel odom yaw 1.6~1.7배 과대추정 확인 / 구동륜 실측 0.42 m·스폰지 휠 기록 (relu 실측 / Claude 측정·기록)
+
+재부팅 후 localization 안정 상태에서 **눈대중 90° 제자리 회전 1회**로 각 odometry 계층의 yaw 변화량을
+비교했다. 결론: **회전 추정을 실제로 담당하는 경로(RF2O twist → EKF → AMCL)는 정상**이고,
+**wheel odom yaw만 크게 과대추정**된다. 단 wheel yaw는 EKF 입력에서 제외돼 있어 현재 영향은 없다.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion` @ `537b9b5`
+- **방식**: read-only 연속 로거(스크래치패드, 프로젝트 소스 미변경). 코드·파라미터 수정 없음, Nav2 Goal 미사용.
+
+### ① 하드웨어 실측 (사용자 줄자)
+
+| 항목 | 값 | 비고 |
+|---|---|---|
+| **구동륜 중심간 거리 (physical)** | **≈ 0.42 m** | differential-drive `wheel_separation` 에 해당하는 값 |
+| 후방 캐스터 간격 | ≈ 0.25 m | **wheel_separation 아님.** 운동학에 쓰지 말 것 |
+| 현재 yaml `wheel_separation_m` | 0.38 | 실측과 4 cm 차이 |
+| `wheel_radius_m` | 0.0587 | 이번 시험 범위 밖 |
+
+차체 폭 0.44 m(이전 항목 `left +0.22 / right -0.22`)와 구동륜 간격 0.42 m 는 서로 모순되지 않는다.
+
+**구동륜 상태 (오차 해석에 필수)**
+
+- 단단한 고무/우레탄이 아니라 **스폰지 계열 휠**
+- 모터축에 대해 완전한 1자(직각)로 고정돼 있지 않음 — 육안상 좌우 바퀴가 약간 변형
+- **바퀴 면이 차체 안쪽으로 말려 들어간 camber 유사 각도** 존재
+- 회전·하중 시 스폰지 특성상 추가 변형 가능
+
+### ② 90° 회전 시험 결과
+
+```
+              before      after      delta
+wheel:       + 45.43    +182.31    +136.88
+RF2O:        - 89.29    -  7.14    + 83.37   (±20, 정지 드리프트 오염)
+filtered:    + 12.73    + 96.37    + 83.64
+AMCL pose:   -171.70    - 84.63    + 87.07   (t=208.4s 이후 갱신 정지 = stale)
+map->base:   -174.35    - 95.11    + 79.24
+```
+
+- **filtered ↔ map 차이 4.4°** = 회전 중 AMCL 이 map→odom 에 넣은 −4.5° 보정과 일치. 정상.
+- `/amcl_pose` +87.07° 는 오차가 아니라 **stale** — 정지 후 motion 이 없어 갱신이 멈춰 마지막 ~11° 미반영.
+  **map 프레임의 정답은 `/amcl_pose` 가 아니라 `map->base_link` TF.**
+- **wheel +136.88° = filtered 대비 1.637배, map 대비 1.727배.**
+- 회전이 단조롭지 않았다(t≈202s 오버슈트 → t≈206s −44° 복귀 → 재진행). **5개 소스 전부 동일 스윙**이므로
+  센서 결함이 아니라 실제 차체 움직임. 순 변화량만 쓰므로 결론에 영향 없음.
+
+### ③ separation 만으로는 설명되지 않음
+
+`0.38 → 0.42` 비례 보정 시 예상 wheel yaw:
+
+```
+136.88 * 0.38 / 0.42 ≈ 123.8 deg    (실제 localization 79~84 deg 대비 여전히 ~1.5배)
+```
+
+→ **"wheel_separation 이 0.38 이라서 생긴 오차"로 결론 내리면 안 된다.** 기하 보정은 전체 오차의
+일부만 설명한다.
+
+역산 effective separation (분모는 odom 계산이 실제로 나눈 값 = 설정값 0.38):
+
+```
+L_eff = 0.38 * 1.637 ≈ 0.622 m   (filtered 기준)
+L_eff = 0.38 * 1.727 ≈ 0.656 m   (map 기준)
+```
+
+⚠️ **0.62~0.66 m 를 물리 바퀴 간격으로 해석하지 말 것.** 슬립·스크럽·바퀴 변형까지 흡수한
+**effective calibration parameter 후보**일 뿐이다. 물리 실측 0.42 m 대비 잔여 배율 ≈ 1.48~1.56 은
+기하가 아닌 접지 거동에서 온다.
+
+### ④ 원인 후보
+
+| 후보 | 근거 |
+|---|---|
+| separation 설정 오차 (0.38 vs 0.42) | 확정된 기여분이나 전체의 일부만 설명 |
+| **스폰지 휠 변형** | 하중·회전 시 접지면 변형 → effective rolling radius 변동 |
+| **wheel alignment / inward camber** | 제자리 회전에서 lateral scrub 유발, 실제 회전 중심 이동 |
+| slip / scrub | 제자리 회전은 스크럽이 최대인 조건 |
+| effective rolling radius 차이 | 좌우 비대칭이면 단일 separation 보정으로 못 잡음 |
+| ideal differential-drive 모델 불일치 | 위 요인들의 총합 |
+
+### ⑤ 영향도 — 현재 Nav2 는 영향 없음
+
+[`ekf.yaml`](../embedded/Lidar/src/choll_slam_bringup/config/ekf.yaml) 확인:
+
+- `odom1` (`/wheel/odom`) → **vx 하나만 `true`.** yaw·yaw-rate 전부 `false` → wheel yaw 오차 미전파
+- `odom0` (`/odom_rf2o_cov`) → vx·vy·**vyaw(twist)**. RF2O 의 **pose 가 아니라 rate** 를 사용
+- `odom2` (`/odom_zupt`) → 정지 중 zero-velocity 주입
+
+filtered 가 +83.6° 로 맞게 나온 것은 **RF2O 각속도 추정 자체는 정상**임을 뜻한다.
+
+**별건 — `/odom_rf2o` pose 정지 드리프트**: 정지 상태에서 yaw 가 계속 흐르고 **드리프트율이 일정하지도
+않다** (회전 전 −1.08 °/s, 회전 후 −0.383 °/s, 그 이전 +1.23 °/s — 부호까지 반전). 보정 불가라
+RF2O delta 는 신뢰할 수 없다. 다만 EKF 는 pose 를 안 쓰고 ZUPT 가 억제해 filtered 정지 드리프트는
+0.02~0.045 °/s 로 잡혀 있다. **`/odom_rf2o` 를 디버깅·시각화 기준으로 믿으면 안 된다.**
+
+### ⑥ 향후 calibration 절차 (이번엔 미수행)
+
+눈대중 90° 1회로 값을 확정하지 않는다. 별도 단계에서:
+
+1. 바닥에 기준선 표시
+2. 실제 **180° 또는 360°** 회전
+3. 같은 방향 3회 이상 + **반대 방향 3회 이상**
+4. 실제 회전각 vs wheel odom 회전각 비교
+
+```
+L_effective = L_config * (wheel_odom_delta / actual_delta)
+```
+
+> 분모에 넣는 기준값은 **odom 계산이 실제로 나눈 설정값**(현재 0.38)이다. 물리 실측 0.42 를 넣으면
+> 서로 다른 두 보정을 한 번에 섞게 된다.
+
+**CW/CCW 결과가 다르면 단일 separation 문제가 아니라 좌우 바퀴 비대칭·변형·슬립 문제로 판단한다.**
+스폰지 휠 + inward camber 상태를 고려하면 그럴 가능성이 낮지 않다.
+
+### ⑦ 미조치 (의도적)
+
+`wheel_separation_m` 을 0.42 로도, 0.62~0.66 으로도 **변경하지 않았다.** wheel radius·EKF config 도
+미변경. 현재 wheel yaw 가 fusion 에서 제외돼 navigation 영향이 없으므로 상태를 유지하고,
+정식 calibration 후에 한 번에 정정한다.
+
+<details>
+<summary>측정 원본 — 회전 구간 트레이스 (deg, unwrapped)</summary>
+
+```text
+t      wheel     rf2o   filtered   amcl    tf_map
+  180   +45.43   -83.09   +12.99  -171.70  -174.02
+  186   +45.43   -88.68   +12.77  -171.70  -174.25
+  188   +45.52   -89.29   +12.67  -171.70  -174.35   <- 회전 시작
+  190   +46.44   -92.02   +10.65  -171.70  -176.37
+  194  +108.97   -36.43   +68.23  -121.22  -117.30
+  198  +162.71    +9.71  +112.47   -83.12   -75.70
+  202  +172.28    +5.36  +110.29   -82.25   -79.99   <- 오버슈트
+  206  +127.83   -49.90   +53.48  -140.35  -138.10   <- 5개 소스 동시 복귀 = 실제 차체 움직임
+  210  +183.13    -4.92   +98.18   -84.63   -93.30   <- 정지
+  212  +182.31    -7.14   +97.27   -84.63   -94.21
+  216  +182.31   -12.11   +97.03   -84.63   -94.44
+  222  +182.31   -17.33   +96.80   -84.63   -94.67
+  230  +182.31   -25.39   +96.45   -84.63   -95.02
+  240  +182.31   -28.82   +96.30   -84.63   -95.18
+  250  +182.31   -27.20   +96.37   -84.63   -95.11
+  257  +182.31   -27.63   +96.37   -84.63   -95.11
+
+정지 중 드리프트 (deg/s), 최소자승:
+  wheel      pre=+0.000 post=-0.000
+  rf2o       pre=-1.080 post=-0.383      <- 율이 불안정, 부호 반전 이력 있음
+  filtered   pre=-0.045 post=-0.017
+  amcl       pre=-0.000 post=-0.000      (정지 시 갱신 없음)
+  tf_map     pre=-0.045 post=-0.017
+
+wheel_odometry 파라미터 실측값:
+  counts_per_wheel_rev = 68160.0
+  wheel_radius_m       = 0.0587
+  wheel_separation_m   = 0.38
+```
+
+</details>
+
+## 2026-08-09 — ✅ 차체 기하 3건 정정(footprint·라이다 extrinsic·scan_mask) / 🔴 map_home_v1~v3 폐기 대상 (relu 실측 / Claude 실행·기록)
+
+"Nav2 가 벽과 거리를 안 둔다 / 실제로 차체가 벽에 닿는다" 진단에서 **기하 가정 3개가 전부 틀려
+있었음**이 드러났다. 셋 다 같은 뿌리 — `base_link` 가 차체 기하 중심이라는 검증되지 않은 가정.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion` @ `537b9b5`
+- **실측(사용자 줄자)**: `base_link` = 좌우 구동륜 차축 정중앙 기준
+  front `+0.10` / rear `-0.50` / left `+0.22` / right `-0.22` (전후 0.60 x 좌우 0.44),
+  라이다 광학 중심 = 전방 `+0.05`. **전륜 구동이라 차축이 차체 앞쪽에 치우쳐 있다.**
+
+### ① 정정 내역
+
+| 대상 | 이전 | 수정 | 영향 |
+|---|---|---|---|
+| `nav2_params.yaml` footprint (local·global) | `[±0.31, ±0.22]` 대칭 | `[+0.10..-0.50, ±0.22]` | 존재하지 않는 전방 0.21 m 를 점유로, 실재하는 후방 0.19 m 를 자유로 오인하고 있었음 |
+| `nav2_params.yaml` DWB critic | `BaseObstacle` (scale 0.02) | `ObstacleFootprint` (scale 0.02) | BaseObstacle 은 Humble 헤더 원문상 "circular robot" 전용 — 중심 셀 1개만 검사 |
+| `lidar.launch.py` static TF x | `0.30` | `0.05` | 0.30 은 차체 최전방(+0.10)보다 0.20 m 앞 = 물리적으로 불가능 |
+| `scan_mask_node.py` 박스 | 원점 대칭 `±0.31 x ±0.16`, 공차 +15% | 비대칭 `x -0.55..+0.05, y ±0.22`, 여유 +0.03 m | 정면 0.357 m 까지 지우고 있었음 = **앞의 벽을 /scan 에서 삭제** |
+
+### ② 새 footprint 기하 (costmap 실측으로 교차검증)
+
+inscribed `0.10` (이전 0.22) / circumscribed `sqrt(0.50²+0.22²) = 0.546` (이전 0.380).
+inflation 은 미변경(local 0.25 / global 0.30)이며, 계산상 gradient 폭 local 0.15 / global 0.20 m.
+costmap 최저 gradient cost 실측 **local 62 / global 53** = 계산 예측 62 / 54 와 일치 → inscribed 0.10 반영 확인.
+
+⚠️ inflation_radius 가 circumscribed 0.546 보다 작아 후방 모서리는 포텐셜 필드 밖이다. 후속 과제.
+
+### ③ scan_mask 전방 과잉 마스킹 해소 (`/scan_raw` vs `/scan` 동시 스냅샷)
+
+```
+raw   유효 374/430
+scan  유효 360/430
+  전방 ±30         raw  67/ 72  ->  scan  67/ 72  (제거 0)
+  좌 60~120       raw  54/ 71  ->  scan  50/ 71  (제거 4)
+  우 -120~-60     raw  58/ 72  ->  scan  52/ 72  (제거 6)
+  후방 150~180     raw  26/ 37  ->  scan  24/ 37  (제거 2)
+  전방 ±30 최근접: raw 1.0779999494552612  scan 1.0779999494552612
+```
+
+전방 제거 0빔, 최근접 거리 raw 와 완전 동일 → **정면 벽이 더 이상 지워지지 않는다.** 자기 반사는
+측면·후방에서만 제거된다.
+
+### ④ 🔴 기존 지도 전량 폐기 대상
+
+`map_home` / `map_home_v2` / `map_home_v3` 는 모두 `base_link->laser_frame x=0.30` 상태에서 매핑됐다.
+실제는 0.05 이므로 스캔 원점이 **0.25 m 전방으로 평행이동**된 채 누적된 지도다. 파일은 보존하되
+운용 지도로 쓰지 않는다 → `map_home_v4` 재매핑.
+
+**✅ `map_home_v4` 재매핑·저장 완료** (teleop 0.12 m/s / 0.90 rad/s, 4파일 생성).
+기존 3세트는 타임스탬프 변동 없이 그대로 보존됐다.
+
+```
+-rw-rw-r-- 1 ssafy ssafy  294265 Aug  9 19:13 map_home_v4.data
+-rw-rw-r-- 1 ssafy ssafy    4703 Aug  9 19:13 map_home_v4.pgm
+-rw-rw-r-- 1 ssafy ssafy 5295127 Aug  9 19:13 map_home_v4.posegraph
+-rw-rw-r-- 1 ssafy ssafy     129 Aug  9 19:13 map_home_v4.yaml
+
+image: map_home_v4.pgm / mode: trinary / resolution: 0.05
+origin: [-1.72, -1.78, 0] / negate: 0 / occupied_thresh: 0.65 / free_thresh: 0.25
+```
+
+🔴 저장 중 `save_map.sh` 의 **따옴표 버그**를 발견해 고쳤다. ②단계가
+`"{filename: '$HOME/maps/$NAME}'"` (닫는 따옴표가 중괄호 뒤) 라서 YAML 파싱이 실패하고
+**posegraph/data 가 조용히 안 만들어졌다** — yaml/pgm 만 생기고 스크립트는 성공처럼 끝난다.
+`'$HOME/maps/$NAME'}` 로 정정했고, v4 는 서비스를 직접 호출해 4파일을 확보했다
+(`SerializePoseGraph_Response(result=0)`).
+
+### ⑦ ✅ map_home_v4 + 새 footprint 로 P2P 1회 성공 (벽 충돌 없음)
+
+`map_home_v4` localization(scan_fit **현재 0.997** / 최적 1.000 @ dyaw +5°) 위에서
+inflation 0.25/0.30 -> **0.60/0.60** 으로 올린 뒤(cost_scaling 3.0 유지) 넓은 공간 P2P 1회.
+
+**주행 전 읽기 전용 확인** — footprint 방향·벽 정합·정면 스캔 3종:
+
+```
+① published_footprint (base_link 기준):
+   [(0.101, 0.22), (0.101, -0.22), (-0.499, -0.219), (-0.499, 0.221)]
+   전방 최대 +0.101 / 후방 최소 -0.499  -> ✅ 앞 짧고 뒤 긺
+② 정적 지도 occupied 344칸  vs  global costmap lethal 344칸  -> 비 1.00 ✅ 이중벽 없음
+③ 전방 ±30° 스캔점 66개 중 local costmap lethal 63개 (95%) 최근접 1.099 m ✅ 정면 벽 살아있음
+```
+
+**inflation 0.60 효과** — lethal 은 안 늘고 gradient 만 넓어졌다(내접 0.10 은 불변):
+
+| | lethal | inscribed(99) | gradient(1-98) | 최저 gradient cost |
+|---|---|---|---|---|
+| local 0.25 | 343 | 855 | 1168 | 62 |
+| local 0.60 | 343 | 855 | **3739** | **22** |
+| global 0.30 | 344 | 908 | 1560 | 53 |
+| global 0.60 | 344 | 908 | **2450** | **22** |
+
+계산 예측 `252*exp(-3*(0.60-0.10))` -> occupancy 22 와 실측 22 가 일치.
+
+**⚠️ 전역 경로 여유는 이 지도에선 안 늘었다** (`plan_probe.py`, 주행 없이 `ComputePathToPose`):
+
+```
+로봇 (map): (-0.40, 0.08)   시험 목적지: (1.31, 1.50)   직선거리 2.22 m
+A) inflation 0.60: 점 87개  경로길이 2.18 m  벽 최소거리 0.200 m  평균 0.672 m
+B) inflation 0.25: 점 88개  경로길이 2.19 m  벽 최소거리 0.200 m  평균 0.657 m
+```
+
+같은 구간의 **최대 병목 여유가 0.15~0.20 m** (연결성 이분탐색) 라 0.200 m 는 **기하학적
+한계**다 — inflation 을 어떻게 잡아도 그 지점은 개선되지 않는다. 넓은 구간의 평균만 늘었다.
+
+**P2P 실주행 1회** (`p2p_watch.py`, 읽기 전용 관찰):
+
+```
+  [  18.5s] 상태 -> EXECUTING
+  [  32.6s] 상태 -> SUCCEEDED
+
+최종 상태      : SUCCEEDED
+상태 전이      : [(18.5, 'EXECUTING'), (32.6, 'SUCCEEDED')]
+/cmd_vel       : 290건 (0 명령 10건), max |v|=0.150 m/s, max |w|=0.897 rad/s
+footprint 샘플 : 70개
+footprint-벽 최소거리 : 0.051 m  (lethal 셀이 footprint 내부였던 프레임 0개)
+footprint 마지막 : [(1.14, 0.81), (1.45, 0.5), (1.02, 0.08), (0.71, 0.39)]
+```
+
+주행 14.1초. nav2.log 신규 19줄 중 경고 2건뿐이며 둘 다 1회성이다
+(`Behavior Tree tick rate 100.00 was exceeded!`, `No goal checker was specified in
+parameter 'current_goal_checker'`). **recovery(spin/backup/wait) 0건, trajectory
+rejection 0건.** 마지막 footprint 변 길이는 0.438 x 0.60 으로 설정과 일치한다.
+
+⚠️ **footprint 와 벽의 최소 거리가 0.051 m 까지 좁혀졌다.** costmap 상 충돌(폴리곤 내부에
+lethal 셀)은 0 프레임이지만 여유 5 cm 는 얇다. 이번 목적지가 넓은 공간이었음에도 이 값이
+나온 것이라 후속 시험에서 재현되는지 볼 것.
+
+### ⑧ 5cm 근접의 출처 규명 + 보수적 원형 global A/B (둘 다 주행 없음)
+
+**출처**: 최소 여유는 목적지가 아니라 **출발 직후 선회 구간**에서 나왔다. 전역 경로의
+**중심** 기준 최소 벽거리는 0.437 m 로 넉넉한데, 그 위에 실제 차체를 접선 방향으로
+얹으면 **0.007 m** 까지 좁아진다 — 벽은 차체 기준 **+159.2°(거의 정후방)**. 종료 pose 는
+0.384 m 로 여유로웠다. 즉 **A(planner 가 벽에 붙임)도 B(DWB 가 접근함)도 아니고,
+후방 0.50 m / 외접 0.546 m 인 비대칭 차체가 선회할 때 뒤가 쓸리는 C** 다.
+실주행 실측 0.051 m 는 접선 모델(0.007)보다 7배 나은 값으로, ObstacleFootprint 가
+실제로 후미를 지켜낸 것으로 보인다 (rejection 0 · 충돌 0).
+
+**cost_scaling_factor 는 해법이 아니다** (같은 경로 재계획, 이후 3.0 복원):
+
+| cost_scaling_factor | 경로 점 | footprint 최소여유 | 경로 중심 최소 벽거리 |
+|---|---|---|---|
+| 3.0 | 50 | 0.007 m | **0.437 m** |
+| 1.5 | 48 | 0.002 m | **0.437 m** |
+| 0.8 | 53 | 0.000 m | **0.437 m** |
+
+**경로 중심선이 전혀 움직이지 않는다.** 이 방(3.35x3.5 m)은 inflation 0.60 이 거의 전
+영역을 덮어 gradient 가 균일 오프셋처럼 작용하고, NavFn 경로는 사실상 기하/길이로
+결정된다. inflation_radius 0.25<->0.60 A/B 에서 경로가 안 바뀐 것과 같은 이유다.
+
+**보수적 원형 global (`footprint: "[]"` + `robot_radius: 0.55`) A/B** — local 은 실제
+polygon + ObstacleFootprint 유지, 목적지 좌표 고정:
+
+| 케이스 | polygon global (baseline) | circle global r=0.55 |
+|---|---|---|
+| A 넓은 공간 (실제로 SUCCEEDED 했던 경로) | ✅ 1.24 m, 중심여유 0.437 | 🔴 **실패** |
+| B 대표 free-space (병목 0.600) | ✅ 1.71 m, 중심여유 0.600 | ✅ 1.70 m, 중심여유 0.605 |
+| C 좁은 통로 (병목 0.112) | ✅ 1.29 m, 중심여유 0.180 | 🔴 **실패** |
+
+**판정: 이 환경에서 `robot_radius=0.55` 는 과도하게 보수적.** 실제로 완주한 A 조차
+계획 불가가 된다. 원복 후 runtime 재확인 — global footprint polygon, robot_radius 0.1
+(footprint 가 있어 미사용), local polygon 불변, inflation 0.6/0.6, critics 불변,
+A/B/C 재계획 결과가 baseline 과 일치(A 1.24/0.437, B 1.70/0.605, C 1.30/0.173).
+
+**장기 대안**: NavFn 은 비대칭 footprint 의 yaw 를 다루지 못하므로, 전역 단계에서
+후방 스윙을 처리하려면 `nav2_smac_planner` 의 **State Lattice**(또는 Hybrid-A*) 처럼
+yaw 를 상태로 갖고 footprint 충돌을 검사하는 플래너로의 교체를 검토할 필요가 있다
+(이번 단계에서는 교체하지 않았다).
+
+### ⑨ ObstacleFootprint.scale 0.02 -> 0.20 A/B (실주행 1회씩)
+
+| | scale 0.02 | scale 0.20 |
+|---|---|---|
+| 결과 | SUCCEEDED | SUCCEEDED |
+| footprint-벽 최소거리 | 0.051 m | **0.059 m** |
+| footprint 내부 lethal | 0 프레임 | 0 프레임 |
+| recovery | 0 | 0 |
+| trajectory rejection | 0 | 0 |
+| max cmd | v 0.150 / w 0.897 | v 0.150 / w 1.074 |
+| `/cmd_vel` | 290건 (0명령 10) | 313건 (0명령 10) |
+| 주행시간 | 14.1 s | 15.2 s |
+
+```
+  [  98.4s] 상태 -> EXECUTING
+  [ 113.6s] 상태 -> SUCCEEDED
+최종 상태      : SUCCEEDED
+/cmd_vel       : 313건 (0 명령 10건), max |v|=0.150 m/s, max |w|=1.074 rad/s
+footprint 샘플 : 76개
+footprint-벽 최소거리 : 0.059 m  (lethal 셀이 footprint 내부였던 프레임 0개)
+footprint 마지막 : [(-0.38, 1.05), (-0.11, 1.4), (0.36, 1.02), (0.09, 0.68)]
+```
+
+nav2.log 신규 19줄, 경고 1건(1회성 `No goal checker was specified`), recovery·rejection 0.
+
+⚠️ **두 시험의 경로가 다르다** (0.02 는 대략 (-0.40,0.08)->(0.64,0.69), 0.20 은
+(0.64,0.69)->(약 0.0,1.04)). 따라서 +0.008 m 는 통제된 비교가 아니며 **개선의 증거로
+읽으면 안 된다.**
+
+**판정: B(변화 없음) — `ObstacleFootprint.scale` 은 이 상황의 핵심 레버가 아니다.**
+기전이 설명된다: `ObstacleFootprintCritic::getScale()` 이 resolution(0.05)을 곱하므로
+0.20 의 실효 가중치는 **0.01** 이고, PathAlign/PathDist(32.0) 대비 3000배 작다.
+게다가 두 시험 모두 rejection 0 이었다 — 즉 이 critic 은 실제로 **연속적인 척력이 아니라
+lethal 침범 시의 거부권(veto)** 으로만 작동하고 있다. 여유를 늘리려면 scale 을 path
+추종 항과 겨룰 수준(명목 수백)까지 올려야 하는데 그건 현실적이지 않다.
+
+### ⑩ 🔴 local footprint_padding 0.05 A/B — 안전은 확보, **주행은 실패**
+
+`ObstacleFootprint.scale` 은 0.02 로 복원하고, `local_costmap` 에만
+`footprint_padding: 0.05` 를 적용했다 (global 은 0.0 유지). padding 적용은
+`published_footprint` 를 base_link 로 역변환해 직접 확인했다:
+
+| | x 범위 | y 범위 |
+|---|---|---|
+| 실제 차체 (param) | -0.500 .. +0.100 | ±0.220 |
+| **local published (padded)** | **-0.550 .. +0.150** | **±0.270** |
+| global published | -0.500 .. +0.100 | ±0.220 |
+
+전 방향 정확히 +5 cm. global 은 실제 기하 유지.
+
+**결과 — 목표에 도달하지 못했다** (`p2p_watch.py` 는 padded 봉투와 실제 차체를 분리 측정):
+
+```
+  [ 200.0s] 상태 -> EXECUTING
+최종 상태      : EXECUTING (관찰 창 300초 내 종료 없음)
+/cmd_vel       : 2005건 (0 명령 15건), max |v|=0.063 m/s, max |w|=0.442 rad/s
+footprint 샘플 : published 506개 / 실제 506개
+① published(padded) -벽 최소거리 : 0.163 m  (내부 침범 0)
+② **실제 차체(unpadded)** -벽 최소거리 : 0.225 m  (내부 침범 0)
+```
+
+nav2.log 신규 198줄 요약:
+
+```
+6 [WARN]  [BehaviorTreeEngine]: Behavior Tree tick rate 100.00 was exceeded!
+5 [WARN]  [controller_server]: [follow_path] [ActionServer] Aborting handle.
+5 [ERROR] [controller_server]: Failed to make progress
+3 [WARN]  [controller_server]: Control loop missed its desired rate of 20.0000Hz
+1 [WARN]  [planner_server]: Planner loop missed its desired rate ... Current loop rate is 1.2183 Hz
+1 [WARN]  [behavior_server]: Collision Ahead - Exiting Spin
+1 [WARN]  [behavior_server]: spin failed
+```
+
+| | scale 0.02 / padding 0 | **padding 0.05** |
+|---|---|---|
+| 결과 | SUCCEEDED (14.1 s) | **미도달** — follow_path abort x5 |
+| 실제 차체-벽 최소거리 | 0.051 m | **0.225 m** |
+| recovery | 0 | **spin(실패) + wait** |
+| max cmd | v 0.150 / w 0.897 | v **0.063** / w **0.442** |
+
+**판정: C — 이 환경에서 5 cm padding 은 너무 보수적이다.** 안전 방향으로는 확실히
+작동했다(실제 여유 0.051 -> 0.225 m, 4배). 그러나 padding 은 local 내접반지름을
+0.10 -> 0.15 로 올리고 충돌 봉투를 0.70 x 0.54 m 로 키우는데, 이 집 경로의 병목이
+0.15~0.20 m 라 통과 가능한 회랑이 사라진다. 카트는 기어가다(0.063 m/s) progress
+checker 에 걸리고, spin 회복마저 `Collision Ahead` 로 실패했다.
+
+⚠️ 시험 종료 직후 Nav2 스택 프로세스가 통째로 사라졌다(마지막 로그 이후 6분간 무기록,
+크래시 트레이스 없음). 시각이 관찰 스크립트의 300초 창 종료와 정확히 일치해
+**프로세스 그룹 정리에 의한 실행 환경 아티팩트**로 보이며 padding 과 무관하다.
+카트는 정지 상태로 안전했다 (`/stm/connected true`, wheel target [0,0], fault NONE,
+`/cmd_vel` publisher 0).
+
+### ⑥ localization -> mapping 전환 시 소유권 정리 (`switch_to_mapping.sh` 신규)
+
+`restart_slam.sh` 를 그대로 쓰면 amcl/map_server/lifecycle_manager 가 살아남아
+**map->odom 이 이중 발행**되고, static_transform_publisher 도 안 죽어 TF publisher 가
+2개가 된다. 전용 전환 스크립트로 소유권을 먼저 끊었다. 이때 **고아 `zupt_node.py` 1개**
+(첫 `ekf.launch.py` 잔재, PID 5323)도 정리 — `/odom_zupt` 가 13.35Hz(이중 발행)에서
+**9.98Hz** 로 정상화됐다.
+
+전환 후 확인: amcl/map_server 없음, slam_toolbox 1개, `/map` publisher 1개(slam_toolbox),
+`rf2o publish_tf=False`(odom->base_link 는 EKF 단독), `base_link->laser_frame [0.050, 0, 0.320]`,
+`/scan` 11.49Hz(publisher 1), `/scan_raw` 11.69Hz, inverted=True.
+
+### ⑤ 회귀 테스트
+
+<details>
+<summary>ruff + pytest 원본 출력</summary>
+
+```text
+$ ruff check embedded/Lidar/src/choll_slam_bringup/scripts/scan_mask_node.py \
+             embedded/Lidar/src/choll_slam_bringup/launch/lidar.launch.py
+All checks passed!
+
+$ cd embedded/Lidar && python3 -m pytest src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.11s
+```
+
+</details>
+
+<details>
+<summary>runtime 확인 원본 출력</summary>
+
+```text
+$ ros2 run tf2_ros tf2_echo base_link laser_frame
+- Translation: [0.050, 0.000, 0.320]
+- Rotation: in RPY (radian) [0.000, -0.000, 0.000]
+
+[scan_mask_node]: /scan_raw -> /scan | 박스(laser_frame) x -0.55..+0.05 y -0.22..+0.22
+  여유 +0.03m → 경계 정면 0.080 / 좌 0.250 / 우 0.250 / 후방 0.580 m | 섹터 마스킹 0개
+[scan_mask_node]: 컷오프 재계산: 430빔, 섹터 전체제거 0빔, inc=0.8392deg
+
+$ ros2 param get /local_costmap/local_costmap footprint
+[ [0.10, 0.22], [0.10, -0.22], [-0.50, -0.22], [-0.50, 0.22] ]
+$ ros2 param get /global_costmap/global_costmap footprint
+[ [0.10, 0.22], [0.10, -0.22], [-0.50, -0.22], [-0.50, 0.22] ]
+$ ros2 param get /controller_server FollowPath.critics
+['RotateToGoal', 'Oscillation', 'ObstacleFootprint', 'GoalAlign', 'PathAlign', 'PathDist', 'GoalDist']
+[controller_server]: Using critic "ObstacleFootprint" (dwb_critics::ObstacleFootprintCritic)
+
+$ ros2 topic hz ...
+/scan_raw          11.526 Hz
+/scan              11.565 Hz
+/odom_rf2o          9.994 Hz
+/odom_zupt         13.351 Hz
+/odometry/filtered  9.984 Hz
+/stm/connected     data: true
+```
+
+</details>
+
 ## 2026-08-09 03:30 — ✅ EM→BE 위치 발행 배선 검증 + ZUPT 실측 / 🔴 BE 단위 설정이 블로커 (relu 실기 / Claude 실행·기록)
 
 Nav2 P2P 가 막혀 있어, 그보다 낮은 층의 MVP —**카트가 자기 위치를 BE 로 계속 보내는 것**—
