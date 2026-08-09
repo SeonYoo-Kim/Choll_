@@ -4,6 +4,8 @@ import json
 import math
 
 from choll_mqtt_bridge.bridge_logic import (
+    NAV_RESULT_STATES,
+    build_nav_result_payload,
     build_position_payload,
     parse_cart_command,
     should_publish_position,
@@ -173,3 +175,50 @@ def test_position_throttle_within_period() -> None:
 def test_position_throttle_after_period() -> None:
     """주기 경과 시 발행 허용."""
     assert should_publish_position(10.5, 10.0, 0.5) is True
+
+
+# ── build_nav_result_payload ─────────────────────────────────────────
+
+
+def test_nav_result_states_match_backend_contract() -> None:
+    """BE NavigationService.applyCartNavResult의 switch case 7종과 일치해야 한다.
+
+    이 집합이 어긋나면 BE가 상태를 조용히 버려 이동 세션이 끝나지 않는다.
+    """
+    assert NAV_RESULT_STATES == {
+        "IDLE",
+        "NAVIGATING",
+        "SUCCEEDED",
+        "ABORTED",
+        "CANCELED",
+        "REJECTED",
+        "NAV2_UNAVAILABLE",
+    }
+
+
+def test_nav_result_payload_shape() -> None:
+    """BE가 우선 파싱하는 {"status": ...} 형태로 만든다."""
+    assert json.loads(build_nav_result_payload("SUCCEEDED")) == {"status": "SUCCEEDED"}
+
+
+def test_nav_result_payload_normalizes_case_and_space() -> None:
+    """소문자·공백이 섞여 와도 계약 문자열로 정규화한다."""
+    assert json.loads(build_nav_result_payload("  navigating ")) == {
+        "status": "NAVIGATING"
+    }
+
+
+def test_nav_result_payload_rejects_unknown_state() -> None:
+    """계약 밖 상태는 발행하지 않는다 (BE가 조용히 버리는 것을 막는다)."""
+    assert build_nav_result_payload("PAUSED") is None
+
+
+def test_nav_result_payload_rejects_empty() -> None:
+    """빈 문자열도 거른다."""
+    assert build_nav_result_payload("") is None
+
+
+def test_nav_result_payload_covers_every_contract_state() -> None:
+    """계약 7종 전부가 발행 가능해야 한다."""
+    for state in NAV_RESULT_STATES:
+        assert json.loads(build_nav_result_payload(state)) == {"status": state}

@@ -102,3 +102,42 @@ def should_publish_position(
     if last_pub_sec is None:
         return True
     return (now_sec - last_pub_sec) >= min_period_sec
+
+
+#: BE가 해석하는 주행 상태 7종. ROS ``/cart/nav_status``(goal_forwarder)의 값과
+#: 같은 집합이며, BE ``NavigationService.applyCartNavResult``의 switch case와
+#: 1:1로 대응한다(2026-08-09 BE 소스 대조). 어느 한쪽만 바꾸면 계약이 깨진다.
+NAV_RESULT_STATES = frozenset(
+    {
+        "IDLE",
+        "NAVIGATING",
+        "SUCCEEDED",
+        "ABORTED",
+        "CANCELED",
+        "REJECTED",
+        "NAV2_UNAVAILABLE",
+    }
+)
+
+
+def build_nav_result_payload(status: str) -> "str | None":
+    """MQTT ``status/nav-result`` 페이로드(JSON 문자열)를 생성한다.
+
+    BE ``MqttNavResultMessageHandler``는 ``{"status": "..."}`` 를 먼저 보고,
+    JSON이 아니면 페이로드 전체를 상태 문자열로 읽는다. 위치 텔레메트리와
+    형식을 맞추기 위해 JSON 쪽으로 발행한다.
+
+    BE는 모르는 상태를 만나면 경고만 남기고 **조용히 버린다.** 그러면 FE의
+    이동 세션이 영원히 끝나지 않으므로, 계약 밖 문자열은 여기서 걸러 내고
+    호출부가 로그로 드러내게 한다.
+
+    Args:
+        status: ROS ``/cart/nav_status``가 실은 상태 문자열.
+
+    Returns:
+        발행할 JSON 문자열. 계약 밖 상태면 ``None``.
+    """
+    normalized = status.strip().upper()
+    if normalized not in NAV_RESULT_STATES:
+        return None
+    return json.dumps({"status": normalized}, separators=(",", ":"))

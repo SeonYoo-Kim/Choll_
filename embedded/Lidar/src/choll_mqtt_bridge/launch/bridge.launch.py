@@ -34,10 +34,12 @@ def generate_launch_description() -> LaunchDescription:
                 "cmd_topic": "cmd/move/cart",  # MQTT-04 (BE→Jetson)
                 "position_topic": "status/position",  # MQTT-01 (Jetson→BE)
                 "position_min_period_sec": 0.5,  # 2Hz — TODO-확인(BE)
+                "nav_result_topic": "status/nav-result",  # (Jetson→BE)
                 # AI-EM ROS2 명세서
                 "pose_topic": "/robot_pose",  # ROS2-08
                 "target_pose_topic": "/cart/target_pose",  # ROS2-14
                 "cancel_topic": "/cart/cancel",  # ROS2-15
+                "nav_status_topic": "/cart/nav_status",  # ROS2-16 (래치)
             }
         ],
     )

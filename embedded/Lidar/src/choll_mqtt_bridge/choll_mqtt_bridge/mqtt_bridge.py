@@ -6,6 +6,9 @@ EM-BE MQTT 명세서와 AI-EM ROS2 명세서 사이의 번역기:
   CANCEL은 ``/cart/cancel``(ROS2-15, data=requestId)로 발행
 - ``/robot_pose``(ROS2-08) 구독 → MQTT-01 ``status/position`` 발행
   (주기 스로틀, 기본 2Hz, 페이로드는 BE 파서 실측 계약)
+- ``/cart/nav_status``(ROS2-16, 래치) 구독 → MQTT ``status/nav-result`` 발행
+  (상태가 **바뀔 때만**, QoS1. BE가 이동 세션을 종료하는 신호라 유실되면
+  FE의 이동이 영영 안 끝난다)
 - SELECT_TARGET은 AI ``fe_bridge_node``가 ``/select_target`` 변환을 담당하므로
   무시하고, FOLLOW_*는 EM/AI 수신측 계약 확정 전까지 로그만 남긴다.
 
@@ -20,9 +23,11 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import String
 
 from choll_mqtt_bridge.bridge_logic import (
+    build_nav_result_payload,
     build_position_payload,
     parse_cart_command,
     should_publish_position,
@@ -44,18 +49,22 @@ class MqttBridge(Node):
         self.declare_parameter("cmd_topic", "cmd/move/cart")
         self.declare_parameter("position_topic", "status/position")
         self.declare_parameter("position_min_period_sec", 0.5)
+        self.declare_parameter("nav_result_topic", "status/nav-result")
         self.declare_parameter("pose_topic", "/robot_pose")
         self.declare_parameter("target_pose_topic", "/cart/target_pose")
         self.declare_parameter("cancel_topic", "/cart/cancel")
+        self.declare_parameter("nav_status_topic", "/cart/nav_status")
 
         self._cmd_topic = str(self.get_parameter("cmd_topic").value)
         self._position_topic = str(self.get_parameter("position_topic").value)
+        self._nav_result_topic = str(self.get_parameter("nav_result_topic").value)
         self._position_min_period = float(
             self.get_parameter("position_min_period_sec").value
         )
 
         self._cmd_queue: queue.Queue[dict] = queue.Queue()
         self._last_position_pub_sec: float | None = None
+        self._last_nav_status: str | None = None
 
         self._target_pose_pub = self.create_publisher(
             PoseStamped, str(self.get_parameter("target_pose_topic").value), 10
@@ -65,6 +74,18 @@ class MqttBridge(Node):
         )
         self.create_subscription(
             PoseStamped, str(self.get_parameter("pose_topic").value), self._on_pose, 10
+        )
+        # goal_forwarder는 /cart/nav_status를 래치(TRANSIENT_LOCAL)로 발행한다.
+        # 구독도 맞춰야 브릿지가 늦게 떠도 **현재 상태를 즉시 받아** BE와 동기화된다.
+        self.create_subscription(
+            String,
+            str(self.get_parameter("nav_status_topic").value),
+            self._on_nav_status,
+            QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            ),
         )
         self.create_timer(0.05, self._drain_cmd_queue)
 
@@ -181,6 +202,36 @@ class MqttBridge(Node):
         )
         self._mqtt.publish(self._position_topic, payload, qos=0)
         self._last_position_pub_sec = now_sec
+
+    def _on_nav_status(self, msg: String) -> None:
+        """/cart/nav_status를 MQTT 주행 결과로 중계한다.
+
+        위치와 달리 **상태 전이 이벤트**라 스로틀하지 않고 변화 시에만 보낸다.
+        QoS1인 이유는 유실되면 BE의 이동 세션이 끝나지 않아 FE에서 카트가
+        영원히 "이동 중"으로 남기 때문이다.
+        """
+        status = msg.data.strip().upper()
+        if status == self._last_nav_status:
+            return
+
+        payload = build_nav_result_payload(status)
+        if payload is None:
+            self.get_logger().warning(
+                f"계약 밖 주행 상태라 발행하지 않음: {msg.data!r} "
+                "(BE는 모르는 값을 조용히 버려 이동 세션이 안 끝난다)"
+            )
+            return
+
+        if not self._mqtt.is_connected():
+            self.get_logger().warning(
+                f"MQTT 미접속 — 주행 상태 {status} 유실. "
+                "재접속 후 다음 전이부터 반영된다"
+            )
+            return
+
+        self._mqtt.publish(self._nav_result_topic, payload, qos=1)
+        self._last_nav_status = status
+        self.get_logger().info(f"/cart/nav_status {status} → {self._nav_result_topic}")
 
     def shutdown_mqtt(self) -> None:
         """MQTT 백그라운드 루프를 정리한다."""

@@ -78,6 +78,9 @@ MQTT 연동(`choll_mqtt_bridge`, 정본: 패키지 README): 브로커
 `your-server.example.com:1883`(CHANGE_ME/CHANGE_ME). `cmd/move/cart`의 MOVE→
 `/cart/target_pose`, CANCEL→`/cart/cancel` 변환 + `/robot_pose`→
 `status/position`(`{"x","y","yaw","timestamp"}`, BE 파서 실측 계약) 발행.
+`/cart/nav_status`(래치) → `status/nav-result`(`{"status"}`, 상태 전이 시에만 QoS1)
+발행 — BE `applyCartNavResult`의 7종과 같은 집합이라 **모르는 값을 보내면 BE가
+조용히 버려 이동 세션이 안 끝난다**(브릿지가 계약 밖 값을 걸러 낸다).
 SELECT_TARGET은 AI `fe_bridge_node` 담당 — 이 브릿지에서 처리 금지.
 
 ## 5. 절대 규칙

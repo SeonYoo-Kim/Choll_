@@ -13,6 +13,7 @@ BE Mosquitto 브로커(`your-server.example.com:1883`)와 Jetson 내부 ROS2 사
 | BE→카트 | MQTT-04 SELECT_TARGET | — (무시) | AI `fe_bridge_node`가 `/select_target` 변환 담당 (backend/CLAUDE.md 실측) — 이중 처리 금지 |
 | BE→카트 | MQTT-04 FOLLOW_START/PAUSE/STOP | (미연결) | EM/AI 수신측 계약 미확정 — 경고 로그만 |
 | 카트→BE | MQTT-01 `status/position` | ROS2-08 `/robot_pose` | 쿼터니언→yaw 변환, 기본 2Hz 스로틀, QoS0 |
+| 카트→BE | `status/nav-result` | ROS2-16 `/cart/nav_status` | 상태 **전이 시에만** `{"status":...}`, QoS1. 계약 밖 값은 발행 안 함 |
 
 MQTT-01 페이로드 — **BE 파서 실측 계약**
 (`backend/.../mqtt/position/MqttPositionMessageHandler.java`의
@@ -81,9 +82,13 @@ python3 -m pytest src/choll_mqtt_bridge/test/test_bridge_logic.py -q
       행에 최종 map.yaml의 resolution·origin 입력 (EM 발행 시작 조건)
 - [ ] BE: 파서에 `yaw` 필드 추가 (WS CART_POSITION_UPDATE yaw 임시 0 해소)
 - [ ] BE: 위치 발행 주기 합의 (기본 2Hz)
-- [ ] BE: 주행 결과 상행 토픽 신설 — 제안 `status/nav`
-      `{"requestId","status"}` (BE가 NAVIGATION_STATUS_UPDATED의
-      STARTED/ARRIVED/FAILED를 "카트 상행 결과 토픽 확정 후"로 보류 중,
-      `/cart/nav_status` 7종이 원천). 확정 시 이 브릿지에 발행 추가
+- [x] ~~BE: 주행 결과 상행 토픽 신설~~ — **2026-08-09 해소.** BE에 이미
+      `status/nav-result` 수신부가 있었다(`MqttNavResultMessageHandler` +
+      `NavigationService.applyCartNavResult`). 받는 상태 7종이 ROS
+      `/cart/nav_status` 7종과 정확히 일치해 **중계만 붙였다**(제안했던
+      `status/nav`·`requestId` 는 불필요). BE는 `{"status":...}` 를 먼저 보고
+      JSON이 아니면 페이로드 전체를 상태로 읽는다
+- [ ] BE: `status/nav-result` 는 `mqtt.cart-id` 로 카트를 귀속한다 —
+      다중 카트 도입 시 재협의 (위치·RFID 토픽과 같은 제약)
 - [ ] EM/AI: FOLLOW_START/PAUSE/STOP 수신 주체·동작 합의
       (BE 정의: /target_position을 nav 목표로 소비 시작/해제하는 모드 전환)

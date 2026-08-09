@@ -37,6 +37,7 @@ Jetson ↔ STM32 인터페이스는 [docs/JETSON_TO_STM.md](../docs/JETSON_TO_ST
 | 하트비트 | `status/cart` | `{"status"}` | (미구현 — 리테인 잔재만 관측) |
 | 슬롯·RFID | `status/slot` | `{"slot_id","uid","event":"DETECTED\|REMOVED","timestamp"}` | RPi `embedded/rfid/main.py` |
 | 추적 대상 | `status/target` | `{"image_width","image_height","tracks"}` | AI `fe_bridge_node` |
+| 주행 결과 | `status/nav-result` | `{"status"}` — `/cart/nav_status` 7종과 동일 집합 | `choll_mqtt_bridge`, 상태 전이 시에만 QoS1 |
 
 **Backend → 카트**: `cmd/move/cart` (`{"requestId","command":"MOVE\|CANCEL","zoneId","target":{x,y},"pixel":{x,y}}`),
 `cmd/lit/led` (`{"slot_id":[...]}`).
