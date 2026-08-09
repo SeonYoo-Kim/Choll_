@@ -6,6 +6,101 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-10 02:00 — ✅ 사서 추종 배선: FOLLOW 버튼 게이트 + 1 m 유지거리 (relu 실기 / Claude 구현·기록)
+
+FE 추종 버튼이 카트에 전달되지 않던 구멍을 메웠다. **AI 제어를 되살리는 대신 이미 배선된
+Nav2 경로를 쓴다** — 후진 금지·장애물 정지·벽 회피가 전부 Nav2 안에 이미 있고,
+`/cmd_vel` 발행자를 1개로 유지해 구역 이동 기능이 깨지지 않는다.
+
+### ① 진단 — 추종이 안 되던 이유 3가지
+
+```
+/person_tracks     16.8 Hz   ← 탐지·추적 정상
+/target_person      0 Hz     ← 🔴 Re-ID 타겟 미등록 (auto_select:=false, FE 선택 대기)
+/target_position    0 Hz     ← 그 결과
+/cmd_vel_legacy    15.0 Hz   ← control_node 는 격리 토픽에 0 발행 중
+goal_forwarder approach_distance = 0.0
+```
+
+1. **FOLLOW_START 가 어디에도 도달하지 않았다.** BE `FollowControlService.java:76` 가
+   `cmd/move/cart` 로 `{"requestId","command":"FOLLOW_START"}` 를 발행하지만
+   AI `fe_bridge_logic.py:94` 는 SELECT_TARGET 외 전부 `return`, EM
+   `mqtt_bridge.py` 는 경고 로그만 남기고 보류했다.
+2. **`approach_distance = 0.0`** — goal 이 사람 좌표 그 자체였다. 사서가 다가오면
+   카트가 물러서는 원인.
+3. AI `control_node.py:340` `linear_error = distance - target_distance(1.0)` 도
+   1 m 이내에서 음수 → 후진이지만, `legacy_control:=false` 라 `/cmd_vel_legacy` 로
+   격리돼 있어 **실주행에는 영향 없음**. 이 줄은 건드리지 않았다.
+
+### ② 변경
+
+| 파일 | 변경 |
+|---|---|
+| `choll_mqtt_bridge/mqtt_bridge.py` | `FOLLOW_*` → `/cart/follow_mode`(String, **래치**) 발행 |
+| `choll_nav/goal_forwarder.py` | `/cart/follow_mode` 구독 + `_on_target_point` 게이트. PAUSE/STOP 시 진행 중 goal 취소(검증된 `_on_cancel` 재사용) |
+| `choll_nav/launch/interface.launch.py` | `approach_distance` 기본 **0.0 → 1.0**, `follow_gate_enabled` 인자 신설(기본 true) |
+
+래치 QoS 이유: FE가 추종을 켠 뒤 `goal_forwarder` 가 재기동해도 현재 모드를 즉시
+받아야 한다. VOLATILE 이면 버튼을 다시 눌러야 추종이 살아난다.
+
+### ③ 검증 — 원본 출력
+
+```
+$ ros2 param get /goal_forwarder approach_distance     → Double value is: 1.0
+$ ros2 param get /goal_forwarder follow_gate_enabled   → Boolean value is: True
+$ ros2 topic info /cart/follow_mode
+  Type: std_msgs/msg/String
+  Publisher count: 1        (mqtt_bridge)
+  Subscription count: 1     (goal_forwarder)
+```
+
+```
+$ ros2 topic pub --once --qos-durability transient_local --qos-reliability reliable \
+    /cart/follow_mode std_msgs/msg/String "{data: FOLLOW_START}"
+[goal_forwarder]: 추종 시작 — /target_position 을 goal 로 소비
+$ ... "{data: FOLLOW_STOP}"
+[goal_forwarder]: FOLLOW_STOP — 추종 중단 + 진행 중 goal 취소
+[goal_forwarder]: 취소 요청 수신 — 진행 중인 goal 없음
+```
+
+```
+$ ros2 topic info /cmd_vel -v
+  Publisher count: 1        Node name: velocity_smoother   ← Nav2 단독 소유 유지
+  Subscription count: 1     Node name: stm_serial_bridge
+$ ros2 topic info /cmd_vel_legacy -v
+  Publisher count: 1        Node name: control_node        ← AI 격리 확인
+```
+
+```
+$ colcon build --packages-select choll_nav choll_mqtt_bridge   → 2 packages finished [6.55s]
+$ pytest choll_nav/test/test_nav_logic.py -q                   → 31 passed in 0.16s
+$ pytest choll_mqtt_bridge/test/ -q                            → 27 passed in 0.14s
+$ ruff check choll_nav choll_mqtt_bridge
+  test_nav_logic.py:3:1: I001  (기존 오류, 이번 변경분 아님)
+```
+
+### ④ 안전 요구가 Nav2 어디서 충족되는가 (`nav2_params.yaml`)
+
+| 요구 | 설정 | 위치 |
+|---|---|---|
+| 후진 금지 | `min_vel_x: 0.0` | :121 |
+| 전방 물체 시 정지 | `ObstacleFootprint` critic (자세 반영 footprint 충돌 판정) | :150, :176 |
+| 벽 회피 | `inflation_radius` 0.25/0.30 + footprint `[[0.10,0.22]…[-0.50,0.22]]` | :222 |
+| 사서에 안 부딪힘 | `approach_distance: 1.0` (goal 을 1 m 앞에) | interface.launch.py |
+
+### ⑤ 미완 — 종단 검증
+
+`/target_person` 이 0 Hz(타겟 미등록)라 **실제 추종 주행은 아직 못 봤다.**
+FE에서 대상 선택 → 추종 시작을 눌러야 `/target_position` 이 흐른다.
+
+### ⑥ 부수 확인 — AI `/cmd_vel` 차단 배포
+
+`legacy_control` 인자는 `0eef289` 에 이미 구현돼 있었으나 젯슨 실행 경로
+(`~/Choll/ai/install`, develop 브랜치)에는 없어 `choll-em` 별칭이 launch 에러로
+죽는 상태였다. `install → build → src` 가 전부 심볼릭이라 커밋본을 `~/Choll` 에
+체크아웃하는 것만으로 **재빌드 없이** 반영됐고, `--show-args` 로 인자 인식과
+`motor_node` 미실행을 확인했다.
+
 ## 2026-08-10 — 🟡 map_home_v5 매핑·localization 정합 ✅ / P2P Goal 도달 ✅ / **장애물 우회는 실패** + 최종 yaw 데드존 (relu 실기 / Claude 실행·기록)
 
 시연 전 최종 상태 동결 시점의 기록. **P2P Goal 도달과 장애물 우회를 분리 판정한다.**

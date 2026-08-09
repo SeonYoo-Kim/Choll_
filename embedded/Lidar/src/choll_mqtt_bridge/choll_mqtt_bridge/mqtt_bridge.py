@@ -54,6 +54,7 @@ class MqttBridge(Node):
         self.declare_parameter("target_pose_topic", "/cart/target_pose")
         self.declare_parameter("cancel_topic", "/cart/cancel")
         self.declare_parameter("nav_status_topic", "/cart/nav_status")
+        self.declare_parameter("follow_mode_topic", "/cart/follow_mode")
 
         self._cmd_topic = str(self.get_parameter("cmd_topic").value)
         self._position_topic = str(self.get_parameter("position_topic").value)
@@ -73,6 +74,17 @@ class MqttBridge(Node):
         )
         self._cancel_pub = self.create_publisher(
             String, str(self.get_parameter("cancel_topic").value), 10
+        )
+        # 추종 모드는 **래치(TRANSIENT_LOCAL)** 로 낸다. FE가 추종을 켠 뒤에
+        # goal_forwarder가 재기동해도 현재 모드를 즉시 받아야 하기 때문이다
+        # (VOLATILE이면 버튼을 다시 눌러야 추종이 살아난다).
+        follow_qos = QoSProfile(
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self._follow_mode_pub = self.create_publisher(
+            String, str(self.get_parameter("follow_mode_topic").value), follow_qos
         )
         self.create_subscription(
             PoseStamped, str(self.get_parameter("pose_topic").value), self._on_pose, 10
@@ -183,8 +195,13 @@ class MqttBridge(Node):
                     "변환을 담당하므로 이 브릿지는 무시"
                 )
             elif kind == "follow":
-                self.get_logger().warning(
-                    f"FOLLOW 명령 수신 — EM/AI 수신측 계약 미확정이라 보류: {cmd}"
+                # FE 추종 버튼 → BE FollowControlService → 여기.
+                # 좌표는 실리지 않는다 — "AI가 내는 /target_position 을 Nav2 goal 로
+                # 소비할지 말지"의 모드 전환일 뿐이다. 실제 게이트는 goal_forwarder.
+                action = cmd["action"]
+                self._follow_mode_pub.publish(String(data=action))
+                self.get_logger().info(
+                    f"{action} → {self._follow_mode_pub.topic_name}"
                 )
             else:
                 self.get_logger().warning(f"명령 무시: {cmd['reason']}")

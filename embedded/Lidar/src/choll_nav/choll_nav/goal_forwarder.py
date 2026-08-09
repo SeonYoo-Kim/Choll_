@@ -53,6 +53,10 @@ class GoalForwarder(Node):
         self.declare_parameter("target_point_topic", "/target_position")
         self.declare_parameter("cancel_topic", "/cart/cancel")
         self.declare_parameter("status_topic", "/cart/nav_status")
+        self.declare_parameter("follow_mode_topic", "/cart/follow_mode")
+        # 추종 게이트. True면 FOLLOW_START를 받기 전까지 /target_position을 버린다.
+        # False로 두면 예전처럼 타겟이 잡히는 즉시 따라간다(버튼 없이 검증할 때).
+        self.declare_parameter("follow_gate_enabled", True)
         self.declare_parameter("navigate_action", "navigate_to_pose")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
@@ -94,6 +98,18 @@ class GoalForwarder(Node):
         )
         self._status_pub = self.create_publisher(
             String, str(self.get_parameter("status_topic").value), status_qos
+        )
+        # 브릿지가 래치로 내므로 구독도 래치여야 한다 — 이 노드가 나중에 떠도
+        # 현재 추종 모드를 즉시 받는다.
+        self._follow_gate_enabled: bool = bool(
+            self.get_parameter("follow_gate_enabled").value
+        )
+        self._follow_active: bool = False
+        self.create_subscription(
+            String,
+            str(self.get_parameter("follow_mode_topic").value),
+            self._on_follow_mode,
+            status_qos,
         )
 
         self._action_client = ActionClient(
@@ -137,15 +153,49 @@ class GoalForwarder(Node):
         except Exception as exc:  # noqa: BLE001 — 콜백은 죽지 않고 로깅
             self.get_logger().error(f"target_pose 처리 실패: {exc}")
 
+    def _on_follow_mode(self, msg: String) -> None:
+        """FE 추종 버튼(FOLLOW_START/PAUSE/STOP)으로 추종 게이트를 여닫는다.
+
+        좌표는 오지 않는다 — 이 명령은 "AI가 내는 /target_position 을 Nav2 goal 로
+        소비할지"의 모드 전환이다. 멈춤 쪽(PAUSE/STOP)에서는 진행 중인 goal 도
+        취소해야 한다. 안 그러면 버튼을 눌러도 카트가 마지막 목표까지 계속 간다.
+
+        Args:
+            msg: `FOLLOW_START` · `FOLLOW_PAUSE` · `FOLLOW_STOP` 중 하나.
+        """
+        try:
+            action = msg.data.strip()
+            if action == "FOLLOW_START":
+                self._follow_active = True
+                self.get_logger().info("추종 시작 — /target_position 을 goal 로 소비")
+                return
+            if action in ("FOLLOW_PAUSE", "FOLLOW_STOP"):
+                self._follow_active = False
+                self.get_logger().info(f"{action} — 추종 중단 + 진행 중 goal 취소")
+                # 취소 경로를 새로 쓰지 않고 검증된 _on_cancel 을 그대로 탄다
+                # (goal 응답 대기 창의 취소 유실 처리까지 재사용).
+                self._on_cancel(String(data=""))
+                return
+            self.get_logger().warning(f"알 수 없는 추종 명령 무시: {action!r}")
+        except Exception as exc:  # noqa: BLE001 — 콜백은 죽지 않고 로깅
+            self.get_logger().error(f"추종 모드 처리 실패: {exc}")
+
     def _on_target_point(self, msg: PointStamped) -> None:
         """PointStamped 목표를 처리한다 (AI 확정 계약).
 
         방향 정보가 없으므로 미지정 쿼터니언으로 두고 auto_orient에
-        맡긴다.
+        맡긴다. 추종 게이트가 닫혀 있으면 버린다 — AI는 타겟이 잡히는 한
+        계속 발행하므로, 게이트가 없으면 추종 버튼과 무관하게 카트가 따라간다.
 
         Args:
             msg: AI가 발행한 목표 지점.
         """
+        if self._follow_gate_enabled and not self._follow_active:
+            self.get_logger().info(
+                "추종 대기 중 — /target_position 무시 (FE 추종 시작 버튼 필요)",
+                throttle_duration_sec=10.0,
+            )
+            return
         try:
             pose = PoseStamped()
             pose.header = msg.header
