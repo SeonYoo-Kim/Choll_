@@ -27,8 +27,6 @@ public class CartPositionTelemetryService {
 	private static final ZoneId DATABASE_ZONE = ZoneId.of("Asia/Seoul");
 	private static final String POSITION_EVENT_TYPE = "CART_POSITION_UPDATE";
 	private static final String UNIT_METERS = "meters";
-	// EM 하드웨어 제작 중이라 yaw 미수신 — EM이 송신을 시작하면 PositionSample에 편입할 것
-	private static final BigDecimal TEMPORARY_YAW = BigDecimal.ZERO;
 
 	private final CartRepository cartRepository;
 	private final RecentPositionBuffer positionBuffer;
@@ -78,6 +76,8 @@ public class CartPositionTelemetryService {
 
 		BigDecimal x = position.x();
 		BigDecimal y = position.y();
+		// EM이 yaw(라디안, SLAM 기준 CCW+)를 실기 발행 중 (2026-08-09 확정) — 없으면 0
+		BigDecimal yaw = position.yaw() == null ? BigDecimal.ZERO : position.yaw();
 		Long knownMapId = null;
 		if (UNIT_METERS.equalsIgnoreCase(positionUnit)) {
 			LibraryMap map = mapRepository.findById(mapId)
@@ -86,6 +86,8 @@ public class CartPositionTelemetryService {
 				coordinateConverter.toImagePixels(x, y, map);
 			x = converted.x();
 			y = converted.y();
+			// 방향도 위치와 같은 변환을 거쳐야 화면 마커가 실제 진행 방향을 가리킨다
+			yaw = coordinateConverter.toImageYaw(yaw, map);
 			knownMapId = map.getId();
 		}
 
@@ -114,7 +116,7 @@ public class CartPositionTelemetryService {
 			eventMapId,
 			x,
 			y,
-			TEMPORARY_YAW,
+			yaw,
 			true
 		));
 
@@ -147,7 +149,8 @@ public class CartPositionTelemetryService {
 		return !previous.getId().equals(current.getId());
 	}
 
-	// WS-FE-01 CART_POSITION_UPDATE 페이로드 (x·y는 지도 이미지 픽셀, mapId는 구역 미확정 시 null)
+	// WS-FE-01 CART_POSITION_UPDATE 페이로드 (x·y는 지도 이미지 픽셀, yaw는 이미지 기준 라디안,
+	// mapId는 구역 미확정 시 null)
 	private record PositionEventPayload(
 		Long mapId,
 		BigDecimal x,

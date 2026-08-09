@@ -34,8 +34,10 @@ class MqttPositionMessageHandlerTest {
 
 	@Test
 	void convertsAValidPositionMessageIntoATelemetrySample() {
+		// EM 실기 페이로드 형식 (2026-08-09 브로커 실측) — yaw 포함
 		handler().handle(MessageBuilder
-			.withPayload("{\"x\":100.5,\"y\":200.25}")
+			.withPayload("{\"x\":100.5,\"y\":200.25,\"yaw\":0.0591,"
+				+ "\"timestamp\":\"2026-08-08T18:14:39.719Z\"}")
 			.setHeader(MqttHeaders.RECEIVED_TOPIC, TOPIC)
 			.build());
 
@@ -46,7 +48,21 @@ class MqttPositionMessageHandlerTest {
 		assertThat(sample.cartId()).isEqualTo(CART_ID);
 		assertThat(sample.x()).isEqualByComparingTo("100.5");
 		assertThat(sample.y()).isEqualByComparingTo("200.25");
+		assertThat(sample.yaw()).isEqualByComparingTo("0.0591");
 		assertThat(sample.measuredAt()).isNotNull();
+	}
+
+	@Test
+	void acceptsLegacyPayloadWithoutYaw() {
+		handler().handle(MessageBuilder
+			.withPayload("{\"x\":100.5,\"y\":200.25}")
+			.setHeader(MqttHeaders.RECEIVED_TOPIC, TOPIC)
+			.build());
+
+		ArgumentCaptor<PositionSample> captor =
+			ArgumentCaptor.forClass(PositionSample.class);
+		verify(telemetryService).accept(captor.capture());
+		assertThat(captor.getValue().yaw()).isNull();
 	}
 
 	@Test

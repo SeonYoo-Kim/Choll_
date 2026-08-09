@@ -18,6 +18,7 @@ class RecentPositionBufferTest {
 				1L,
 				BigDecimal.valueOf(sequence),
 				BigDecimal.ZERO,
+			null,
 				Instant.EPOCH.plusSeconds(sequence)
 			));
 		}
@@ -36,12 +37,14 @@ class RecentPositionBufferTest {
 			1L,
 			BigDecimal.ONE,
 			BigDecimal.ONE,
+			null,
 			Instant.EPOCH
 		));
 		buffer.add(new PositionSample(
 			2L,
 			BigDecimal.TWO,
 			BigDecimal.TWO,
+			null,
 			Instant.EPOCH
 		));
 

@@ -86,6 +86,31 @@ public class SlamCoordinateConverter {
 		return new SlamPosition(x, y);
 	}
 
+	/**
+	 * SLAM 진행 방향(yaw, 라디안 CCW+) → 지도 이미지 기준 방향(라디안, 이미지 y축이 아래라 CW+).
+	 *
+	 * 위치와 마찬가지로 방향도 좌표 변환을 거쳐야 한다 — 평면도가 회전·반전 파생본이면
+	 * 세계 기준 0 rad(동쪽)가 화면에서는 동쪽이 아니다. 방향 벡터 (cos, sin)에 변환의
+	 * 선형부만 적용하고(평행이동은 방향에 무의미) 다시 각도로 되돌린다.
+	 * FE는 이 값을 CSS rotate(rad)로 그대로 쓴다 (화면 좌표도 y가 아래라 부호 규약이 같다).
+	 */
+	public BigDecimal toImageYaw(BigDecimal yaw, LibraryMap map) {
+		double radians = yaw.doubleValue();
+		double vx = Math.cos(radians);
+		double vy = Math.sin(radians);
+		double px;
+		double py;
+		if (map.hasAffineTransform()) {
+			px = map.getAffineA11().doubleValue() * vx + map.getAffineA12().doubleValue() * vy;
+			py = map.getAffineA21().doubleValue() * vx + map.getAffineA22().doubleValue() * vy;
+		} else {
+			// 기본식은 세로반전뿐 — 이미지에서는 y 부호만 뒤집힌다
+			px = vx;
+			py = -vy;
+		}
+		return BigDecimal.valueOf(Math.atan2(py, px)).setScale(4, RoundingMode.HALF_UP);
+	}
+
 	private static BigDecimal roundPixel(double value) {
 		return BigDecimal.valueOf(value).setScale(PIXEL_SCALE, RoundingMode.HALF_UP);
 	}
