@@ -27,10 +27,9 @@
     반전(-yaw, 세로반전), pixels 모드는 원값 중계
   - `TEMPORARY_YAW` 제거, WS CART_POSITION_UPDATE에 변환된 yaw 실림 (FE는 수정 불요 —
     이미 yaw로 마커 회전)
-- **명령·결과**: `gradlew.bat test` → **97개 중 96개 통과, 실패 1**:
-  `BackendApplicationTests.contextLoads` — 로컬 MySQL80 서비스가 내려가 있어 DB 연결 실패
-  (변경과 무관한 환경 문제, 서비스 기동 후 재확인 필요). 위치 패키지 단위 테스트
-  (`mqtt.position.*`, 신규 6 포함)는 전부 통과
+- **명령·결과**: `gradlew.bat test` → 1차 **97개 중 96개 통과** (실패 1 =
+  `contextLoads`, 로컬 MySQL80 서비스 중지가 원인 — 변경과 무관).
+  MySQL80 기동 후 재실행 → **contextLoads 포함 전부 통과 (97/97)**
 - **신규 테스트**: EM 실측 페이로드(yaw 포함) 파싱 / 구버전(yaw 없음) 호환 / pixels 원값 중계 /
   meters 세로반전(-0.5) / 아핀 회전 방향(+90°) / yaw 미수신 시 0
 

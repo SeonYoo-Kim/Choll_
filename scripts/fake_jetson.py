@@ -58,6 +58,7 @@ class FakeCart:
     def __init__(self, start_x: float, start_y: float, speed_mps: float) -> None:
         self.x = start_x
         self.y = start_y
+        self.yaw = 0.0  # 진행 방향 (라디안, SLAM 기준 CCW+) — 실물의 /robot_pose yaw에 대응
         self.speed = speed_mps
         self.target: tuple[float, float] | None = None
         self.lock = threading.Lock()
@@ -78,6 +79,7 @@ class FakeCart:
             dx = self.target[0] - self.x
             dy = self.target[1] - self.y
             distance = math.hypot(dx, dy)
+            self.yaw = math.atan2(dy, dx)  # 목표를 바라보는 방향 (도착 후에도 유지)
             reach = self.speed * dt_s
             if distance <= reach:
                 self.x, self.y = self.target
@@ -175,7 +177,13 @@ def main() -> None:
                 client.publish(TOPIC_HEARTBEAT, json.dumps({"timestamp": now_iso()}))
                 last_heartbeat = now
 
-            position = {"x": round(cart.x, 3), "y": round(cart.y, 3), "timestamp": now_iso()}
+            # yaw 포함 — EM 실기 페이로드 형식 (2026-08-09 브로커 실측)과 동일
+            position = {
+                "x": round(cart.x, 3),
+                "y": round(cart.y, 3),
+                "yaw": round(cart.yaw, 4),
+                "timestamp": now_iso(),
+            }
             client.publish(TOPIC_POSITION, json.dumps(position))
             if moving:
                 log.info("위치 발행 %s", position)
