@@ -42,6 +42,8 @@ import paho.mqtt.client as mqtt
 TOPIC_POSITION = "status/position"
 TOPIC_HEARTBEAT = "status/cart"
 PUBLISH_HZ = 2.0
+# 상단 통로의 평면도 y 픽셀 — 웨이포인트 이동은 이 높이를 경유해 구역 관통을 피한다
+CORRIDOR_Y_PX = 117.0
 HEARTBEAT_INTERVAL_S = 5.0
 
 # world(SLAM m) -> 평면도 픽셀 아핀 (library-map-affine-initial.sql과 동일해야 함)
@@ -65,6 +67,13 @@ WAYPOINTS: dict[str, tuple[float, float]] = {
 }
 
 
+def world_to_pixel(wx: float, wy: float) -> tuple[float, float]:
+    """SLAM 미터 → 평면도 픽셀 (아핀 정변환)."""
+    (a11, a12), (a21, a22) = AFFINE_A
+    tx, ty = AFFINE_T
+    return a11 * wx + a12 * wy + tx, a21 * wx + a22 * wy + ty
+
+
 def pixel_to_world(px: float, py: float) -> tuple[float, float]:
     """평면도 픽셀 → SLAM 미터 (아핀 역변환)."""
     (a11, a12), (a21, a22) = AFFINE_A
@@ -81,32 +90,33 @@ class PuppetCart:
         self.x, self.y = start_world
         self.yaw = 0.0
         self.speed = speed_mps
-        self.target: tuple[float, float] | None = None
+        self.targets: list[tuple[float, float]] = []
         self.lock = threading.Lock()
 
-    def go(self, world: tuple[float, float], jump: bool = False) -> None:
+    def go(self, waypoints: list[tuple[float, float]], jump: bool = False) -> None:
         with self.lock:
             if jump:
-                self.x, self.y = world
-                self.target = None
+                self.x, self.y = waypoints[-1]
+                self.targets = []
             else:
-                self.target = world
+                self.targets = list(waypoints)
 
     def step(self, dt_s: float) -> None:
         with self.lock:
-            if self.target is None:
-                return
-            dx = self.target[0] - self.x
-            dy = self.target[1] - self.y
-            distance = math.hypot(dx, dy)
-            self.yaw = math.atan2(dy, dx)
             reach = self.speed * dt_s
-            if distance <= reach:
-                self.x, self.y = self.target
-                self.target = None
-            else:
-                self.x += dx / distance * reach
-                self.y += dy / distance * reach
+            while self.targets and reach > 0:
+                dx = self.targets[0][0] - self.x
+                dy = self.targets[0][1] - self.y
+                distance = math.hypot(dx, dy)
+                if distance > 1e-9:
+                    self.yaw = math.atan2(dy, dx)
+                if distance <= reach:
+                    self.x, self.y = self.targets.pop(0)
+                    reach -= distance
+                else:
+                    self.x += dx / distance * reach
+                    self.y += dy / distance * reach
+                    reach = 0.0
 
 
 def main() -> None:
@@ -162,15 +172,19 @@ def main() -> None:
                 print(f"  속도 {cart.speed} m/s")
                 continue
             if raw in WAYPOINTS:
-                world = pixel_to_world(*WAYPOINTS[raw])
+                px, py = WAYPOINTS[raw]
             elif "," in raw:
                 px, py = (float(v) for v in raw.split(","))
-                world = pixel_to_world(px, py)
             else:
                 print("  모르는 명령입니다")
                 continue
-            cart.go(world, jump=jump)
-            print(f"  -> SLAM({world[0]:.2f}, {world[1]:.2f}) {'즉시' if jump else '활주'}")
+            # 직선 활주는 구역을 관통해 엉뚱한 진입 팝업을 만든다 —
+            # 실제 카트 동선처럼 상단 통로(y=117px)를 경유한다
+            cx, cy = world_to_pixel(cart.x, cart.y)
+            route_px = [(cx, CORRIDOR_Y_PX), (px, CORRIDOR_Y_PX), (px, py)]
+            waypoints = [pixel_to_world(*p) for p in route_px]
+            cart.go(waypoints, jump=jump)
+            print(f"  -> plan({px:.0f}, {py:.0f}) {'즉시' if jump else '통로 경유 활주'}")
     except (KeyboardInterrupt, EOFError):
         pass
     finally:
