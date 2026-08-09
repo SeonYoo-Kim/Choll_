@@ -13,6 +13,40 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-08 밤 — ✅ legacy_control launch 인자 추가, 114 passed·ruff 0건 (Claude)
+
+- **명령**: `ruff check follow_robot_launch.py` + ast 구문 검증 + `pytest ai/test/ -q`
+- **환경**: Windows 11 개발 PC, Python 3.12 (miniforge base), ruff 0.16.0
+- **커밋**: develop `dae413a` 이후 작업 트리 (커밋 전)
+- **맥락**: EM이 Nav2로 바퀴를 굴리는 구성에서 AI의 레거시 구동 발행이 충돌하는 문제 대비.
+  `legacy_control:=false`(기본 true=현행 유지)면:
+  - motor_node 미실행 → `/wheel_speed_cmd` 발행 중단 (타임아웃 정지 발행 포함)
+  - control_node의 `/cmd_vel` → `/cmd_vel_legacy`로 remap 격리
+    (노드는 유지 — `/target_distance` 디버그 거리 라벨 보존)
+  - `/target_position`·트랙/영상 하행은 모드 무관 동일. launch만 변경, 노드 코드 무수정.
+- **미검증**: Jetson 실기에서 `legacy_control:=false` 시 `ros2 topic list`로
+  `/wheel_speed_cmd` 부재·`/cmd_vel_legacy` 존재 확인 필요 (내일 EM 통합 시).
+- **참고**: `ruff format --check`는 이 launch 파일 전체 재정렬을 요구(기존 미적용 스타일) —
+  무관한 diff를 피하려 기존 스타일 유지, `ruff check`는 통과.
+
+<details>
+<summary>ruff / pytest 원본 출력</summary>
+
+```
+$ ruff check ai/src/person_follow_robot/launch/follow_robot_launch.py
+All checks passed!
+
+$ python -c "ast.parse(...)"
+구문 OK
+
+$ pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.17s
+```
+
+</details>
+
 ## 2026-08-08 — ✅ target_position_node 주석 한글화(로직 불변), 114 passed·ruff 수정 1건 (Claude)
 
 - **명령**: `ruff check --fix` + `ruff format` (변경 2파일) + `pytest ai/test/ -q`
