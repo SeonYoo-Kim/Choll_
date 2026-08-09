@@ -147,6 +147,26 @@ class SlamCoordinateConverterTest {
 	}
 
 	@Test
+	void yawFlipsSignUnderLegacyVerticalFlip() {
+		// 세계에서 반시계 0.5rad → 이미지(y 아래)에서는 시계 방향 = -0.5rad
+		assertThat(converter.toImageYaw(new BigDecimal("0.5"), map).doubleValue())
+			.isCloseTo(-0.5, org.assertj.core.data.Offset.offset(1e-4));
+	}
+
+	@Test
+	void yawFollowsAffineRotationWhenCalibrated() {
+		// 아핀 A=[[0,180],[180,0]] — 세계 동쪽(1,0)이 이미지 (0,180) = 아래(+90°)로 간다
+		when(map.hasAffineTransform()).thenReturn(true);
+		when(map.getAffineA11()).thenReturn(new BigDecimal("0"));
+		when(map.getAffineA12()).thenReturn(new BigDecimal("180"));
+		when(map.getAffineA21()).thenReturn(new BigDecimal("180"));
+		when(map.getAffineA22()).thenReturn(new BigDecimal("0"));
+
+		assertThat(converter.toImageYaw(BigDecimal.ZERO, map).doubleValue())
+			.isCloseTo(Math.PI / 2, org.assertj.core.data.Offset.offset(1e-4));
+	}
+
+	@Test
 	void pixelToMetersRoundTripsBackToSamePixel() {
 		stubMap("0.05", "-10", "-10", 600);
 		SlamCoordinateConverter.SlamPosition meters = converter.toSlamMeters(
