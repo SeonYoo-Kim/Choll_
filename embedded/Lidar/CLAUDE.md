@@ -24,7 +24,7 @@
   노트북(Ubuntu 22.04+Humble)에서 검증 완료된 것을 Jetson에 이식한 것.
 - 구성: `src/choll_slam_bringup`(라이다+rf2o+slam_toolbox 설정/런치),
   `src/choll_nav`(cart_pose_publisher + goal_forwarder), `src/choll_nav2`
-  (Nav2 파라미터·후진 제거 BT·런치), `src/choll_mqtt_bridge`(MQTT↔ROS2
+  (Nav2 파라미터·제한 BackUp BT·런치), `src/choll_mqtt_bridge`(MQTT↔ROS2
   브릿지 — BE 브로커 연동, python3-paho-mqtt 필요). upstream 2종은
   setup_jetson.sh가 클론.
 - 카트 3보드 분산 제어 중 **Jetson 담당**: AI 추종 연산 + LiDAR/SLAM/Nav2 처리.
@@ -92,8 +92,22 @@ SELECT_TARGET은 AI `fe_bridge_node` 담당 — 이 브릿지에서 처리 금�
   드라이버에서 자르면 rf2o가 정지 상태에서 yaw −0.4°/s로 단조 드리프트한다
   (2026-08-07 실측). `ignore_array`는 빈 문자열로 유지할 것.
 - `bench:=true` 파라미터는 모터리스 검증 전용 — **실주행은 기본 nav2_params.yaml**.
-- 후진 금지 설계: 커스텀 BT(navigate_to_pose_no_backup.xml)가 1차 방어 —
-  BT/behavior 설정 변경 시 이 전제를 깨지 말 것.
+- 후진 정책 (2026-08-09 개정 — 이전의 "후진 절대 금지"가 아니다):
+  - **정상 주행(FollowPath) 후진 금지** — DWB `min_vel_x: 0.0` 이 유일한 방어다.
+    이 값을 음수로 바꾸지 말 것.
+  - **recovery BackUp 만 제한적으로 허용** — `navigate_to_pose_no_backup.xml` 의
+    `<BackUp backup_dist="0.10" backup_speed="0.10"/>` (ClearingActions 다음, Spin 앞).
+    RoundRobin 자식 4개 + retries 6 이라 1회 주행당 최대 2회 = 누적 0.20 m 로 유계.
+  - 이를 위해 `velocity_smoother.min_velocity[x] = -0.10` 이 필요하다. `0.0` 이면
+    BackUp 의 음수 vx 가 clamp 되어 카트가 안 움직이고 time_allowance 까지 헛돈다
+    (behavior_server 도 `SetRemap("cmd_vel","cmd_vel_nav")` 로 smoother 를 통과한다).
+  - 안전은 Nav2 의 collision prediction 이 담당한다 — `simulate_ahead_time 2.0` x
+    `cycle_frequency 10.0` = 예견 0.19 m, footprint 가 **LETHAL(254)** 에 닿으면
+    `vel_pub_->publish()` **전에** FAILED 로 거부한다(253 INSCRIBED 는 거부 아님).
+  - 검증: 빈 공간 0.10 m 후진 성공 / 후방 장애물 시 2 ms 만에 거부·음수 명령 0건.
+    근거와 원본 출력은 `tests/TEST_LOG.md` 2026-08-09 항목 2건.
+  ⚠️ 위 3개(`min_vel_x` / BT BackUp / `min_velocity[x]`)는 한 세트다. 하나만 바꾸면
+     조용히 무력화되거나 의도치 않은 후진이 열린다.
 - Git: 피처 브랜치(`em/feature/*`) 커밋·푸시·MR 생성까지만. develop/main 직접
   푸시·로컬 머지 금지. 커밋 `[type] subject` (≤50자, 명사형, 마침표 없음).
 - 임시 산출물(build/ install/ log/ 지도 파일) 커밋 금지.
