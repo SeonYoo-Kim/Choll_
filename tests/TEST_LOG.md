@@ -6,6 +6,365 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-10 — 🟡 map_home_v5 매핑·localization 정합 ✅ / P2P Goal 도달 ✅ / **장애물 우회는 실패** + 최종 yaw 데드존 (relu 실기 / Claude 실행·기록)
+
+시연 전 최종 상태 동결 시점의 기록. **P2P Goal 도달과 장애물 우회를 분리 판정한다.**
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion`
+- **파라미터 변경 없음** (BackUp 2건 외 추가 수정 없음)
+
+### ① map_home_v5 매핑·저장
+
+v4(3.35 x 3.50 m)가 좁아 Nav2 전역 플래너의 가용 영역이 부족 → 재매핑.
+`rolling_window: False` 라 **전역 플래너의 세계 = static map 크기**라는 점이 재확인됐다.
+
+매핑 중 `/cmd_vel` 충돌 발견 — AI `control_node` 가 15 Hz 로 zero Twist 를 발행 중이었다.
+teleop 과 같은 토픽이라 매핑 동안만 팀원 승인 후 AI 스택 정지 (`choll-em` alias 로 복구).
+🔴 `~/.bashrc` 는 `source setup.bash` + alias 정의뿐 — **자동 실행 아님, 수정하지 않았다.**
+
+```
+map_home_v4 : 67x70 = 3.35 x 3.50 m   free 7.10 m²  occ 344  unknown 1506
+map_home_v5 : 79x80 = 3.95 x 4.00 m   free 9.17 m²  occ 404  unknown 2250
+origin v5   : (-2.83, -1.49)   범위 x[-2.83,1.12] y[-1.49,2.51]
+save_map=0 / serialize_map=0 → yaml·pgm·data·posegraph 4종 생성
+```
+
+**v1~v4 및 library_map 전부 보존** (타임스탬프 무변동).
+
+### ② localization 전환·정합 — 정상
+
+```
+map_server active / amcl active / slam_toolbox 없음
+map->odom : AMCL 단독   odom->base_link : EKF 단독 (rf2o publish_tf=False)
+/scan 11.46 / /odom_rf2o 10.00 / /odometry/filtered 9.98 / /wheel/odom 10.00 / /odom_zupt 10.06 Hz
+```
+
+정합(2D Pose Estimate 후):
+
+```
+scan endpoint -> 최근접 벽 셀 거리 : median 0.031 m, mean 0.037, p90 0.065, max 0.258
+1셀(0.05) 이내 73.9% / 2셀(0.10) 이내 98.6% / 유효빔 364/364 전부 맵 안에서 종료
+```
+
+⚠️ **"scan endpoint 가 map occupied 셀에 정확히 떨어지는 비율"(v4 42.1% / v5 43.3%)은
+쓰지 말 것** — ±1셀 양자화에 지배되는 지표라 정합 품질을 과소평가한다. 거리 분포가 정본.
+v4 때 "동적 장애물 476셀"로 보였던 것도 같은 아티팩트였다.
+
+### ③ P2P 장애물 회피 1차 — 🔴 우회 실패
+
+박스(높이 0.4 m 이상) 배치 후 RViz Goal 1회. 박스 탐지는 성공:
+
+```
+벽에서 0.15 m 이상 떨어진 LETHAL = 18셀 단일 클러스터 0.21 x 0.33 m
+centroid (map) (-0.82, +0.55), 로봇 기준 1.04 m / 방위 +58.1°
+scan 최근접 0.725 m
+```
+
+주행 결과:
+
+```
+final status : SUCCEEDED   duration 226.2 s   recoveries 8
+start (-0.295,-0.338) -> end (-0.881,+1.671)   직선 2.092 m
+max lateral excursion   : 0.094 m      <- 사실상 직진
+min footprint clearance : 0.000 m (ANY / DYNAMIC 모두)
+footprint-in-lethal     : 3 samples
+final distance          : 0.184 m (xy tol 0.35 이내)
+behavior : backup +1 / spin +1 / wait +1 / collision +1
+/cmd_vel : n=4420 min=-0.100 max=+0.150 negatives=57
+```
+
+**판정 B — 우회 실패.** 박스 중심에서 시작→종료 직선까지의 수직거리가 **0.255 m**,
+padded footprint 반폭이 **0.27 m** 로 기하학적으로 겹친다. 실제 횡이탈 0.094 m 는
+비켜간 것이 아니라 그대로 통과한 것이고, footprint 가 LETHAL 에 3샘플 진입한 것과 일치한다.
+
+⚠️ padding 0.05 m 가 있어 **padded footprint 의 LETHAL 접촉 = 물리 접촉은 아니다.**
+실기 육안 확인 결과 **박스 실제 접촉은 없었다**. 그래도 회피 기동은 성립하지 않았다.
+
+🔴 미해결 의문: `ObstacleFootprint` critic 은 footprint 가 LETHAL 이면 해당 trajectory 를
+예외로 기각하므로 원칙상 이 주행이 나오면 안 된다. 박스의 costmap 반영 시점인지, 전역 경로가
+박스를 통과했는지 이번 기록만으로 특정 못 함 — **다음 조사 대상.**
+
+### ④ 최종 yaw 정렬 데드존 (별도 이슈)
+
+xy tolerance 진입 후 순수 회전 명령이 계속 나갔으나 차체가 돌지 않았다.
+
+```
+cmd wz = +0.316 rad/s = 18.1 deg/s  → 12초면 217도 회전해야 함
+실측 yaw 변화 -0.20 deg (-0.02 deg/s)   = 전혀 안 돎
+PWM = 10 x (0.316 x 2.925) ≈ 9.2   vs 데드존 ≈ PWM 17 (차체 약 0.58 rad/s)
+```
+
+`RotateToGoal.slowing_factor 5.0` 으로 감속하다 데드존에 진입, `min_speed_theta: 0.0` 이라
+하한이 없다. **자력 탈출은 recovery Spin 이 했다** — `behavior_server.min_rotational_vel 0.70`
+은 데드존 위라 실제로 회전하고, 그 결과 최종 SUCCEEDED.
+
+**후보(미적용)**: `FollowPath.min_speed_theta` `0.0` → `0.60`.
+설치본 `dwb_plugins/xy_theta_iterator.hpp:60-71` 의 `isValidSpeed` 계약상,
+`min_speed_xy=0.0` 인 순수 회전에서는 `|theta| > min_speed_theta` 가 유일한 통과 경로라
+**속도 이터레이터 단계에서 하드 필터로 작동한다**(critic 가중치 무관, min_speed_xy 0 이어도 유효).
+0.58 rad/s 바로 위 값이며 Spin 의 0.70 보다 보수적.
+⚠️ 부작용: 주행 중 저속 회전 샘플이 전부 제거되어 미세 조향이 거칠어질 수 있음 — 동시 검증 필요.
+
+### ⑤ 시연 동결 시점 상태
+
+검증 완료: map_home_v5 localization / P2P Goal 도달 / 박스 실제 접촉 없음 /
+recovery BackUp 0.10 m·0.10 m/s / 후방 장애물 시 출발 전 거부 / DWB `min_vel_x=0.0` /
+`velocity_smoother.min_velocity.x=-0.10` / `footprint_padding=0.05` / 비대칭 footprint /
+LiDAR extrinsic x=+0.05 / scan_mask 비대칭 / inverted=true.
+
+Known issue: ①최종 yaw 데드존 ②Spin 이 우회 해결한 사례 ③좁은 공간 후미 회전 여유 부족
+④wheel odom 거리·yaw scale 미보정 ⑤RF2O pose 드리프트(디버깅 기준으로 쓰지 말 것)
+⑥**장애물 우회 미성립(위 ③)** — 시연 시 동적 장애물 시나리오는 피할 것.
+
+## 2026-08-09 — ✅ BackUp collision rejection 시험 PASS — 후방 장애물 시 출발 전 거부 확인 (relu 배치·승인 / Claude 실행·기록)
+
+제한 BackUp 도입 2단계. **"예측 경로에 장애물이 있으면 후진 명령을 내기 전에 거부하는가"** 를
+실물 박스로 검증했다. 결과: **거부까지 2 ms, 음수 속도 0건, 이동 0.0000 m.**
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion`
+- **파라미터 변경 없음** — BT `backup_dist=0.10`, `velocity_smoother.min_velocity`, DWB `min_vel_x` 전부 유지.
+  요청 0.20 m 는 하네스 내부의 일회성 action 값.
+
+### ① 소스 기준 재확인 (가정 금지 — 바이너리/원문 확인)
+
+🔴 **collision threshold 는 253 이 아니라 254 다.** 설치본에 `.cpp` 가 없어
+`libnav2_costmap_2d_client.so` 의 `CostmapTopicCollisionChecker::isCollisionFree` 를 역어셈블:
+
+```
+mov  x0, #0xc00000000000 ; movk x0, #0x406f, lsl #48   → 0x406FC00000000000 = double 254.0
+fmov d1, x0 ; fcmpe d0, d1                              → scorePose(pose) vs 254.0
+```
+
+**INSCRIBED(253) 은 collision 이 아니다** — inflation 셀은 거부를 유발하지 않는다.
+(이전 검토에서 "inscribed 0.15 m 가 마진을 준다"고 쓴 계산은 틀렸다. 정정함.)
+
+`track_unknown_space: False` 이므로 unknown 은 free(0) — 255 에 의한 오탐도 없다.
+
+**예견 범위** (`drive_on_heading.hpp` 원문):
+
+```
+max_cycle_count = cycle_frequency(10.0) x simulate_ahead_time(2.0) = 20
+k=0..19: sim = cmd_vel.linear.x x (k/10.0);  break if (|command_x| - traveled) - |sim| <= 0
+검사 지점 0, -0.01 ... -0.19  →  최대 예견 0.19 m (0.20 아님)
+```
+
+⚠️ **`backup_dist=0.10` 이면 |sim|>=0.10 에서 break 하므로 실제 예견은 0.09 m 뿐** — 실제 recovery 는
+"갈 거리만큼만" 본다. 시험이 0.20 m 를 요청한 이유가 이것(예견을 0.19 m 로 확장).
+
+**순서**: `if (!isCollisionFree(...)) { stopRobot(); return FAILED; }` 가
+`vel_pub_->publish()` **앞**에 있다 → 첫 사이클 거부 시 `/cmd_vel_nav` 에 단 1건도 안 나간다.
+
+### ② 배치와 pre-flight
+
+박스(높이 0.40 m 이상, 빈 종이박스)를 물리 범퍼 뒤 **0.213 m** 에 배치.
+
+```
+scan 정후방      : 0.760 m  → base_link x=-0.710 → 범퍼 뒤 0.21 m
+costmap LETHAL   : 846 cells
+reverse sweep    : 5초 샘플 [-0.12, -0.12, -0.12, -0.12, -0.12]   안정
+                   예견 0.19 m 대비 여유 0.07 m
+```
+
+🔴 **pre-flight 결함 1건 발견·수정.** 초기 시도에서 sweep 이 `-0.00`(현재 pose 에서 이미 충돌)을
+PASS 로 통과시켰다. 원인은 버그가 아니라 **박스를 옮긴 직후 작업자가 카트 옆에 서 있어** LETHAL 셀이
+padded footprint 에 닿은 것. 그대로 실행했다면 거부는 나오지만 **"예측"이 아니라 "이미 충돌 중"이라
+거부된 것**이라 검증 목적을 달성하지 못했다. 두 가지 게이트 추가:
+
+- 최소 거리 게이트 `0.05 m` — 현재 pose 에서 이미/거의 충돌이면 goal 미발행
+- 5초 안정성 샘플링 — 사람이 지나가는 순간적 오염 제거
+
+### ③ 결과 — PASS
+
+```
+action result   : ABORTED (GoalStatus 6)
+fail-safe fired : no
+displacement    : 0.0000 m
+/cmd_vel vx     : min=+0.0000 max=+0.0000 (n=20, negatives=0)
+behavior log    : collision+1  timeout+0  → FAILED 사유 = COLLISION PREDICTION
+```
+
+behavior_server 로그 타임스탬프:
+
+```
+1786284677.258  Running backup
+1786284677.260  Collision Ahead - Exiting DriveOnHeading     ← 2 ms 후
+1786284677.260  backup failed / Aborting handle
+```
+
+- **음수 `/cmd_vel` 0건** — 소스 순서(검사 → 발행) 분석과 정확히 일치. 명령이 아예 안 나갔다.
+- **이동 0.0000 m**, 박스 접촉 없음, fail-safe 미발동.
+- `time_allowance` 를 1 s 로 줄인 탓에 타임아웃 실패와 충돌 실패가 action 계층에서 구분되지 않으므로,
+  로그 문자열 증가분으로 사유를 판정했다 — `collision+1 / timeout+0`.
+
+### ④ 안전 설계 (4중, 전부 미발동)
+
+| 층 | 값 | 최악 이동 |
+|---|---|---|
+| collision 거부 | 0.12 m 에서 예측, 예견 0.19 m (여유 0.07) | 0 |
+| 하네스 auto-cancel | 변위 > 0.02 m 또는 음수 `/cmd_vel` 3연속 | 약 0.03 m |
+| `time_allowance` | 1 s | 실측 0.039 m/s → 약 0.04 m |
+| 물리 완충 | 범퍼↔박스 0.213 m | 이론적 최악 0.10 m 라도 0.11 m 여유 |
+
+### ⑤ 판정
+
+**"뒤가 막혀 있으면 BackUp 이 출발 전에 거부한다" 안전 체인 확인 완료.**
+1단계(빈 공간 10 cm 후진 성공) + 2단계(막힌 후방 거부) 로 양방향 검증됨.
+
+<details>
+<summary>원본 출력</summary>
+
+```text
+=== PRE-FLIGHT ===
+scan rear return: PASS  nearest=0.760 m (within +-40 deg of straight back)
+costmap LETHAL  : 846 cells
+reverse sweep   : samples over 5s -> [-0.12, -0.12, -0.12, -0.12, -0.12]
+                  PASS  range [-0.12, -0.12] m, lookahead margin 0.07 m
+
+overall pre-flight: PASS
+
+sending BackUp: target.x=-0.20 speed=0.10 allowance=1s
+goal accepted
+
+=== RESULT ===
+action result   : UNKNOWN(6)
+fail-safe fired : no
+displacement    : 0.0000 m
+/cmd_vel vx     : min=+0.0000 max=+0.0000 (n=20, negatives=0)
+behavior log    : collision+1  timeout+0
+  -> FAILED reason = COLLISION PREDICTION (correct)
+
+--- 시험 후 ---
+cmd_vel traffic (5s): silent
+
+[behavior_server 로그]
+[INFO] [1786284677.258048592] [behavior_server]: Running backup
+[WARN] [1786284677.260093505] [behavior_server]: Collision Ahead - Exiting DriveOnHeading
+[WARN] [1786284677.260214342] [behavior_server]: backup failed
+[WARN] [1786284677.260254664] [behavior_server]: [backup] [ActionServer] Aborting handle.
+```
+
+> `UNKNOWN(6)` 는 하네스의 status 라벨 매핑 오류다. `action_msgs/GoalStatus` 기준
+> 6 = **STATUS_ABORTED** 로, behavior FAILED 가 action 계층에 나타나는 정상 코드다.
+
+</details>
+
+### ⑥ 미조치
+
+- `embedded/Lidar/CLAUDE.md` §5 "후진 금지 설계: 커스텀 BT 가 1차 방어 — 이 전제를 깨지 말 것"
+  이 여전히 현재 설계와 충돌. **다음 단계에서 정정 필요.**
+- 다음 단계 후보: 실제 stuck 상황에서 recovery 전체 흐름(ClearCostmaps → BackUp → Spin → Wait) 검증.
+
+## 2026-08-09 — ✅ 제한 BackUp 10 cm 단독 시험 PASS / ⚠️ 요청 0.10 m → 실효 0.126 m, 속도추종 39% (relu 승인·후방확인 / Claude 실행·기록)
+
+벽 근접 정체(Spin → `Collision Ahead`) 해소를 위한 **recovery 전용 BackUp** 도입 1단계.
+Goal·FollowPath·stuck 재현 없이 `/backup` 액션만 **1회** 직접 호출해 단독 검증했다.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion`
+- **사전 근거**: 후방 360° 커버리지 실측(같은 날 항목), cmd_vel 배선 runtime 확인
+- **안전**: 사용자가 후방 공백 육안 확인 후 승인. 넓은 공간, 1회만.
+
+### ① 적용한 변경 2건
+
+| 파일 | 변경 |
+|---|---|
+| `choll_nav2/config/nav2_params.yaml` | `velocity_smoother.min_velocity` `[0.0,0.0,-1.2]` → `[-0.10,0.0,-1.2]` |
+| `choll_nav2/behavior_trees/navigate_to_pose_no_backup.xml` | RoundRobin에 `<BackUp backup_dist="0.10" backup_speed="0.10"/>` 삽입 (ClearingActions 다음, Spin 앞) + stale 헤더 주석 정정 |
+
+**DWB `min_vel_x: 0.0` 유지** — 정상 FollowPath 후진은 계속 금지, recovery만 후진 가능.
+
+`backup_speed 0.10`은 임의값이 아니라 데드존 하한: `PWM = 10 × wheel_rad/s`
+(`MOTOR_OPEN_LOOP_PWM_PER_RAD_S`), 데드존 ≈ PWM 17 → wheel 1.7 rad/s → 0.10 m/s.
+**0.05 m/s는 PWM 8.5로 데드존 안쪽이라 카트가 안 움직인다.**
+
+### ② runtime 확인 (Nav2 재기동 후)
+
+```
+/cmd_vel_nav  pub 5 = controller_server×1 + behavior_server×4   sub 1 = velocity_smoother
+/cmd_vel      pub 1 = velocity_smoother                          sub 1 = stm_serial_bridge
+min_velocity [-0.1, 0.0, -1.2] / DWB min_vel_x 0.0 / simulate_ahead_time 2.0
+footprint_padding 0.05 / behavior_plugins [spin, backup, drive_on_heading, wait]
+```
+
+🔴 **이전 BT 주석의 "behavior_server가 velocity_smoother를 우회한다"는 stale**이다.
+`SetRemap("cmd_vel","cmd_vel_nav")` 도입 후 4개 플러그인 전부 smoother를 통과한다.
+그래서 `min_velocity[x]=0.0`이면 BackUp 음수 vx가 0으로 잘려 **BT만 고쳐서는 동작하지 않는다.**
+
+### ③ 실측 결과 — SUCCEEDED
+
+```
+requested distance : 0.100 m        requested speed : 0.100 m/s
+base_link distance : 0.1023 m       (액션 구간, map->base_link)
+  + settle(4s)     : 0.1263 m
+  overshoot        : 0.0240 m
+wheel odom distance: 0.1394 m
+duration           : 2.60 s  (action) / 2.61 s (wall)
+cmd_vel_nav vx     : min -0.1000  max +0.0000  (n=27)
+cmd_vel     vx     : min -0.1000  max +0.0000  (n=72)
+yaw change         : -2.32 deg
+action result      : SUCCEEDED      collision abort : 없음
+```
+
+- **음수 vx가 smoother를 정확히 통과** — `/cmd_vel`에서 `-0.1000` 그대로 관측. clamp 없음.
+- **거리 추종 양호** — 액션 구간 0.1023 m vs 요청 0.100 m.
+
+### ④ 남은 이슈 2건 (FAIL 아님, 후속 반영 필요)
+
+**(1) 요청 0.10 m → 실효 0.126 m.** 액션 종료 후 4초 관측에서 2.4 cm(요청의 24%)가 추가됐다.
+관측 속도(평균 0.039 m/s)와 smoother 감속(−0.3 m/s²)으로 계산한 물리 코스팅은 **약 0.3 cm**뿐이라,
+2.4 cm의 대부분은 물리적 밀림이 아니라 **정착 구간 AMCL map→odom 보정**일 가능성이 높다.
+1회 시험 제약으로 둘을 분리 검증하지 못했다. **좁은 공간 계획 시에는 보수적으로 0.13 m로 잡을 것.**
+
+**(2) 속도 추종 39%.** 명령 0.10 m/s인데 실제 평균 0.039 m/s(2.60 s / 0.1023 m).
+램프(0.3 m/s²) 포함 예상 1.2 s 대비 2.2배 느리다. **PWM 17이 데드존 탈출 하한이라 여유가 없다**는 뜻.
+`time_allowance` 10 s 중 2.6 s만 썼으므로 현재는 안전하지만, 거리를 늘리거나 마찰이 크면 타임아웃에 근접한다.
+
+또한 wheel odom 0.1394 m vs map->base_link 0.1023 m = **1.36배 차이**. 같은 날 회전 시험의 yaw
+1.6~1.7배 차이와 같은 뿌리(스폰지 휠 변형에 의한 effective rolling radius 축소 + 슬립)로 보인다.
+wheel odom은 EKF에서 vx만 쓰이므로 영향은 남아 있다 — **직선 거리에서도 두 추정이 어긋난다는 점이
+이번에 새로 확인됐다.**
+
+⚠️ **0.1023 m 는 ground truth 가 아니다.** map->base_link 역시 AMCL+EKF 추정값이므로, 어느 쪽이
+물리적으로 맞는지 이 시험은 판정하지 못한다. 실제 이동거리는 **바닥 줄자/마킹 기준의 별도 직선
+calibration**으로만 확정할 수 있다. 그때까지 wheel parameter 를 고치지 말 것.
+
+yaw −2.32°는 10 cm 후진 기준 허용 범위. STM 방향전환 홀드(한쪽 바퀴 200 ms) 또는 휠 캠버 비대칭 후보.
+
+<details>
+<summary>원본 출력</summary>
+
+```text
+waiting for /backup action server ...
+before: x=-0.4186 y=+0.2368 yaw=-111.16 deg
+sending BackUp goal: target.x=-0.100 speed=0.100 allowance=10s
+
+=== BackUp 10cm 단독 시험 ===
+requested distance : 0.100 m
+requested speed    : 0.100 m/s
+after  : x=-0.3805 y=+0.3317 yaw=-113.76 deg
+settled: x=-0.3708 y=+0.3536 yaw=-113.48 deg
+base_link distance : 0.1023 m
+  incl. settle     : 0.1263 m
+  overshoot        : 0.0240 m
+yaw change         : -2.32 deg
+wheel odom distance: 0.1394 m
+duration (action)  : 2.60 s
+duration (wall)    : 2.61 s
+cmd_vel_nav vx     : min=-0.1000 max=+0.0000  (n=27)
+cmd_vel vx         : min=-0.1000 max=+0.0000  (n=72)
+action result      : SUCCEEDED
+
+--- 시험 후 정지 확인 ---
+cmd_vel traffic (5s): silent
+```
+
+</details>
+
+### ⑤ 미조치
+
+- `embedded/Lidar/CLAUDE.md` §5 "후진 금지 설계: 커스텀 BT가 1차 방어 — 이 전제를 깨지 말 것"이
+  이번 변경과 충돌한다. 지시 범위(2개 파일) 밖이라 미수정. **다음 단계에서 정정 필요.**
+- 다음 단계: 후방에 장애물을 두고 **collision checker가 BackUp을 실제로 거부하는지** 검증.
+
 ## 2026-08-09 — ⚠️ wheel odom yaw 1.6~1.7배 과대추정 확인 / 구동륜 실측 0.42 m·스폰지 휠 기록 (relu 실측 / Claude 측정·기록)
 
 재부팅 후 localization 안정 상태에서 **눈대중 90° 제자리 회전 1회**로 각 odometry 계층의 yaw 변화량을
