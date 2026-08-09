@@ -57,6 +57,16 @@ interface CartMapState {
   navStatus: NavigationStatus | null;
   /** cartStatus가 MOVING인지의 편의 플래그 */
   isMoving: boolean;
+  /**
+   * 도착 안내를 이미 한 구역 인덱스 — 그 구역을 떠나기 전에는 다시 알리지 않는다.
+   *
+   * 도착 안내는 두 경로로 열린다: ① 이동 명령의 ARRIVED 이벤트, ② **구역 진입**
+   * (추종·수동 발행처럼 명령 없이 위치만 움직이는 경우 — ①이 영영 오지 않으므로,
+   * 좌표가 구역 안으로 들어오는 순간 바로 연다). 경계에서 좌표가 흔들려 들락날락할 때마다
+   * 모달이 다시 뜨면 소음이라, 구역을 벗어난 뒤 재진입할 때만 다시 알린다.
+   * 화면 첫 진입(REST 복구)은 "진입"이 아니므로 알리지 않는다.
+   */
+  announcedZone: number | null;
   /** 도착 알림 모달에 표시할 구역 인덱스 (null이면 닫힘) */
   arrivalZone: number | null;
   /**
@@ -128,6 +138,7 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   isMoving: false,
   arrivalZone: null,
   landmarkDestination: null,
+  announcedZone: null,
   mapInfo: null,
   mapUnavailable: false,
   applyMapInfo: (mapInfo, isError) =>
@@ -170,12 +181,17 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
     const moved =
       Math.hypot(position.x - state.cartPosition.x, position.y - state.cartPosition.y) >
       MOVE_EPSILON_PERCENT;
+    // 구역 진입 = 도착 안내. 테이블행 이동 중(landmarkDestination)에는 정차점이 구역 안이라
+    // 지나는 길에 모달이 뜨면 안 되므로, 안내 없이 "알린 것"으로만 기록한다
+    const entered = zone !== null && zone !== state.announcedZone;
     set({
       cartPosition: position,
       cartYaw,
       cartZone: zone,
       lastPositionAt: now,
       positionIntervalMs,
+      announcedZone: zone,
+      ...(entered && state.landmarkDestination === null && { arrivalZone: zone }),
       // 추종(FOLLOWING) 등 다른 상태는 유지하고, 대기 중일 때만 이동 중으로 올린다
       ...(moved && !state.isMoving && state.cartStatus === 'IDLE' && { cartStatus: 'MOVING' }),
     });
@@ -187,7 +203,15 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
       state.cartStatus === 'MOVING' && !state.isMoving ? { cartStatus: 'IDLE' } : {},
     ),
   applyZone: (currentZoneId) =>
-    set({ cartZone: currentZoneId === null ? null : zoneIndexOf(currentZoneId) }),
+    set((state) => {
+      const zone = currentZoneId === null ? null : zoneIndexOf(currentZoneId);
+      const entered = zone !== null && zone !== state.announcedZone;
+      return {
+        cartZone: zone,
+        announcedZone: zone,
+        ...(entered && state.landmarkDestination === null && { arrivalZone: zone }),
+      };
+    }),
   applyNavigation: (status, destinationZoneId) => {
     if (MOVING_STATUSES.includes(status)) {
       set({ navStatus: status, isMoving: true, cartStatus: 'MOVING' });
@@ -203,7 +227,7 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
         isMoving: false,
         cartStatus: 'IDLE',
         landmarkDestination: null,
-        ...(zone !== null && { cartZone: zone }),
+        ...(zone !== null && { cartZone: zone, announcedZone: zone }),
         ...(zone !== null && !isLandmarkArrival && { arrivalZone: zone }),
       });
       return;
@@ -214,12 +238,18 @@ export const useCartMapStore = create<CartMapState>()((set, get) => ({
   abortMove: () =>
     set({ isMoving: false, cartStatus: 'IDLE', navStatus: null, landmarkDestination: null }),
   syncFromCart: ({ position, zoneId, status }) =>
-    set((state) => ({
-      cartPosition: position ?? state.cartPosition,
-      cartZone:
-        zoneId === undefined ? state.cartZone : zoneId === null ? null : zoneIndexOf(zoneId),
-      cartStatus: status ?? state.cartStatus,
-      isMoving: status === undefined ? state.isMoving : status === 'MOVING',
-    })),
+    set((state) => {
+      const cartZone =
+        zoneId === undefined ? state.cartZone : zoneId === null ? null : zoneIndexOf(zoneId);
+      return {
+        cartPosition: position ?? state.cartPosition,
+        cartZone,
+        // 첫 로드·재조회 복구는 "구역 진입"이 아니다 — 새로고침마다 모달이 뜨지 않게
+        // 이미 알린 것으로 기록만 한다
+        announcedZone: cartZone,
+        cartStatus: status ?? state.cartStatus,
+        isMoving: status === undefined ? state.isMoving : status === 'MOVING',
+      };
+    }),
   dismissArrival: () => set({ arrivalZone: null }),
 }));

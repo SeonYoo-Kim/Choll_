@@ -32,6 +32,7 @@ beforeEach(() => {
     isMoving: false,
     arrivalZone: null,
     landmarkDestination: null,
+    announcedZone: 2, // beforeEach 기준 카트가 Z3 안에 있으므로 이미 알린 상태
   });
 });
 
@@ -245,5 +246,48 @@ describe('cartMapStore', () => {
     useCartMapStore.getState().startMove('반납 테이블');
     useCartMapStore.getState().abortMove();
     expect(useCartMapStore.getState().landmarkDestination).toBeNull();
+  });
+
+  it('이동 명령 없이 좌표가 구역에 진입하면 즉시 도착 모달을 연다', () => {
+    // 추종·수동 발행 시나리오 — ARRIVED 이벤트가 영영 오지 않는다
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0); // 구역 이탈
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0); // Z1 진입
+    expect(useCartMapStore.getState().arrivalZone).toBe(0);
+  });
+
+  it('같은 구역 안에서 좌표가 움직이는 동안은 모달을 다시 열지 않는다', () => {
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
+    useCartMapStore.getState().dismissArrival();
+    useCartMapStore
+      .getState()
+      .applyPosition({ x: ZONE_POSITIONS[0].x + 1, y: ZONE_POSITIONS[0].y + 1 }, 0);
+    expect(useCartMapStore.getState().arrivalZone).toBeNull();
+  });
+
+  it('구역을 벗어났다 재진입하면 다시 알린다', () => {
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
+    useCartMapStore.getState().dismissArrival();
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0); // 이탈
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0); // 재진입
+    expect(useCartMapStore.getState().arrivalZone).toBe(0);
+  });
+
+  it('테이블행 이동 중 경유하는 구역 진입은 모달을 열지 않는다', () => {
+    useCartMapStore.getState().startMove('반납 테이블');
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0); // 정차점이 있는 Z1 진입
+    expect(useCartMapStore.getState().arrivalZone).toBeNull();
+  });
+
+  it('첫 로드(REST 복구)로 구역이 채워지는 것은 진입으로 치지 않는다', () => {
+    useCartMapStore.setState({ cartZone: null, announcedZone: null });
+    useCartMapStore.getState().syncFromCart({ zoneId: 1, status: 'IDLE' });
+    expect(useCartMapStore.getState().arrivalZone).toBeNull();
+    // 하지만 그 구역을 떠났다 돌아오면 알린다
+    useCartMapStore.getState().applyPosition(OUTSIDE_ZONES, 0);
+    useCartMapStore.getState().applyPosition(ZONE_POSITIONS[0], 0);
+    expect(useCartMapStore.getState().arrivalZone).toBe(0);
   });
 });
