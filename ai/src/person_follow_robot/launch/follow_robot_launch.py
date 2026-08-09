@@ -10,7 +10,7 @@ Launch the full pipeline: camera → detector → tracker → re-id → control 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -69,6 +69,14 @@ def generate_launch_description() -> LaunchDescription:
             "mqtt_password",
             default_value="",
             description="MQTT 브로커 비밀번호.",
+        ),
+        DeclareLaunchArgument(
+            "legacy_control",
+            default_value="true",
+            description="AI 직접 구동(레거시 PID). false면 EM Nav2가 바퀴를 "
+            "굴리는 구성: motor_node 미실행 + control_node의 /cmd_vel을 "
+            "/cmd_vel_legacy로 격리 (거리 측정 /target_distance는 유지). "
+            "예: legacy_control:=false",
         ),
         Node(
             package="person_follow_robot",
@@ -140,6 +148,16 @@ def generate_launch_description() -> LaunchDescription:
             executable="control_node",
             name="control_node",
             output="screen",
+            # legacy_control:=false면 /cmd_vel을 격리 토픽으로 보내 EM Nav2와의
+            # 이중 발행 충돌을 막는다 (노드는 계속 떠서 /target_distance 발행)
+            remappings=[(
+                "/cmd_vel",
+                PythonExpression([
+                    "'/cmd_vel' if '",
+                    LaunchConfiguration("legacy_control"),
+                    "'.lower() in ('true', '1') else '/cmd_vel_legacy'",
+                ]),
+            )],
             parameters=[{
                 "target_distance_m": 1.0,
                 "camera_fov_deg": 58.0,
@@ -158,6 +176,9 @@ def generate_launch_description() -> LaunchDescription:
             executable="motor_node",
             name="motor_node",
             output="screen",
+            # EM Nav2 구성(legacy_control:=false)에서는 /wheel_speed_cmd 발행 자체를
+            # 중단해야 하므로 노드를 띄우지 않는다 (타임아웃 정지 발행도 충돌 요인)
+            condition=IfCondition(LaunchConfiguration("legacy_control")),
             parameters=[{
                 "wheel_radius_m": 0.065,
                 "wheel_separation_m": 0.30,   # TODO: 조립 후 실측값으로 교체

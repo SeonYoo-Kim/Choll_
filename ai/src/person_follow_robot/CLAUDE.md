@@ -51,6 +51,9 @@ ros2 launch person_follow_robot follow_robot_launch.py
 #   fe_bridge:=true auto_select:=false \
 #     be_video_ws_url:=ws://<BE호스트>:8080/ws/carts/1/video/publish mqtt_host:=<브로커IP>
 #                                 # FE 화면에서 타겟을 직접 고르는 모드 (자동 선택 끔)
+#   legacy_control:=false         # EM Nav2가 바퀴를 굴릴 때 (AI의 /cmd_vel·/wheel_speed_cmd
+#                                 # 발행 차단 — motor_node 미실행, cmd_vel은 /cmd_vel_legacy로
+#                                 # 격리. /target_distance·/target_position은 그대로 발행)
 
 # 터미널 3) 타겟 선택 — 기본은 자동 (카메라 앞에 서면 최대 bbox가 0.5초 뒤 자동 선택됨)
 # 수동으로 고르고 싶을 때만 (launch에 auto_select_enabled:=false 주고):
