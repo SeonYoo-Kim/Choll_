@@ -88,10 +88,67 @@ $ ruff check choll_nav choll_mqtt_bridge
 | 벽 회피 | `inflation_radius` 0.25/0.30 + footprint `[[0.10,0.22]…[-0.50,0.22]]` | :222 |
 | 사서에 안 부딪힘 | `approach_distance: 1.0` (goal 을 1 m 앞에) | interface.launch.py |
 
-### ⑤ 미완 — 종단 검증
+### ⑤ 종단 검증 ✅ — 실주행 관통 (03:55 추가)
 
-`/target_person` 이 0 Hz(타겟 미등록)라 **실제 추종 주행은 아직 못 봤다.**
-FE에서 대상 선택 → 추종 시작을 눌러야 `/target_position` 이 흐른다.
+첫 시도는 실패했고, **원인을 로그가 아니라 데이터로 특정**했다. AI가 터미널에서
+돌아 `reid_node` 로그를 읽을 수 없어, Re-ID 등록 게이트 조건을 `/person_tracks` 의
+bbox 로 직접 계산하는 프로브를 만들었다.
+
+```
+=== 10초 관측: 샘플 40개 ===
+  트랙 ID 분포: {103: 40}          ← FE 모달에서 고른 ID 는 97
+  ID=103  중심=(494,237)  크기=288x471
+  bbox  x:350~638   y:1~472   (화면 640x480)
+  화면 면적 대비: 44.1%
+  ✅ 면적 44.1% <= 50%
+  🔴 좌우 잘림 (x 350~638, 여유 4.0px 필요) → crop_side_margin_px 위반
+```
+
+**실패 원인 2가지 (둘 다 "사람이 너무 가까움"에서 파생)**
+1. ByteTrack ID 가 97→103 으로 바뀌어 `reid_node._select_callback` 이 거부
+   (`Rejected target ID=…: not currently tracked`). 사람이 가까워 탐지가 끊겼다
+   붙었다 하면서 ID 가 계속 새로 발급된다.
+2. bbox 우측이 638px 로 화면 경계(640)에 2px 까지 붙어 `crop_side_margin_px: 4.0`
+   위반 → Memory Bank 초기화 거부. 잘린 크롭은 Re-ID 특징으로 쓸 수 없다.
+
+**조치: 2~3 m 뒤로 물러서서 전신이 화면 중앙에 들어온 상태로 재선택.** 성공.
+
+```
+=== 추종 파이프라인 감시 90초 ===
+  [  43.0s] nav_status → NAVIGATING
+  [  43.6s] nav_status → SUCCEEDED
+    45.0s  tracks 1307 | target  479 | pos  479 | cmd  282
+  ... (NAVIGATING↔SUCCEEDED 20여 회 반복)
+=== 단계별 결과 ===
+  follow_mode      : FOLLOW_STOP
+  /person_tracks   : 2562건
+  /target_person   : 863건        ← Re-ID 등록 성공
+  /target_position : 863건        ← 지도 좌표 산출
+  /cmd_vel         : 500건 (최대 속도 0.464)
+  ✅ 추종 경로 전 구간 관통 — 카트가 실제로 주행 명령을 받고 있다.
+```
+
+카트가 실제로 이동한 증거 — 추종 전후 `status/position` 좌표 변화:
+
+```
+추종 전 : {"x":-0.008,"y":-0.0,   "yaw":0.0591,  ...}
+추종 후 : {"x":-1.158,"y":0.597, "yaw":-2.1831, ...}   1.79 Hz
+```
+
+### ⑥ 🔴 남은 리스크 — nav_status 요동이 BE 로 그대로 올라간다
+
+추종 중 `nav_status` 가 **NAVIGATING ↔ SUCCEEDED 를 90초에 20여 회** 오간다.
+1 m 앞 goal 이라 금방 도달하고 곧바로 새 goal 이 오기 때문이며, 추종 동작 자체는
+정상이다. 그런데 브릿지는 **상태 전이마다** `status/nav-result` 를 QoS1 로 올린다.
+
+- 추종만 하는 동안은 BE 에 진행 중인 이동 세션이 없어 대체로 무해하다.
+- 🔴 **추종 중에 FE 로 구역 이동을 걸면** 추종이 뱉는 `SUCCEEDED` 가 그 이동
+  세션을 즉시 종료시킬 수 있다. BE 는 반대 방향(NAVIGATING 중 추종 시작)만
+  막고 있고(`FollowControlService.java:58`), `NavigationService.start` 는
+  FOLLOWING 여부를 검사하지 않는다.
+- **데모 운용 규칙: 추종과 구역 이동을 동시에 걸지 말 것.**
+- 코드로 막으려면 goal_forwarder 가 추종 모드일 때 nav_status 발행을 억제하는
+  방법이 있으나, 계약 변경이라 BE 와 합의 후 진행한다.
 
 ### ⑥ 부수 확인 — AI `/cmd_vel` 차단 배포
 
