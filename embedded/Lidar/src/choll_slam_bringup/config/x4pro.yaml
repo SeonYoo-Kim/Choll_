@@ -38,8 +38,16 @@ ydlidar_ros2_driver_node:
 
     # ---- 좌표/방향 ----
     # 지도가 좌우 반전이면 inverted, 전/후가 뒤집혀 보이면 reversion을 토글해서 실측 확인
+    #
+    # 🔴 2026-08-09 손회전 실측: 카트를 손으로 CCW 45~90도 돌렸을 때
+    #    /wheel/odom yaw +69.04deg (정상) 인데 /odom_rf2o yaw -61.66deg (반대) 였다.
+    #    크기는 맞고 부호만 반대 = 스케일이 아니라 **거울 반사**. 회전(reversion)으로는
+    #    각속도 부호가 뒤집히지 않으므로 각도 방향을 반전하는 inverted 를 true 로 시험한다.
+    #    (미러된 스캔은 그 스캔으로 만든 지도와는 자기정합적이라 정지 scan_fit 은 높게
+    #     나온다 — 회전할 때만 드러난다.)
+    #    ⚠️ true 로 확정되면 기존 map_home / map_home_v2 는 모두 재매핑 대상이다.
     reversion: false
-    inverted: false
+    inverted: true
 
     # ---- 범위 (Datasheet Chart 1) ----
     angle_max: 180.0

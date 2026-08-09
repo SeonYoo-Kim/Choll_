@@ -86,7 +86,12 @@ controller_server:
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
-    odom_topic: /odom_rf2o
+    # 🔴 2026-08-09 변경: /odom_rf2o -> /odometry/filtered.
+    #    DWB 는 이 토픽의 twist 를 궤적 생성의 현재 속도로 쓴다. raw rf2o 는 정지
+    #    상태에서도 angular.z std 0.0346 rad/s (평균의 100배) 로 요동쳐 기준점이
+    #    흔들렸다. EKF+ZUPT 를 거친 /odometry/filtered 는 같은 조건에서
+    #    std 0.000105 로 약 330배 안정적이다 (2026-08-09 8분 정지 실측).
+    odom_topic: /odometry/filtered
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
@@ -102,6 +107,16 @@ controller_server:
       yaw_goal_tolerance: 0.785  # 45° — 제자리 회전 최소화 (STM32 방향전환 홀드)
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
+      # trajectory_generator_name 은 지정하지 않는다 = DWB 기본
+      # StandardTrajectoryGenerator.
+      # 🔴 2026-08-09 A/B 시험 결과 `dwb_plugins::LimitedAccelGenerator` 는
+      #    **이 플랜트에서 쓸 수 없다.** 그 생성기는 현재 속도에서
+      #    acc_lim x sim_period(=1/controller_frequency=0.05s) 만큼만 샘플링하는데,
+      #    theta 는 1.6*0.05 = 0.08 rad/s (바퀴 0.23) 로 모터 데드존(바퀴 약 0.7)
+      #    아래다. 바퀴가 안 도니 측정 속도가 0에 머물고 샘플 창도 안 커져
+      #    **출발 자체를 못 했다** (실측: |wz| 98.4% 가 0.2 미만, 0.2~1.0 구간 0개).
+      #    선형축도 0.3*0.05 = 0.015 m/s 로 같은 문제다.
+      #    되살리려면 데드존 보상이 먼저다 — sim_period 를 임의로 키우지 말 것.
       debug_trajectory_details: True
       min_vel_x: 0.0             # 후진 금지 (후방 미검증 + 방향전환 홀드 회피)
       min_vel_y: 0.0
@@ -292,8 +307,13 @@ behavior_server:
     robot_base_frame: base_link
     transform_tolerance: 0.5
     simulate_ahead_time: 2.0
-    # ⚠ Humble에서 behavior는 velocity_smoother를 우회해 /cmd_vel 직접 발행
-    #   → 여기서 자체 클램프 (STM32에 클램프 없음)
+    # Humble 기본 배선에서 behavior는 velocity_smoother를 우회해 /cmd_vel에 직접
+    # 발행한다. 2026-08-09부터 nav.launch.py의 SetRemap("cmd_vel","cmd_vel_nav")로
+    # smoother 입력단에 합류시켜 우회를 없앴다 — 즉 아래 값은 이제 **1차 리미터**이고
+    # velocity_smoother가 2차(최종) 리미터다.
+    # ⚠ 그래도 삭제하지 말 것: SetRemap 전제(use_composition=False)가 깨지거나
+    #   launch를 우회해 노드를 직접 띄우면 이 값이 유일한 클램프가 된다
+    #   (STM32에는 클램프가 없다).
     max_rotational_vel: 1.2
     min_rotational_vel: 0.70   # 2026-08-07 실측 반영: 0.15는 PWM 4로 데드존. 0.70 = PWM 20.5
     rotational_acc_lim: 1.6
