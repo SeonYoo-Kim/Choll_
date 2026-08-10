@@ -8,7 +8,7 @@ import { SlotFullModal } from './SlotFullModal';
 
 import { SlotStatus } from '@/shared/api/generated/model';
 import { getListSlotsQueryKey } from '@/shared/api/generated/slots/slots';
-import { DEMO_CART_ID, PHYSICAL_SLOT_COUNT } from '@/shared/config/cart';
+import { CART_FULL_THRESHOLD, DEMO_CART_ID, PHYSICAL_SLOT_COUNT } from '@/shared/config/cart';
 
 import type { Slot } from '@/shared/api/generated/model';
 
@@ -25,6 +25,12 @@ const slot = (slotNumber: number, status: Slot['status']): Slot => ({
 
 const fullSlots = (): Slot[] =>
   Array.from({ length: PHYSICAL_SLOT_COUNT }, (_, i) => slot(i + 1, SlotStatus.OCCUPIED));
+
+/** 실물 슬롯 중 앞에서부터 count개만 찬 목록 (나머지는 빈 칸) */
+const partiallyFullSlots = (count: number): Slot[] =>
+  Array.from({ length: PHYSICAL_SLOT_COUNT }, (_, i) =>
+    slot(i + 1, i < count ? SlotStatus.OCCUPIED : SlotStatus.EMPTY),
+  );
 
 /**
  * 슬롯 목록은 쿼리 캐시에서 읽으므로 캐시에 직접 심는다.
@@ -55,18 +61,23 @@ function renderModal(slots: Slot[]) {
 const popup = () => screen.queryByRole('alertdialog');
 
 describe('SlotFullModal', () => {
-  it('실물 슬롯이 모두 차면 정리 요청 팝업을 띄운다', () => {
-    renderModal(fullSlots());
+  it('임계값(4칸)만큼 차면 정리 요청 팝업을 띄운다', () => {
+    renderModal(partiallyFullSlots(CART_FULL_THRESHOLD));
     expect(popup()).toBeInTheDocument();
-    expect(screen.getByText('슬롯이 모두 찼어요')).toBeInTheDocument();
+    expect(screen.getByText('카트가 가득 찼어요')).toBeInTheDocument();
     expect(screen.getByText(/북카트를 정리해주세요/)).toBeInTheDocument();
   });
 
-  it('한 칸이라도 비어 있으면 띄우지 않는다', () => {
-    const slots = fullSlots();
-    slots[1] = slot(2, SlotStatus.EMPTY);
-    renderModal(slots);
+  it('임계값 미만이면 띄우지 않는다', () => {
+    renderModal(partiallyFullSlots(CART_FULL_THRESHOLD - 1));
     expect(popup()).not.toBeInTheDocument();
+  });
+
+  it('빈 슬롯은 담긴 책 목록에 표시하지 않는다', () => {
+    renderModal(partiallyFullSlots(CART_FULL_THRESHOLD));
+    // 찬 4칸만 나열 — 빈 5번 슬롯이 "인식 중"으로 잘못 표시되면 안 된다
+    expect(screen.getAllByRole('listitem')).toHaveLength(CART_FULL_THRESHOLD);
+    expect(screen.queryByText('인식 중')).not.toBeInTheDocument();
   });
 
   it('담긴 책 목록을 슬롯 번호와 함께 보여준다', () => {
@@ -99,9 +110,8 @@ describe('SlotFullModal', () => {
     await userEvent.click(screen.getByRole('button', { name: '확인' }));
     expect(popup()).not.toBeInTheDocument();
 
-    const withRoom = fullSlots();
-    withRoom[3] = slot(4, SlotStatus.EMPTY);
-    await setSlots(withRoom);
+    // 임계값 아래로 내려가야 만적이 풀린다
+    await setSlots(partiallyFullSlots(CART_FULL_THRESHOLD - 1));
     expect(popup()).not.toBeInTheDocument();
 
     await setSlots(fullSlots());

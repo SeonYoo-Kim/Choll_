@@ -1,5 +1,5 @@
 import { SlotStatus } from '@/shared/api/generated/model';
-import { PHYSICAL_SLOT_COUNT } from '@/shared/config/cart';
+import { CART_FULL_THRESHOLD, PHYSICAL_SLOT_COUNT } from '@/shared/config/cart';
 
 import type { Slot } from '@/shared/api/generated/model';
 
@@ -14,19 +14,16 @@ export function physicalSlots(slots: readonly Slot[]): Slot[] {
 }
 
 /**
- * 카트가 꽉 찼는지 — 실물 슬롯에 빈 자리가 하나도 없는 상태.
+ * 카트가 꽉 찼는지 — 실물 슬롯 중 CART_FULL_THRESHOLD개 이상 책이 올라간 상태.
  *
  * EMPTY가 아니면 찬 것으로 본다. 인식 중(RECOGNIZING)이나 인식 실패(RECOGNITION_FAILED)도
  * 책이 물리적으로 올라가 있어 더 담을 수 없기 때문이다 — "책을 못 읽었으니 빈 칸"으로 세면
  * 사서에게 있지도 않은 자리를 알려주게 된다.
  *
- * 실물 슬롯을 다 받아보지 못했으면(응답 지연·부분 응답) 찬 것으로 판단하지 않는다.
- * 3개만 받은 상태에서 그 3개가 찼다고 "만적"을 띄우면 거짓 경고가 된다.
+ * 부분 응답(응답 지연으로 실물 슬롯 일부만 도착)은 찬 슬롯을 실제보다 적게 셀 수만 있어
+ * 거짓 경고가 나지 않는다 — 받은 것 중 임계값만큼 찼다면 그 책들은 실제로 카트에 있다.
  */
 export function isCartFull(slots: readonly Slot[]): boolean {
-  const physical = physicalSlots(slots);
-  return (
-    physical.length === PHYSICAL_SLOT_COUNT &&
-    physical.every((slot) => slot.status !== SlotStatus.EMPTY)
-  );
+  const occupied = physicalSlots(slots).filter((slot) => slot.status !== SlotStatus.EMPTY);
+  return occupied.length >= CART_FULL_THRESHOLD;
 }

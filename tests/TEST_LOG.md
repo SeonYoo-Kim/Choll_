@@ -31,6 +31,35 @@
 - **주의**: v1 기준 `library-map-affine-initial.sql`은 폐기. 시연장 3점 캘리브레이션 권장은 유지
   (이 값도 평면도 도식화 한계로 ~25cm 수준 오차 내포)
 
+## 2026-08-10 — ✅ FE: 만적 팝업 임계값 5→4 (Claude)
+
+- **배경**: RFID 5개(실물 슬롯 전부)가 찍혀야 만적 팝업이 떴는데, 4개가 찍히면 미리 뜨도록 요청
+- **변경**:
+  - `shared/config/cart.ts`: `CART_FULL_THRESHOLD = 4` 신규 (실물 슬롯 수 5는 그대로 —
+    슬롯 필터링 용도라 분리)
+  - `slotCapacity.isCartFull`: "실물 슬롯 전부 비어있지 않음" → "찬 슬롯 ≥ 임계값" 카운트로 변경.
+    부분 응답 가드는 제거 — 카운트 방식은 실제보다 적게 셀 수만 있어 거짓 경고가 없음
+  - `SlotFullModal`: 목록에 찬 슬롯만 표시(빈 칸이 "인식 중"으로 나오던 문제 예방),
+    문구 "슬롯이 모두 찼어요/5개 가득" → "카트가 가득 찼어요/N개 담김"
+- **환경**: Windows 11, pnpm + Vitest 4.1.10, 커밋 b7df980 (develop)
+- **명령·결과**: `pnpm vitest run src/features/slot-board` → **7 files, 35 tests, 0 failures** /
+  `pnpm eslint src/features/slot-board src/shared/config/cart.ts` → 0 problems
+
+<details>
+<summary>pnpm vitest run src/features/slot-board</summary>
+
+```
+ RUN  v4.1.10 C:/SSAFY/workspace/Choll/frontend
+
+ Test Files  7 passed (7)
+      Tests  35 passed (35)
+   Start at  08:08:04
+   Duration  31.06s (transform 7.85s, setup 36.87s, import 25.51s, tests 818ms, environment 119.94s)
+```
+
+</details>
+
+
 ## 2026-08-09 — ✅ FE: 구역 진입 즉시 도착 팝업 (Claude)
 
 - **배경**: 도착 모달이 이동 명령의 ARRIVED 이벤트에만 묶여 있어, 추종·수동 위치 발행처럼
