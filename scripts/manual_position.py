@@ -9,6 +9,8 @@
 
 사용법:
     python scripts/manual_position.py [--broker localhost]
+    # 배포 브로커(EC2 mosquitto)에 직접 발행 — 서버에 띄울 필요 없이 내 PC에서 실행
+    python scripts/manual_position.py --broker your-server.example.com --username choll --password CHANGE_ME
 
 프롬프트 명령:
     z1 / z2 / z3      각 통로 중앙으로 이동
@@ -46,9 +48,9 @@ PUBLISH_HZ = 2.0
 CORRIDOR_Y_PX = 117.0
 HEARTBEAT_INTERVAL_S = 5.0
 
-# world(SLAM m) -> 평면도 픽셀 아핀 (library-map-affine-initial.sql과 동일해야 함)
-AFFINE_A = ((-127.740647802, -61.889825701), (47.371462021, -97.774734011))
-AFFINE_T = (834.804938333, 357.108555490)
+# world(SLAM m) -> 평면도 픽셀 아핀 (library-map-affine-v2.sql과 동일해야 함 — v2 지도 기준)
+AFFINE_A = ((-20.317241, 144.564682), (108.029244, 15.182520))
+AFFINE_T = (917.881, 175.555)
 
 # 평면도 픽셀 웨이포인트 (frontend zones.ts 실측값 기준)
 WAYPOINTS: dict[str, tuple[float, float]] = {
@@ -124,10 +126,14 @@ def main() -> None:
     parser.add_argument("--broker", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--speed", type=float, default=0.5)
+    parser.add_argument("--username", default=None, help="브로커 인증 계정 (배포 브로커는 필수)")
+    parser.add_argument("--password", default=None)
     args = parser.parse_args()
 
     cart = PuppetCart(pixel_to_world(*WAYPOINTS["start"]), args.speed)
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="manual-position")
+    if args.username is not None:
+        client.username_pw_set(args.username, args.password)
     client.connect(args.broker, args.port)
     client.loop_start()
 
