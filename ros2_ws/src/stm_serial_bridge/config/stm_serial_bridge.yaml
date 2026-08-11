@@ -1,0 +1,91 @@
+# stm_serial_bridge 공통 파라미터.
+#
+# launch 파일이 이 파일을 읽어 노드에 넘긴다:
+#   ros2 launch stm_serial_bridge stm_serial_bridge.launch.py
+#
+# 개별 값만 덮어쓰려면 launch 인자를 쓴다 (파일 수정 불필요):
+#   ros2 launch stm_serial_bridge stm_serial_bridge.launch.py serial_port:=/dev/ttyACM1
+#
+# ⚠️ 노드 이름(`stm_serial_bridge`)이 키와 일치해야 파라미터가 적용된다.
+#    노드 이름·네임스페이스를 바꾸면 이 키도 함께 바꿔야 한다.
+stm_serial_bridge:
+  ros__parameters:
+    # --- Serial 포트 ---
+    # 하드웨어: /dev/ttyACM0 (실기 확인된 값)
+    # mock/PTY: launch 의 mode:=mock 이 이 값을 mock PTY 경로로 덮어쓴다
+    serial_port: /dev/ttyACM0
+    baud_rate: 115200
+
+    # --- 차동구동 기하 ---
+    # ⚠️ `config/wheel_odometry.yaml` 의 wheel_radius_m(0.0587)과 **의도적으로 다르다.**
+    #    여기 값은 `/cmd_vel`(m/s) -> 바퀴 목표 각속도(rad/s) 변환에 쓰이는 **명목 기구 치수**로,
+    #    엔코더가 전혀 개입하지 않는 개루프 명령 경로다.
+    #    반면 오도메트리의 0.0587 은 2026-08-08 실기 1m 직진으로 얻은 **거리 스케일 보정 상수**이며
+    #    (유효 구름반지름 + 슬립 + counts_per_rev 오차)를 한꺼번에 흡수한 값이다.
+    #    그 10.7% 오차의 상당 부분이 미해결 상태인 **엔코더 스케일**일 가능성이 있으므로
+    #    (r=0.065 기준 유효 counts/rev 약 75,439 -> 명목 77,520 에 근접),
+    #    명령 경로에 그대로 옮기지 않았다. 옮기면 실제 주행 속도와 속도 봉투 표가 모두 바뀐다.
+    #    두 값을 합칠지는 바퀴 실측 + 엔코더 스케일 원인 규명 후에 결정한다.
+    wheel_radius_m: 0.065
+    # 2026-08-04 실측값. 좌우 구동 바퀴 **트레드 중심선 사이 거리** 38cm.
+    # (이전 0.30 은 미실측 플레이스홀더였다. 이 값은 회전 성분에만 들어가므로
+    #  직진 명령의 변환 결과는 변경 전후가 같다.)
+    # 🔴 2026-08-08 재실측으로 **0.38 확정** — 08-07에 0.265로 낮췄던 것을 되돌린다.
+    #   08-07 측정은 **모터 고정 L자 브라켓이 풀린 상태**에서 이뤄졌다. 브라켓을
+    #   조인 뒤 좌우 접지면 사이를 다시 재니 38 cm 로, 08-04 실측과 일치한다.
+    #   ⚠️ 따라서 "L 오차 1.43배 때문에 Nav2가 진동했다"는 08-07 가설은 **기각**된다
+    #   (tests/TEST_LOG.md 2026-08-07 17:40 항목). 회전 발진 원인은 미확정이며,
+    #   모터 데드존(PWM<20)으로 회전 제어가 bang-bang이 되는 쪽이 유력하다.
+    wheel_separation_m: 0.38
+
+    # --- 엔코더 스케일 (Wheel Odometry 용) ---
+    # ⚠️ **이 노드는 이 값을 쓰지 않는다.** 실제 소비자는 별도 노드 `wheel_odometry` 이며
+    #    정본은 `config/wheel_odometry.yaml` 이다. 여기 값은 두 파일이 갈리지 않도록 두는
+    #    사본이며, `test_wheel_odometry_node.py` 가 일치를 강제한다.
+    # 바퀴(출력축) 1회전당 누적 엔코더 count. 2026-08-08 실측 기준값이며 **좌우 공통**이다.
+    # `/stm/encoder_total` 의 변화량을 바퀴 회전량으로 환산할 때만 쓴다.
+    #
+    # ⚠️ 펌웨어 명목값 77520(= CPR 380 x Gear 51 x Quadrature 4)과 **의도적으로 다르다.**
+    #    STM 은 여전히 77520 을 쓰므로 `/stm/wheel_actual_rad_s` 는 실제보다 약 12% 작게
+    #    보고되고, ROS Wheel Odometry 는 68160 기준으로 계산된다. 즉 **두 값의 스케일이
+    #    현재 서로 다르다** — 같은 축에서 직접 비교하면 안 된다.
+    #    이 불일치는 별건인 Encoder Scale Calibration 작업에서 해소한다. 펌웨어 상수를
+    #    지금 바꾸지 않는 이유는 그 값이 PI 제어 입력과 Stall 판정에도 함께 쓰이기 때문이다.
+    #    (근거: embedded/motor/docs/serial_protocol.md "출력축 Count 실측" 절)
+    #
+    # 좌우 공통 단일값을 쓰는 이유: 2026-08-03·08-08 두 차례 손 회전 측정에서 좌우 편차의
+    # 크기와 부호가 재현되지 않았다. 좌우 차이를 하드웨어 특성으로 확정할 근거가 없으므로
+    # 통합 평균 하나만 둔다. 좌우 개별값은 근거가 생긴 뒤에 도입한다.
+    counts_per_wheel_rev: 68160.0
+
+    # --- 송신(TX) ---
+    tx_rate_hz: 20.0
+    cmd_vel_timeout_sec: 0.5
+    # false = 실제 Serial 송신. true 면 로그만 찍고 포트에 쓰지 않는다.
+    dry_run: false
+    # ⚠️ 벤치 테스트용 잠정 상한. 바퀴 최대 RPM 실측 후 확정해야 한다.
+    #
+    # 이 값을 넘는 목표는 `limit_wheel_rad_s()`가 좌우 비율을 유지한 채 비례 축소한다
+    # (제한이 걸리면 노드가 경고 로그를 남긴다). 궤적은 유지되고 속도만 느려진다.
+    #
+    # 상위 주행 스택(Nav2)의 봉투와 이 상한의 관계
+    # — r=0.065, L=0.38(2026-08-04 실측) 기준:
+    #
+    #   Nav2 명령              필요 상한      1.0 일 때
+    #   직진 v=0.3            4.615 rad/s   0.065 m/s 로 축소 (21.7%)
+    #   제자리 회전 ω=0.6     1.754 rad/s   0.57 배로 축소
+    #   직진+회전 (최악)      6.369 rad/s   0.157 배로 축소
+    #
+    # 계산 근거는 주석이 아니라 코드에 있다:
+    #   `differential_drive.required_max_wheel_rad_s()` + test_differential_drive.py
+    #
+    # 이 기본값은 **바꾸지 않는다**. 올릴 때는 launch 프로파일/인자를 쓴다:
+    #   speed_profile:=slow   -> 2.0 (config/speed_profile_slow.yaml)
+    #   speed_profile:=nav2   -> 6.4 (config/speed_profile_nav2.yaml, ⚠️ 실기 미검증)
+    #   max_wheel_rad_s:=3.5  -> 임의값 (프로파일보다 우선)
+    max_wheel_rad_s: 1.0
+
+    # --- 수신(RX) ---
+    rx_poll_hz: 50.0
+    # STM STATUS 는 10Hz(100ms)로 오므로 0.5초면 5주기 유실까지 허용한다.
+    status_timeout_sec: 0.5

@@ -60,6 +60,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, Float32MultiArray, Int16MultiArray, Int32MultiArray, String
 
 from stm_serial_bridge.command_watchdog import select_wheel_command
+from stm_serial_bridge.deadzone_compensator import apply_deadzone_compensation
 from stm_serial_bridge.differential_drive import cmd_vel_to_wheel_rad_s
 from stm_serial_bridge.line_decoder import LineDecoder
 from stm_serial_bridge.packet_parser import (
@@ -142,9 +143,25 @@ class StmSerialBridgeNode(Node):
         self.declare_parameter("serial_port", "/dev/ttyACM0")
         self.declare_parameter("baud_rate", 115200)
         self.declare_parameter("wheel_radius_m", 0.065)
-        # ⚠️ 임시값: 좌우 바퀴 중심 간 거리는 조립 후 실측이 필요하다.
+        # 좌우 구동 바퀴 트레드 중심선 간 거리.
+        # 🔴 2026-08-08 재실측으로 0.38 확정 — 08-07에 0.265로 낮췄던 것을 되돌린다.
+        #   08-07 측정은 **모터 고정 L자 브라켓이 풀린 상태**에서 잰 값이었고,
+        #   브라켓을 조인 뒤 좌우 접지면 사이를 다시 재니 38 cm 였다(사용자 실측).
+        #   ⚠️ 따라서 "0.38이라서 Nav2가 진동했다"는 08-07 TEST_LOG의 가설은 기각된다.
+        #   회전 발진의 원인은 다시 미확정 상태다 (모터 데드존 bang-bang이 유력).
         # 이 값이 틀리면 angular.z -> 좌우 속도 차 변환이 어긋나 회전량이 맞지 않는다.
-        self.declare_parameter("wheel_separation_m", 0.30)
+        # config/stm_serial_bridge.yaml 과 같은 값을 유지할 것 — launch 를 거치지 않고
+        # `ros2 run` 으로 직접 띄우면 이 기본값이 쓰인다.
+        self.declare_parameter("wheel_separation_m", 0.38)
+        # 바퀴 1회전당 누적 엔코더 count. 2026-08-08 실측 기준값(좌우 공통).
+        # ⚠️ **이 노드는 이 값을 쓰지 않는다.** 실제 소비자는 별도 노드 `wheel_odometry`
+        # (`wheel_odometry_node.py`)이고 정본은 `config/wheel_odometry.yaml` 이다.
+        # 여기 선언은 두 파일이 갈리지 않도록 두는 사본이며, 일치는 테스트가 강제한다.
+        #
+        # ⚠️ 펌웨어 명목값 77520 과 의도적으로 다르다. STM 의 actual_rad_s 는 77520 기준이라
+        #    약 12% 작게 보고되므로, 이 값으로 계산한 odometry 속도와 같은 축에서 비교하면
+        #    안 된다. 스케일 통일은 별건인 Encoder Scale Calibration 작업의 몫이다.
+        self.declare_parameter("counts_per_wheel_rev", 68160.0)
         self.declare_parameter("tx_rate_hz", 20.0)
         self.declare_parameter("cmd_vel_timeout_sec", 0.5)
         self.declare_parameter("dry_run", True)
@@ -152,6 +169,10 @@ class StmSerialBridgeNode(Node):
         # STM32에는 목표 각속도 상한 clamp가 아직 없으므로(MOTION_CONTROLLER_MAX_
         # WHEEL_RAD_S 미적용) 현재 상한 방어는 브리지 쪽에만 존재한다.
         self.declare_parameter("max_wheel_rad_s", 1.0)
+        # 모터 데드존 보상 (deadzone_compensator 모듈 참고). 0 = 비활성 = 보상 이전과
+        # 완전히 같은 거동. 켜는 것은 명시적 선택이어야 하므로 기본값을 0으로 둔다.
+        # 실측 참고값: 바닥 데드존 PWM 10~12 = 바퀴 1.0~1.2 rad/s (2026-08-07/08).
+        self.declare_parameter("deadzone_wheel_rad_s", 0.0)
         # RX 폴링 주기. STATUS는 10Hz로 오므로 50Hz면 한 줄이 도착한 뒤 최대 20ms 안에
         # 읽힌다. TX 타이머(20Hz)와 분리한 이유는 두 주기가 서로 다른 이유로 바뀔 수
         # 있기 때문이다(송신 주기는 STM timeout, 수신 주기는 상태 신선도가 기준).
@@ -170,6 +191,9 @@ class StmSerialBridgeNode(Node):
         self._tx_rate_hz = float(self._param_value("tx_rate_hz"))
         self._cmd_vel_timeout_sec = float(self._param_value("cmd_vel_timeout_sec"))
         self._max_wheel_rad_s = float(self._param_value("max_wheel_rad_s"))
+        self._deadzone_wheel_rad_s = float(
+            self._param_value("deadzone_wheel_rad_s")
+        )
         self._rx_poll_hz = float(self._param_value("rx_poll_hz"))
         self._status_timeout_sec = float(self._param_value("status_timeout_sec"))
 
@@ -346,6 +370,23 @@ class StmSerialBridgeNode(Node):
                     f"{name} must be a finite value greater than 0.0, got {value}"
                 )
 
+        # deadzone_wheel_rad_s만 0을 허용한다(0 = 보상 비활성). 대신 상한보다 작아야
+        # 한다 — 상한 이상이면 살아 있는 제어 구간이 없어 저속 주행이 통째로 사라진다.
+        if (
+            not math.isfinite(self._deadzone_wheel_rad_s)
+            or self._deadzone_wheel_rad_s < 0.0
+        ):
+            raise ValueError(
+                "deadzone_wheel_rad_s must be a finite value of 0.0 or greater, "
+                f"got {self._deadzone_wheel_rad_s}"
+            )
+        if self._deadzone_wheel_rad_s >= self._max_wheel_rad_s:
+            raise ValueError(
+                "deadzone_wheel_rad_s must be less than max_wheel_rad_s, got "
+                f"deadzone={self._deadzone_wheel_rad_s} "
+                f"max={self._max_wheel_rad_s}"
+            )
+
     def _connect_serial(self) -> None:
         """Create the SerialLink and open the port (`dry_run=false` only).
 
@@ -425,7 +466,11 @@ class StmSerialBridgeNode(Node):
         logger.info(f"  wheel_radius_m      = {self._param_value('wheel_radius_m')}")
         logger.info(
             f"  wheel_separation_m  = {self._param_value('wheel_separation_m')}"
-            "  <-- ⚠️ 조립 후 실측 필요한 임시값"
+            "  <-- 2026-08-04 좌우 구동 바퀴 트레드 중심선 간 실측값"
+        )
+        logger.info(
+            f"  counts_per_wheel_rev= {self._param_value('counts_per_wheel_rev')}"
+            "  <-- 2026-08-08 실측(좌우 공통). ⚠️ 펌웨어 명목 77520 과 다름"
         )
         logger.info(f"  tx_rate_hz          = {self._param_value('tx_rate_hz')}")
         logger.info(
@@ -435,6 +480,10 @@ class StmSerialBridgeNode(Node):
         logger.info(
             f"  max_wheel_rad_s     = {self._param_value('max_wheel_rad_s')}"
             "  <-- ⚠️ 실제 모터 정격 확정 전 임시 벤치 제한"
+        )
+        logger.info(
+            f"  deadzone_wheel_rad_s= {self._param_value('deadzone_wheel_rad_s')}"
+            "  <-- 0 = 보상 비활성(기존 거동). 실측 참고 1.0~1.2"
         )
         logger.info(f"  rx_poll_hz          = {self._param_value('rx_poll_hz')}")
         logger.info(
@@ -579,9 +628,31 @@ class StmSerialBridgeNode(Node):
             )
             return
 
+        try:
+            # 🔴 순서가 중요하다 — 반드시 제한 **뒤**다. 먼저 걸면 limit_wheel_rad_s가
+            #    데드존 offset을 도로 비례 축소해 보상이 무의미해진다.
+            #    deadzone_wheel_rad_s=0(기본값)이면 항등 함수라 거동이 바뀌지 않는다.
+            compensated_left_rad_s, compensated_right_rad_s = (
+                apply_deadzone_compensation(
+                    limited_left_rad_s,
+                    limited_right_rad_s,
+                    self._deadzone_wheel_rad_s,
+                    self._max_wheel_rad_s,
+                )
+            )
+        except ValueError as error:
+            # start()에서 두 파라미터를 검증하므로 정상적으로는 도달하지 않는다.
+            # 도달하면 보상 없이 제한값만 쓴다 — 안전한 쪽(느린 쪽)으로 퇴화한다.
+            self.get_logger().error(
+                f"데드존 보상 실패 — 보상 없이 진행한다: {error}",
+                throttle_duration_sec=CMD_VEL_LOG_THROTTLE_SEC,
+            )
+            compensated_left_rad_s = limited_left_rad_s
+            compensated_right_rad_s = limited_right_rad_s
+
         # watchdog/타이머는 이 값만 읽는다 — 제한 전 값은 어디에도 보관하지 않는다.
-        self._latest_left_rad_s = limited_left_rad_s
-        self._latest_right_rad_s = limited_right_rad_s
+        self._latest_left_rad_s = compensated_left_rad_s
+        self._latest_right_rad_s = compensated_right_rad_s
         self._last_cmd_vel_time_sec = self._now_sec()
 
         was_limited = (

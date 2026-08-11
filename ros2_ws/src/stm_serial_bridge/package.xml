@@ -11,8 +11,13 @@
   <exec_depend>geometry_msgs</exec_depend>
   <!-- STM 상태 토픽(/stm/*) 발행용. custom message는 만들지 않는다. -->
   <exec_depend>std_msgs</exec_depend>
+  <!-- /wheel/odom 발행용 (stm_serial_bridge/wheel_odometry_node.py). -->
+  <exec_depend>nav_msgs</exec_depend>
   <!-- pyserial. Ubuntu 패키지명은 python3-serial (stm_serial_bridge/serial_link.py에서만 import) -->
   <exec_depend>python3-serial</exec_depend>
+  <!-- launch/stm_serial_bridge.launch.py 실행용 -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

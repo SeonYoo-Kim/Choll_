@@ -21,6 +21,7 @@ Jetson ↔ STM32 인터페이스는 [docs/JETSON_TO_STM.md](../docs/JETSON_TO_ST
 | `motor/` | STM32 기반 모터 제어 |
 | `rfid/` | RFID 인식 |
 | `led/` | LED 제어 |
+| `Lidar/` | SLAM/NAV colcon 워크스페이스 (X4Pro + slam_toolbox + Nav2, `/robot_pose`·`/target_position` 계약 구현) |
 
 ## 인터페이스 계약
 
@@ -28,11 +29,32 @@ Jetson ↔ STM32 인터페이스는 [docs/JETSON_TO_STM.md](../docs/JETSON_TO_ST
 - UART Serial 115200 bps, micro-ROS (ROS 2 Humble)
 - 구독: `/wheel_speed_cmd` (`std_msgs/msg/Int32MultiArray`) — `data[0]` 좌측 RPM, `data[1]` 우측 RPM, 10~12 Hz
 
-**카트 → Backend (MQTT, 현재 확정분)**:
-- `carts/{cartId}/telemetry/position` (SLAM 위치), `carts/status` (하트비트 — 5초 주기 발행 약속, 2026-07-30 확정),
-  `choll/cart/rfid` (슬롯·RFID — 2026-07-30 실물 기준 확정, 페이로드 `{"slot_id","uid","event":"DETECTED|REMOVED","timestamp"}`.
-  ⚠️ 하트비트·RFID 토픽에 cartId 미포함: BE가 `mqtt.cart-id`로 귀속하므로 다중 카트 도입 시 BE와 재협의)
-- BE→EM 명령 토픽(이동·추종·LED·RFID 재인식)은 명세 작성 중
+**카트 → Backend (MQTT)** — 2026-08-09 BE 소스 + 브로커 `#` 구독 실측으로 확정:
+
+| 용도 | 토픽 | 페이로드 | 발행 주체 |
+|---|---|---|---|
+| SLAM 위치 | `status/position` | `{"x","y","yaw","timestamp"}` (미터·라디안·ISO8601 UTC) | `choll_mqtt_bridge`, 2Hz |
+| 하트비트 | `status/cart` | `{"status"}` | (미구현 — 리테인 잔재만 관측) |
+| 슬롯·RFID | `status/slot` | `{"slot_id","uid","event":"DETECTED\|REMOVED","timestamp"}` | RPi `embedded/rfid/main.py` |
+| 추적 대상 | `status/target` | `{"image_width","image_height","tracks"}` | AI `fe_bridge_node` |
+| 주행 결과 | `status/nav-result` | `{"status"}` — `/cart/nav_status` 7종과 동일 집합 | `choll_mqtt_bridge`, 상태 전이 시에만 QoS1 |
+
+**Backend → 카트**: `cmd/move/cart` (`{"requestId","command":"MOVE\|CANCEL","zoneId","target":{x,y},"pixel":{x,y}}`),
+`cmd/lit/led` (`{"slot_id":[...]}`).
+
+> 🔴 2026-08-09 정정: 이전에 적혀 있던 `carts/{cartId}/telemetry/position` · `carts/status` ·
+> `choll/cart/rfid` 는 **BE 코드에 존재하지 않는다**(`grep choll/` 0건). 위 표가 정본이다.
+
+⚠️ 위치·RFID·하트비트 토픽에 cartId 미포함: BE가 `mqtt.cart-id`로 귀속하므로 다중 카트 도입 시 재협의.
+
+🔴 **BE 측 전제 2개** (EM이 못 고침, 안 되어 있으면 위치가 도달해도 기능이 죽는다):
+- `MQTT_POSITION_UNIT=meters` — 기본값 `pixels`. EM은 SLAM 미터를 보내므로 `pixels`면
+  BE가 `x=1.235`를 픽셀 1.235로 읽어 구역 판정이 전부 실패한다(→ LED가 안 켜진다).
+  같은 설정이 `NavigationService`의 MOVE `target`도 `null`로 만들어 EM이 명령을 거부한다.
+- `library_maps` id=`MQTT_MAP_ID`(기본 2)에 사용 지도의 `resolution`/`origin_x`/`origin_y`/
+  `width`/`height` 등록. 행이 없으면 meters 모드에서 매 메시지마다 예외가 난다 —
+  **지도 등록을 meters 전환보다 먼저.**
+- BE는 `yaw`를 파싱하지 않는다(`PositionPayload(x, y, timestamp)`). FE에는 항상 0이 나간다.
 
 > ⚠️ 위 계약(토픽명·타입·매핑)을 바꾸려면 AI 파트(`motor_node`)·BE 파트와 동시에 바꿔야 합니다.
 > 단독 변경 금지 — 이슈로 논의 후 정본 문서(JETSON_TO_STM.md / API 명세서)를 먼저 갱신하세요.

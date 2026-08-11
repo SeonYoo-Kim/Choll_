@@ -6,14 +6,5258 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
-## 기록 규칙
+## 2026-08-10 02:00 — ✅ 사서 추종 배선: FOLLOW 버튼 게이트 + 1 m 유지거리 (relu 실기 / Claude 구현·기록)
 
-- **최신 항목이 맨 위** (이 문단 바로 아래에 추가).
-- 항목 형식: `## 날짜 시각 — 결과 요약 (실행자)` + 환경·명령·커밋 + 접힌 전체 출력(`<details>`).
-- **실패도 기록한다.** 실패 → 수정 → 재실행이면 두 번 다 남겨서 이력이 보이게 한다.
-- 원본 출력은 `<details>` 블록에 그대로 붙인다 (요약만 믿지 말고 검증 가능하게).
+FE 추종 버튼이 카트에 전달되지 않던 구멍을 메웠다. **AI 제어를 되살리는 대신 이미 배선된
+Nav2 경로를 쓴다** — 후진 금지·장애물 정지·벽 회피가 전부 Nav2 안에 이미 있고,
+`/cmd_vel` 발행자를 1개로 유지해 구역 이동 기능이 깨지지 않는다.
+
+### ① 진단 — 추종이 안 되던 이유 3가지
+
+```
+/person_tracks     16.8 Hz   ← 탐지·추적 정상
+/target_person      0 Hz     ← 🔴 Re-ID 타겟 미등록 (auto_select:=false, FE 선택 대기)
+/target_position    0 Hz     ← 그 결과
+/cmd_vel_legacy    15.0 Hz   ← control_node 는 격리 토픽에 0 발행 중
+goal_forwarder approach_distance = 0.0
+```
+
+1. **FOLLOW_START 가 어디에도 도달하지 않았다.** BE `FollowControlService.java:76` 가
+   `cmd/move/cart` 로 `{"requestId","command":"FOLLOW_START"}` 를 발행하지만
+   AI `fe_bridge_logic.py:94` 는 SELECT_TARGET 외 전부 `return`, EM
+   `mqtt_bridge.py` 는 경고 로그만 남기고 보류했다.
+2. **`approach_distance = 0.0`** — goal 이 사람 좌표 그 자체였다. 사서가 다가오면
+   카트가 물러서는 원인.
+3. AI `control_node.py:340` `linear_error = distance - target_distance(1.0)` 도
+   1 m 이내에서 음수 → 후진이지만, `legacy_control:=false` 라 `/cmd_vel_legacy` 로
+   격리돼 있어 **실주행에는 영향 없음**. 이 줄은 건드리지 않았다.
+
+### ② 변경
+
+| 파일 | 변경 |
+|---|---|
+| `choll_mqtt_bridge/mqtt_bridge.py` | `FOLLOW_*` → `/cart/follow_mode`(String, **래치**) 발행 |
+| `choll_nav/goal_forwarder.py` | `/cart/follow_mode` 구독 + `_on_target_point` 게이트. PAUSE/STOP 시 진행 중 goal 취소(검증된 `_on_cancel` 재사용) |
+| `choll_nav/launch/interface.launch.py` | `approach_distance` 기본 **0.0 → 1.0**, `follow_gate_enabled` 인자 신설(기본 true) |
+
+래치 QoS 이유: FE가 추종을 켠 뒤 `goal_forwarder` 가 재기동해도 현재 모드를 즉시
+받아야 한다. VOLATILE 이면 버튼을 다시 눌러야 추종이 살아난다.
+
+### ③ 검증 — 원본 출력
+
+```
+$ ros2 param get /goal_forwarder approach_distance     → Double value is: 1.0
+$ ros2 param get /goal_forwarder follow_gate_enabled   → Boolean value is: True
+$ ros2 topic info /cart/follow_mode
+  Type: std_msgs/msg/String
+  Publisher count: 1        (mqtt_bridge)
+  Subscription count: 1     (goal_forwarder)
+```
+
+```
+$ ros2 topic pub --once --qos-durability transient_local --qos-reliability reliable \
+    /cart/follow_mode std_msgs/msg/String "{data: FOLLOW_START}"
+[goal_forwarder]: 추종 시작 — /target_position 을 goal 로 소비
+$ ... "{data: FOLLOW_STOP}"
+[goal_forwarder]: FOLLOW_STOP — 추종 중단 + 진행 중 goal 취소
+[goal_forwarder]: 취소 요청 수신 — 진행 중인 goal 없음
+```
+
+```
+$ ros2 topic info /cmd_vel -v
+  Publisher count: 1        Node name: velocity_smoother   ← Nav2 단독 소유 유지
+  Subscription count: 1     Node name: stm_serial_bridge
+$ ros2 topic info /cmd_vel_legacy -v
+  Publisher count: 1        Node name: control_node        ← AI 격리 확인
+```
+
+```
+$ colcon build --packages-select choll_nav choll_mqtt_bridge   → 2 packages finished [6.55s]
+$ pytest choll_nav/test/test_nav_logic.py -q                   → 31 passed in 0.16s
+$ pytest choll_mqtt_bridge/test/ -q                            → 27 passed in 0.14s
+$ ruff check choll_nav choll_mqtt_bridge
+  test_nav_logic.py:3:1: I001  (기존 오류, 이번 변경분 아님)
+```
+
+### ④ 안전 요구가 Nav2 어디서 충족되는가 (`nav2_params.yaml`)
+
+| 요구 | 설정 | 위치 |
+|---|---|---|
+| 후진 금지 | `min_vel_x: 0.0` | :121 |
+| 전방 물체 시 정지 | `ObstacleFootprint` critic (자세 반영 footprint 충돌 판정) | :150, :176 |
+| 벽 회피 | `inflation_radius` 0.25/0.30 + footprint `[[0.10,0.22]…[-0.50,0.22]]` | :222 |
+| 사서에 안 부딪힘 | `approach_distance: 1.0` (goal 을 1 m 앞에) | interface.launch.py |
+
+### ⑤ 종단 검증 ✅ — 실주행 관통 (03:55 추가)
+
+첫 시도는 실패했고, **원인을 로그가 아니라 데이터로 특정**했다. AI가 터미널에서
+돌아 `reid_node` 로그를 읽을 수 없어, Re-ID 등록 게이트 조건을 `/person_tracks` 의
+bbox 로 직접 계산하는 프로브를 만들었다.
+
+```
+=== 10초 관측: 샘플 40개 ===
+  트랙 ID 분포: {103: 40}          ← FE 모달에서 고른 ID 는 97
+  ID=103  중심=(494,237)  크기=288x471
+  bbox  x:350~638   y:1~472   (화면 640x480)
+  화면 면적 대비: 44.1%
+  ✅ 면적 44.1% <= 50%
+  🔴 좌우 잘림 (x 350~638, 여유 4.0px 필요) → crop_side_margin_px 위반
+```
+
+**실패 원인 2가지 (둘 다 "사람이 너무 가까움"에서 파생)**
+1. ByteTrack ID 가 97→103 으로 바뀌어 `reid_node._select_callback` 이 거부
+   (`Rejected target ID=…: not currently tracked`). 사람이 가까워 탐지가 끊겼다
+   붙었다 하면서 ID 가 계속 새로 발급된다.
+2. bbox 우측이 638px 로 화면 경계(640)에 2px 까지 붙어 `crop_side_margin_px: 4.0`
+   위반 → Memory Bank 초기화 거부. 잘린 크롭은 Re-ID 특징으로 쓸 수 없다.
+
+**조치: 2~3 m 뒤로 물러서서 전신이 화면 중앙에 들어온 상태로 재선택.** 성공.
+
+```
+=== 추종 파이프라인 감시 90초 ===
+  [  43.0s] nav_status → NAVIGATING
+  [  43.6s] nav_status → SUCCEEDED
+    45.0s  tracks 1307 | target  479 | pos  479 | cmd  282
+  ... (NAVIGATING↔SUCCEEDED 20여 회 반복)
+=== 단계별 결과 ===
+  follow_mode      : FOLLOW_STOP
+  /person_tracks   : 2562건
+  /target_person   : 863건        ← Re-ID 등록 성공
+  /target_position : 863건        ← 지도 좌표 산출
+  /cmd_vel         : 500건 (최대 속도 0.464)
+  ✅ 추종 경로 전 구간 관통 — 카트가 실제로 주행 명령을 받고 있다.
+```
+
+카트가 실제로 이동한 증거 — 추종 전후 `status/position` 좌표 변화:
+
+```
+추종 전 : {"x":-0.008,"y":-0.0,   "yaw":0.0591,  ...}
+추종 후 : {"x":-1.158,"y":0.597, "yaw":-2.1831, ...}   1.79 Hz
+```
+
+### ⑥ 🔴 남은 리스크 — nav_status 요동이 BE 로 그대로 올라간다
+
+추종 중 `nav_status` 가 **NAVIGATING ↔ SUCCEEDED 를 90초에 20여 회** 오간다.
+1 m 앞 goal 이라 금방 도달하고 곧바로 새 goal 이 오기 때문이며, 추종 동작 자체는
+정상이다. 그런데 브릿지는 **상태 전이마다** `status/nav-result` 를 QoS1 로 올린다.
+
+- 추종만 하는 동안은 BE 에 진행 중인 이동 세션이 없어 대체로 무해하다.
+- 🔴 **추종 중에 FE 로 구역 이동을 걸면** 추종이 뱉는 `SUCCEEDED` 가 그 이동
+  세션을 즉시 종료시킬 수 있다. BE 는 반대 방향(NAVIGATING 중 추종 시작)만
+  막고 있고(`FollowControlService.java:58`), `NavigationService.start` 는
+  FOLLOWING 여부를 검사하지 않는다.
+- **데모 운용 규칙: 추종과 구역 이동을 동시에 걸지 말 것.**
+- 코드로 막으려면 goal_forwarder 가 추종 모드일 때 nav_status 발행을 억제하는
+  방법이 있으나, 계약 변경이라 BE 와 합의 후 진행한다.
+
+### ⑥ 부수 확인 — AI `/cmd_vel` 차단 배포
+
+`legacy_control` 인자는 `0eef289` 에 이미 구현돼 있었으나 젯슨 실행 경로
+(`~/Choll/ai/install`, develop 브랜치)에는 없어 `choll-em` 별칭이 launch 에러로
+죽는 상태였다. `install → build → src` 가 전부 심볼릭이라 커밋본을 `~/Choll` 에
+체크아웃하는 것만으로 **재빌드 없이** 반영됐고, `--show-args` 로 인자 인식과
+`motor_node` 미실행을 확인했다.
+
+## 2026-08-10 — 🟡 map_home_v5 매핑·localization 정합 ✅ / P2P Goal 도달 ✅ / **장애물 우회는 실패** + 최종 yaw 데드존 (relu 실기 / Claude 실행·기록)
+
+시연 전 최종 상태 동결 시점의 기록. **P2P Goal 도달과 장애물 우회를 분리 판정한다.**
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion`
+- **파라미터 변경 없음** (BackUp 2건 외 추가 수정 없음)
+
+### ① map_home_v5 매핑·저장
+
+v4(3.35 x 3.50 m)가 좁아 Nav2 전역 플래너의 가용 영역이 부족 → 재매핑.
+`rolling_window: False` 라 **전역 플래너의 세계 = static map 크기**라는 점이 재확인됐다.
+
+매핑 중 `/cmd_vel` 충돌 발견 — AI `control_node` 가 15 Hz 로 zero Twist 를 발행 중이었다.
+teleop 과 같은 토픽이라 매핑 동안만 팀원 승인 후 AI 스택 정지 (`choll-em` alias 로 복구).
+🔴 `~/.bashrc` 는 `source setup.bash` + alias 정의뿐 — **자동 실행 아님, 수정하지 않았다.**
+
+```
+map_home_v4 : 67x70 = 3.35 x 3.50 m   free 7.10 m²  occ 344  unknown 1506
+map_home_v5 : 79x80 = 3.95 x 4.00 m   free 9.17 m²  occ 404  unknown 2250
+origin v5   : (-2.83, -1.49)   범위 x[-2.83,1.12] y[-1.49,2.51]
+save_map=0 / serialize_map=0 → yaml·pgm·data·posegraph 4종 생성
+```
+
+**v1~v4 및 library_map 전부 보존** (타임스탬프 무변동).
+
+### ② localization 전환·정합 — 정상
+
+```
+map_server active / amcl active / slam_toolbox 없음
+map->odom : AMCL 단독   odom->base_link : EKF 단독 (rf2o publish_tf=False)
+/scan 11.46 / /odom_rf2o 10.00 / /odometry/filtered 9.98 / /wheel/odom 10.00 / /odom_zupt 10.06 Hz
+```
+
+정합(2D Pose Estimate 후):
+
+```
+scan endpoint -> 최근접 벽 셀 거리 : median 0.031 m, mean 0.037, p90 0.065, max 0.258
+1셀(0.05) 이내 73.9% / 2셀(0.10) 이내 98.6% / 유효빔 364/364 전부 맵 안에서 종료
+```
+
+⚠️ **"scan endpoint 가 map occupied 셀에 정확히 떨어지는 비율"(v4 42.1% / v5 43.3%)은
+쓰지 말 것** — ±1셀 양자화에 지배되는 지표라 정합 품질을 과소평가한다. 거리 분포가 정본.
+v4 때 "동적 장애물 476셀"로 보였던 것도 같은 아티팩트였다.
+
+### ③ P2P 장애물 회피 1차 — 🔴 우회 실패
+
+박스(높이 0.4 m 이상) 배치 후 RViz Goal 1회. 박스 탐지는 성공:
+
+```
+벽에서 0.15 m 이상 떨어진 LETHAL = 18셀 단일 클러스터 0.21 x 0.33 m
+centroid (map) (-0.82, +0.55), 로봇 기준 1.04 m / 방위 +58.1°
+scan 최근접 0.725 m
+```
+
+주행 결과:
+
+```
+final status : SUCCEEDED   duration 226.2 s   recoveries 8
+start (-0.295,-0.338) -> end (-0.881,+1.671)   직선 2.092 m
+max lateral excursion   : 0.094 m      <- 사실상 직진
+min footprint clearance : 0.000 m (ANY / DYNAMIC 모두)
+footprint-in-lethal     : 3 samples
+final distance          : 0.184 m (xy tol 0.35 이내)
+behavior : backup +1 / spin +1 / wait +1 / collision +1
+/cmd_vel : n=4420 min=-0.100 max=+0.150 negatives=57
+```
+
+**판정 B — 우회 실패.** 박스 중심에서 시작→종료 직선까지의 수직거리가 **0.255 m**,
+padded footprint 반폭이 **0.27 m** 로 기하학적으로 겹친다. 실제 횡이탈 0.094 m 는
+비켜간 것이 아니라 그대로 통과한 것이고, footprint 가 LETHAL 에 3샘플 진입한 것과 일치한다.
+
+⚠️ padding 0.05 m 가 있어 **padded footprint 의 LETHAL 접촉 = 물리 접촉은 아니다.**
+실기 육안 확인 결과 **박스 실제 접촉은 없었다**. 그래도 회피 기동은 성립하지 않았다.
+
+🔴 미해결 의문: `ObstacleFootprint` critic 은 footprint 가 LETHAL 이면 해당 trajectory 를
+예외로 기각하므로 원칙상 이 주행이 나오면 안 된다. 박스의 costmap 반영 시점인지, 전역 경로가
+박스를 통과했는지 이번 기록만으로 특정 못 함 — **다음 조사 대상.**
+
+### ④ 최종 yaw 정렬 데드존 (별도 이슈)
+
+xy tolerance 진입 후 순수 회전 명령이 계속 나갔으나 차체가 돌지 않았다.
+
+```
+cmd wz = +0.316 rad/s = 18.1 deg/s  → 12초면 217도 회전해야 함
+실측 yaw 변화 -0.20 deg (-0.02 deg/s)   = 전혀 안 돎
+PWM = 10 x (0.316 x 2.925) ≈ 9.2   vs 데드존 ≈ PWM 17 (차체 약 0.58 rad/s)
+```
+
+`RotateToGoal.slowing_factor 5.0` 으로 감속하다 데드존에 진입, `min_speed_theta: 0.0` 이라
+하한이 없다. **자력 탈출은 recovery Spin 이 했다** — `behavior_server.min_rotational_vel 0.70`
+은 데드존 위라 실제로 회전하고, 그 결과 최종 SUCCEEDED.
+
+**후보(미적용)**: `FollowPath.min_speed_theta` `0.0` → `0.60`.
+설치본 `dwb_plugins/xy_theta_iterator.hpp:60-71` 의 `isValidSpeed` 계약상,
+`min_speed_xy=0.0` 인 순수 회전에서는 `|theta| > min_speed_theta` 가 유일한 통과 경로라
+**속도 이터레이터 단계에서 하드 필터로 작동한다**(critic 가중치 무관, min_speed_xy 0 이어도 유효).
+0.58 rad/s 바로 위 값이며 Spin 의 0.70 보다 보수적.
+⚠️ 부작용: 주행 중 저속 회전 샘플이 전부 제거되어 미세 조향이 거칠어질 수 있음 — 동시 검증 필요.
+
+### ⑤ 시연 동결 시점 상태
+
+검증 완료: map_home_v5 localization / P2P Goal 도달 / 박스 실제 접촉 없음 /
+recovery BackUp 0.10 m·0.10 m/s / 후방 장애물 시 출발 전 거부 / DWB `min_vel_x=0.0` /
+`velocity_smoother.min_velocity.x=-0.10` / `footprint_padding=0.05` / 비대칭 footprint /
+LiDAR extrinsic x=+0.05 / scan_mask 비대칭 / inverted=true.
+
+Known issue: ①최종 yaw 데드존 ②Spin 이 우회 해결한 사례 ③좁은 공간 후미 회전 여유 부족
+④wheel odom 거리·yaw scale 미보정 ⑤RF2O pose 드리프트(디버깅 기준으로 쓰지 말 것)
+⑥**장애물 우회 미성립(위 ③)** — 시연 시 동적 장애물 시나리오는 피할 것.
+
+## 2026-08-09 — ✅ BackUp collision rejection 시험 PASS — 후방 장애물 시 출발 전 거부 확인 (relu 배치·승인 / Claude 실행·기록)
+
+제한 BackUp 도입 2단계. **"예측 경로에 장애물이 있으면 후진 명령을 내기 전에 거부하는가"** 를
+실물 박스로 검증했다. 결과: **거부까지 2 ms, 음수 속도 0건, 이동 0.0000 m.**
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion`
+- **파라미터 변경 없음** — BT `backup_dist=0.10`, `velocity_smoother.min_velocity`, DWB `min_vel_x` 전부 유지.
+  요청 0.20 m 는 하네스 내부의 일회성 action 값.
+
+### ① 소스 기준 재확인 (가정 금지 — 바이너리/원문 확인)
+
+🔴 **collision threshold 는 253 이 아니라 254 다.** 설치본에 `.cpp` 가 없어
+`libnav2_costmap_2d_client.so` 의 `CostmapTopicCollisionChecker::isCollisionFree` 를 역어셈블:
+
+```
+mov  x0, #0xc00000000000 ; movk x0, #0x406f, lsl #48   → 0x406FC00000000000 = double 254.0
+fmov d1, x0 ; fcmpe d0, d1                              → scorePose(pose) vs 254.0
+```
+
+**INSCRIBED(253) 은 collision 이 아니다** — inflation 셀은 거부를 유발하지 않는다.
+(이전 검토에서 "inscribed 0.15 m 가 마진을 준다"고 쓴 계산은 틀렸다. 정정함.)
+
+`track_unknown_space: False` 이므로 unknown 은 free(0) — 255 에 의한 오탐도 없다.
+
+**예견 범위** (`drive_on_heading.hpp` 원문):
+
+```
+max_cycle_count = cycle_frequency(10.0) x simulate_ahead_time(2.0) = 20
+k=0..19: sim = cmd_vel.linear.x x (k/10.0);  break if (|command_x| - traveled) - |sim| <= 0
+검사 지점 0, -0.01 ... -0.19  →  최대 예견 0.19 m (0.20 아님)
+```
+
+⚠️ **`backup_dist=0.10` 이면 |sim|>=0.10 에서 break 하므로 실제 예견은 0.09 m 뿐** — 실제 recovery 는
+"갈 거리만큼만" 본다. 시험이 0.20 m 를 요청한 이유가 이것(예견을 0.19 m 로 확장).
+
+**순서**: `if (!isCollisionFree(...)) { stopRobot(); return FAILED; }` 가
+`vel_pub_->publish()` **앞**에 있다 → 첫 사이클 거부 시 `/cmd_vel_nav` 에 단 1건도 안 나간다.
+
+### ② 배치와 pre-flight
+
+박스(높이 0.40 m 이상, 빈 종이박스)를 물리 범퍼 뒤 **0.213 m** 에 배치.
+
+```
+scan 정후방      : 0.760 m  → base_link x=-0.710 → 범퍼 뒤 0.21 m
+costmap LETHAL   : 846 cells
+reverse sweep    : 5초 샘플 [-0.12, -0.12, -0.12, -0.12, -0.12]   안정
+                   예견 0.19 m 대비 여유 0.07 m
+```
+
+🔴 **pre-flight 결함 1건 발견·수정.** 초기 시도에서 sweep 이 `-0.00`(현재 pose 에서 이미 충돌)을
+PASS 로 통과시켰다. 원인은 버그가 아니라 **박스를 옮긴 직후 작업자가 카트 옆에 서 있어** LETHAL 셀이
+padded footprint 에 닿은 것. 그대로 실행했다면 거부는 나오지만 **"예측"이 아니라 "이미 충돌 중"이라
+거부된 것**이라 검증 목적을 달성하지 못했다. 두 가지 게이트 추가:
+
+- 최소 거리 게이트 `0.05 m` — 현재 pose 에서 이미/거의 충돌이면 goal 미발행
+- 5초 안정성 샘플링 — 사람이 지나가는 순간적 오염 제거
+
+### ③ 결과 — PASS
+
+```
+action result   : ABORTED (GoalStatus 6)
+fail-safe fired : no
+displacement    : 0.0000 m
+/cmd_vel vx     : min=+0.0000 max=+0.0000 (n=20, negatives=0)
+behavior log    : collision+1  timeout+0  → FAILED 사유 = COLLISION PREDICTION
+```
+
+behavior_server 로그 타임스탬프:
+
+```
+1786284677.258  Running backup
+1786284677.260  Collision Ahead - Exiting DriveOnHeading     ← 2 ms 후
+1786284677.260  backup failed / Aborting handle
+```
+
+- **음수 `/cmd_vel` 0건** — 소스 순서(검사 → 발행) 분석과 정확히 일치. 명령이 아예 안 나갔다.
+- **이동 0.0000 m**, 박스 접촉 없음, fail-safe 미발동.
+- `time_allowance` 를 1 s 로 줄인 탓에 타임아웃 실패와 충돌 실패가 action 계층에서 구분되지 않으므로,
+  로그 문자열 증가분으로 사유를 판정했다 — `collision+1 / timeout+0`.
+
+### ④ 안전 설계 (4중, 전부 미발동)
+
+| 층 | 값 | 최악 이동 |
+|---|---|---|
+| collision 거부 | 0.12 m 에서 예측, 예견 0.19 m (여유 0.07) | 0 |
+| 하네스 auto-cancel | 변위 > 0.02 m 또는 음수 `/cmd_vel` 3연속 | 약 0.03 m |
+| `time_allowance` | 1 s | 실측 0.039 m/s → 약 0.04 m |
+| 물리 완충 | 범퍼↔박스 0.213 m | 이론적 최악 0.10 m 라도 0.11 m 여유 |
+
+### ⑤ 판정
+
+**"뒤가 막혀 있으면 BackUp 이 출발 전에 거부한다" 안전 체인 확인 완료.**
+1단계(빈 공간 10 cm 후진 성공) + 2단계(막힌 후방 거부) 로 양방향 검증됨.
+
+<details>
+<summary>원본 출력</summary>
+
+```text
+=== PRE-FLIGHT ===
+scan rear return: PASS  nearest=0.760 m (within +-40 deg of straight back)
+costmap LETHAL  : 846 cells
+reverse sweep   : samples over 5s -> [-0.12, -0.12, -0.12, -0.12, -0.12]
+                  PASS  range [-0.12, -0.12] m, lookahead margin 0.07 m
+
+overall pre-flight: PASS
+
+sending BackUp: target.x=-0.20 speed=0.10 allowance=1s
+goal accepted
+
+=== RESULT ===
+action result   : UNKNOWN(6)
+fail-safe fired : no
+displacement    : 0.0000 m
+/cmd_vel vx     : min=+0.0000 max=+0.0000 (n=20, negatives=0)
+behavior log    : collision+1  timeout+0
+  -> FAILED reason = COLLISION PREDICTION (correct)
+
+--- 시험 후 ---
+cmd_vel traffic (5s): silent
+
+[behavior_server 로그]
+[INFO] [1786284677.258048592] [behavior_server]: Running backup
+[WARN] [1786284677.260093505] [behavior_server]: Collision Ahead - Exiting DriveOnHeading
+[WARN] [1786284677.260214342] [behavior_server]: backup failed
+[WARN] [1786284677.260254664] [behavior_server]: [backup] [ActionServer] Aborting handle.
+```
+
+> `UNKNOWN(6)` 는 하네스의 status 라벨 매핑 오류다. `action_msgs/GoalStatus` 기준
+> 6 = **STATUS_ABORTED** 로, behavior FAILED 가 action 계층에 나타나는 정상 코드다.
+
+</details>
+
+### ⑥ 미조치
+
+- `embedded/Lidar/CLAUDE.md` §5 "후진 금지 설계: 커스텀 BT 가 1차 방어 — 이 전제를 깨지 말 것"
+  이 여전히 현재 설계와 충돌. **다음 단계에서 정정 필요.**
+- 다음 단계 후보: 실제 stuck 상황에서 recovery 전체 흐름(ClearCostmaps → BackUp → Spin → Wait) 검증.
+
+## 2026-08-09 — ✅ 제한 BackUp 10 cm 단독 시험 PASS / ⚠️ 요청 0.10 m → 실효 0.126 m, 속도추종 39% (relu 승인·후방확인 / Claude 실행·기록)
+
+벽 근접 정체(Spin → `Collision Ahead`) 해소를 위한 **recovery 전용 BackUp** 도입 1단계.
+Goal·FollowPath·stuck 재현 없이 `/backup` 액션만 **1회** 직접 호출해 단독 검증했다.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion`
+- **사전 근거**: 후방 360° 커버리지 실측(같은 날 항목), cmd_vel 배선 runtime 확인
+- **안전**: 사용자가 후방 공백 육안 확인 후 승인. 넓은 공간, 1회만.
+
+### ① 적용한 변경 2건
+
+| 파일 | 변경 |
+|---|---|
+| `choll_nav2/config/nav2_params.yaml` | `velocity_smoother.min_velocity` `[0.0,0.0,-1.2]` → `[-0.10,0.0,-1.2]` |
+| `choll_nav2/behavior_trees/navigate_to_pose_no_backup.xml` | RoundRobin에 `<BackUp backup_dist="0.10" backup_speed="0.10"/>` 삽입 (ClearingActions 다음, Spin 앞) + stale 헤더 주석 정정 |
+
+**DWB `min_vel_x: 0.0` 유지** — 정상 FollowPath 후진은 계속 금지, recovery만 후진 가능.
+
+`backup_speed 0.10`은 임의값이 아니라 데드존 하한: `PWM = 10 × wheel_rad/s`
+(`MOTOR_OPEN_LOOP_PWM_PER_RAD_S`), 데드존 ≈ PWM 17 → wheel 1.7 rad/s → 0.10 m/s.
+**0.05 m/s는 PWM 8.5로 데드존 안쪽이라 카트가 안 움직인다.**
+
+### ② runtime 확인 (Nav2 재기동 후)
+
+```
+/cmd_vel_nav  pub 5 = controller_server×1 + behavior_server×4   sub 1 = velocity_smoother
+/cmd_vel      pub 1 = velocity_smoother                          sub 1 = stm_serial_bridge
+min_velocity [-0.1, 0.0, -1.2] / DWB min_vel_x 0.0 / simulate_ahead_time 2.0
+footprint_padding 0.05 / behavior_plugins [spin, backup, drive_on_heading, wait]
+```
+
+🔴 **이전 BT 주석의 "behavior_server가 velocity_smoother를 우회한다"는 stale**이다.
+`SetRemap("cmd_vel","cmd_vel_nav")` 도입 후 4개 플러그인 전부 smoother를 통과한다.
+그래서 `min_velocity[x]=0.0`이면 BackUp 음수 vx가 0으로 잘려 **BT만 고쳐서는 동작하지 않는다.**
+
+### ③ 실측 결과 — SUCCEEDED
+
+```
+requested distance : 0.100 m        requested speed : 0.100 m/s
+base_link distance : 0.1023 m       (액션 구간, map->base_link)
+  + settle(4s)     : 0.1263 m
+  overshoot        : 0.0240 m
+wheel odom distance: 0.1394 m
+duration           : 2.60 s  (action) / 2.61 s (wall)
+cmd_vel_nav vx     : min -0.1000  max +0.0000  (n=27)
+cmd_vel     vx     : min -0.1000  max +0.0000  (n=72)
+yaw change         : -2.32 deg
+action result      : SUCCEEDED      collision abort : 없음
+```
+
+- **음수 vx가 smoother를 정확히 통과** — `/cmd_vel`에서 `-0.1000` 그대로 관측. clamp 없음.
+- **거리 추종 양호** — 액션 구간 0.1023 m vs 요청 0.100 m.
+
+### ④ 남은 이슈 2건 (FAIL 아님, 후속 반영 필요)
+
+**(1) 요청 0.10 m → 실효 0.126 m.** 액션 종료 후 4초 관측에서 2.4 cm(요청의 24%)가 추가됐다.
+관측 속도(평균 0.039 m/s)와 smoother 감속(−0.3 m/s²)으로 계산한 물리 코스팅은 **약 0.3 cm**뿐이라,
+2.4 cm의 대부분은 물리적 밀림이 아니라 **정착 구간 AMCL map→odom 보정**일 가능성이 높다.
+1회 시험 제약으로 둘을 분리 검증하지 못했다. **좁은 공간 계획 시에는 보수적으로 0.13 m로 잡을 것.**
+
+**(2) 속도 추종 39%.** 명령 0.10 m/s인데 실제 평균 0.039 m/s(2.60 s / 0.1023 m).
+램프(0.3 m/s²) 포함 예상 1.2 s 대비 2.2배 느리다. **PWM 17이 데드존 탈출 하한이라 여유가 없다**는 뜻.
+`time_allowance` 10 s 중 2.6 s만 썼으므로 현재는 안전하지만, 거리를 늘리거나 마찰이 크면 타임아웃에 근접한다.
+
+또한 wheel odom 0.1394 m vs map->base_link 0.1023 m = **1.36배 차이**. 같은 날 회전 시험의 yaw
+1.6~1.7배 차이와 같은 뿌리(스폰지 휠 변형에 의한 effective rolling radius 축소 + 슬립)로 보인다.
+wheel odom은 EKF에서 vx만 쓰이므로 영향은 남아 있다 — **직선 거리에서도 두 추정이 어긋난다는 점이
+이번에 새로 확인됐다.**
+
+⚠️ **0.1023 m 는 ground truth 가 아니다.** map->base_link 역시 AMCL+EKF 추정값이므로, 어느 쪽이
+물리적으로 맞는지 이 시험은 판정하지 못한다. 실제 이동거리는 **바닥 줄자/마킹 기준의 별도 직선
+calibration**으로만 확정할 수 있다. 그때까지 wheel parameter 를 고치지 말 것.
+
+yaw −2.32°는 10 cm 후진 기준 허용 범위. STM 방향전환 홀드(한쪽 바퀴 200 ms) 또는 휠 캠버 비대칭 후보.
+
+<details>
+<summary>원본 출력</summary>
+
+```text
+waiting for /backup action server ...
+before: x=-0.4186 y=+0.2368 yaw=-111.16 deg
+sending BackUp goal: target.x=-0.100 speed=0.100 allowance=10s
+
+=== BackUp 10cm 단독 시험 ===
+requested distance : 0.100 m
+requested speed    : 0.100 m/s
+after  : x=-0.3805 y=+0.3317 yaw=-113.76 deg
+settled: x=-0.3708 y=+0.3536 yaw=-113.48 deg
+base_link distance : 0.1023 m
+  incl. settle     : 0.1263 m
+  overshoot        : 0.0240 m
+yaw change         : -2.32 deg
+wheel odom distance: 0.1394 m
+duration (action)  : 2.60 s
+duration (wall)    : 2.61 s
+cmd_vel_nav vx     : min=-0.1000 max=+0.0000  (n=27)
+cmd_vel vx         : min=-0.1000 max=+0.0000  (n=72)
+action result      : SUCCEEDED
+
+--- 시험 후 정지 확인 ---
+cmd_vel traffic (5s): silent
+```
+
+</details>
+
+### ⑤ 미조치
+
+- `embedded/Lidar/CLAUDE.md` §5 "후진 금지 설계: 커스텀 BT가 1차 방어 — 이 전제를 깨지 말 것"이
+  이번 변경과 충돌한다. 지시 범위(2개 파일) 밖이라 미수정. **다음 단계에서 정정 필요.**
+- 다음 단계: 후방에 장애물을 두고 **collision checker가 BackUp을 실제로 거부하는지** 검증.
+
+## 2026-08-09 — ⚠️ wheel odom yaw 1.6~1.7배 과대추정 확인 / 구동륜 실측 0.42 m·스폰지 휠 기록 (relu 실측 / Claude 측정·기록)
+
+재부팅 후 localization 안정 상태에서 **눈대중 90° 제자리 회전 1회**로 각 odometry 계층의 yaw 변화량을
+비교했다. 결론: **회전 추정을 실제로 담당하는 경로(RF2O twist → EKF → AMCL)는 정상**이고,
+**wheel odom yaw만 크게 과대추정**된다. 단 wheel yaw는 EKF 입력에서 제외돼 있어 현재 영향은 없다.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion` @ `537b9b5`
+- **방식**: read-only 연속 로거(스크래치패드, 프로젝트 소스 미변경). 코드·파라미터 수정 없음, Nav2 Goal 미사용.
+
+### ① 하드웨어 실측 (사용자 줄자)
+
+| 항목 | 값 | 비고 |
+|---|---|---|
+| **구동륜 중심간 거리 (physical)** | **≈ 0.42 m** | differential-drive `wheel_separation` 에 해당하는 값 |
+| 후방 캐스터 간격 | ≈ 0.25 m | **wheel_separation 아님.** 운동학에 쓰지 말 것 |
+| 현재 yaml `wheel_separation_m` | 0.38 | 실측과 4 cm 차이 |
+| `wheel_radius_m` | 0.0587 | 이번 시험 범위 밖 |
+
+차체 폭 0.44 m(이전 항목 `left +0.22 / right -0.22`)와 구동륜 간격 0.42 m 는 서로 모순되지 않는다.
+
+**구동륜 상태 (오차 해석에 필수)**
+
+- 단단한 고무/우레탄이 아니라 **스폰지 계열 휠**
+- 모터축에 대해 완전한 1자(직각)로 고정돼 있지 않음 — 육안상 좌우 바퀴가 약간 변형
+- **바퀴 면이 차체 안쪽으로 말려 들어간 camber 유사 각도** 존재
+- 회전·하중 시 스폰지 특성상 추가 변형 가능
+
+### ② 90° 회전 시험 결과
+
+```
+              before      after      delta
+wheel:       + 45.43    +182.31    +136.88
+RF2O:        - 89.29    -  7.14    + 83.37   (±20, 정지 드리프트 오염)
+filtered:    + 12.73    + 96.37    + 83.64
+AMCL pose:   -171.70    - 84.63    + 87.07   (t=208.4s 이후 갱신 정지 = stale)
+map->base:   -174.35    - 95.11    + 79.24
+```
+
+- **filtered ↔ map 차이 4.4°** = 회전 중 AMCL 이 map→odom 에 넣은 −4.5° 보정과 일치. 정상.
+- `/amcl_pose` +87.07° 는 오차가 아니라 **stale** — 정지 후 motion 이 없어 갱신이 멈춰 마지막 ~11° 미반영.
+  **map 프레임의 정답은 `/amcl_pose` 가 아니라 `map->base_link` TF.**
+- **wheel +136.88° = filtered 대비 1.637배, map 대비 1.727배.**
+- 회전이 단조롭지 않았다(t≈202s 오버슈트 → t≈206s −44° 복귀 → 재진행). **5개 소스 전부 동일 스윙**이므로
+  센서 결함이 아니라 실제 차체 움직임. 순 변화량만 쓰므로 결론에 영향 없음.
+
+### ③ separation 만으로는 설명되지 않음
+
+`0.38 → 0.42` 비례 보정 시 예상 wheel yaw:
+
+```
+136.88 * 0.38 / 0.42 ≈ 123.8 deg    (실제 localization 79~84 deg 대비 여전히 ~1.5배)
+```
+
+→ **"wheel_separation 이 0.38 이라서 생긴 오차"로 결론 내리면 안 된다.** 기하 보정은 전체 오차의
+일부만 설명한다.
+
+역산 effective separation (분모는 odom 계산이 실제로 나눈 값 = 설정값 0.38):
+
+```
+L_eff = 0.38 * 1.637 ≈ 0.622 m   (filtered 기준)
+L_eff = 0.38 * 1.727 ≈ 0.656 m   (map 기준)
+```
+
+⚠️ **0.62~0.66 m 를 물리 바퀴 간격으로 해석하지 말 것.** 슬립·스크럽·바퀴 변형까지 흡수한
+**effective calibration parameter 후보**일 뿐이다. 물리 실측 0.42 m 대비 잔여 배율 ≈ 1.48~1.56 은
+기하가 아닌 접지 거동에서 온다.
+
+### ④ 원인 후보
+
+| 후보 | 근거 |
+|---|---|
+| separation 설정 오차 (0.38 vs 0.42) | 확정된 기여분이나 전체의 일부만 설명 |
+| **스폰지 휠 변형** | 하중·회전 시 접지면 변형 → effective rolling radius 변동 |
+| **wheel alignment / inward camber** | 제자리 회전에서 lateral scrub 유발, 실제 회전 중심 이동 |
+| slip / scrub | 제자리 회전은 스크럽이 최대인 조건 |
+| effective rolling radius 차이 | 좌우 비대칭이면 단일 separation 보정으로 못 잡음 |
+| ideal differential-drive 모델 불일치 | 위 요인들의 총합 |
+
+### ⑤ 영향도 — 현재 Nav2 는 영향 없음
+
+[`ekf.yaml`](../embedded/Lidar/src/choll_slam_bringup/config/ekf.yaml) 확인:
+
+- `odom1` (`/wheel/odom`) → **vx 하나만 `true`.** yaw·yaw-rate 전부 `false` → wheel yaw 오차 미전파
+- `odom0` (`/odom_rf2o_cov`) → vx·vy·**vyaw(twist)**. RF2O 의 **pose 가 아니라 rate** 를 사용
+- `odom2` (`/odom_zupt`) → 정지 중 zero-velocity 주입
+
+filtered 가 +83.6° 로 맞게 나온 것은 **RF2O 각속도 추정 자체는 정상**임을 뜻한다.
+
+**별건 — `/odom_rf2o` pose 정지 드리프트**: 정지 상태에서 yaw 가 계속 흐르고 **드리프트율이 일정하지도
+않다** (회전 전 −1.08 °/s, 회전 후 −0.383 °/s, 그 이전 +1.23 °/s — 부호까지 반전). 보정 불가라
+RF2O delta 는 신뢰할 수 없다. 다만 EKF 는 pose 를 안 쓰고 ZUPT 가 억제해 filtered 정지 드리프트는
+0.02~0.045 °/s 로 잡혀 있다. **`/odom_rf2o` 를 디버깅·시각화 기준으로 믿으면 안 된다.**
+
+### ⑥ 향후 calibration 절차 (이번엔 미수행)
+
+눈대중 90° 1회로 값을 확정하지 않는다. 별도 단계에서:
+
+1. 바닥에 기준선 표시
+2. 실제 **180° 또는 360°** 회전
+3. 같은 방향 3회 이상 + **반대 방향 3회 이상**
+4. 실제 회전각 vs wheel odom 회전각 비교
+
+```
+L_effective = L_config * (wheel_odom_delta / actual_delta)
+```
+
+> 분모에 넣는 기준값은 **odom 계산이 실제로 나눈 설정값**(현재 0.38)이다. 물리 실측 0.42 를 넣으면
+> 서로 다른 두 보정을 한 번에 섞게 된다.
+
+**CW/CCW 결과가 다르면 단일 separation 문제가 아니라 좌우 바퀴 비대칭·변형·슬립 문제로 판단한다.**
+스폰지 휠 + inward camber 상태를 고려하면 그럴 가능성이 낮지 않다.
+
+### ⑦ 미조치 (의도적)
+
+`wheel_separation_m` 을 0.42 로도, 0.62~0.66 으로도 **변경하지 않았다.** wheel radius·EKF config 도
+미변경. 현재 wheel yaw 가 fusion 에서 제외돼 navigation 영향이 없으므로 상태를 유지하고,
+정식 calibration 후에 한 번에 정정한다.
+
+<details>
+<summary>측정 원본 — 회전 구간 트레이스 (deg, unwrapped)</summary>
+
+```text
+t      wheel     rf2o   filtered   amcl    tf_map
+  180   +45.43   -83.09   +12.99  -171.70  -174.02
+  186   +45.43   -88.68   +12.77  -171.70  -174.25
+  188   +45.52   -89.29   +12.67  -171.70  -174.35   <- 회전 시작
+  190   +46.44   -92.02   +10.65  -171.70  -176.37
+  194  +108.97   -36.43   +68.23  -121.22  -117.30
+  198  +162.71    +9.71  +112.47   -83.12   -75.70
+  202  +172.28    +5.36  +110.29   -82.25   -79.99   <- 오버슈트
+  206  +127.83   -49.90   +53.48  -140.35  -138.10   <- 5개 소스 동시 복귀 = 실제 차체 움직임
+  210  +183.13    -4.92   +98.18   -84.63   -93.30   <- 정지
+  212  +182.31    -7.14   +97.27   -84.63   -94.21
+  216  +182.31   -12.11   +97.03   -84.63   -94.44
+  222  +182.31   -17.33   +96.80   -84.63   -94.67
+  230  +182.31   -25.39   +96.45   -84.63   -95.02
+  240  +182.31   -28.82   +96.30   -84.63   -95.18
+  250  +182.31   -27.20   +96.37   -84.63   -95.11
+  257  +182.31   -27.63   +96.37   -84.63   -95.11
+
+정지 중 드리프트 (deg/s), 최소자승:
+  wheel      pre=+0.000 post=-0.000
+  rf2o       pre=-1.080 post=-0.383      <- 율이 불안정, 부호 반전 이력 있음
+  filtered   pre=-0.045 post=-0.017
+  amcl       pre=-0.000 post=-0.000      (정지 시 갱신 없음)
+  tf_map     pre=-0.045 post=-0.017
+
+wheel_odometry 파라미터 실측값:
+  counts_per_wheel_rev = 68160.0
+  wheel_radius_m       = 0.0587
+  wheel_separation_m   = 0.38
+```
+
+</details>
+
+## 2026-08-09 — ✅ 차체 기하 3건 정정(footprint·라이다 extrinsic·scan_mask) / 🔴 map_home_v1~v3 폐기 대상 (relu 실측 / Claude 실행·기록)
+
+"Nav2 가 벽과 거리를 안 둔다 / 실제로 차체가 벽에 닿는다" 진단에서 **기하 가정 3개가 전부 틀려
+있었음**이 드러났다. 셋 다 같은 뿌리 — `base_link` 가 차체 기하 중심이라는 검증되지 않은 가정.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`, 브랜치 `em/feature/system-fusion` @ `537b9b5`
+- **실측(사용자 줄자)**: `base_link` = 좌우 구동륜 차축 정중앙 기준
+  front `+0.10` / rear `-0.50` / left `+0.22` / right `-0.22` (전후 0.60 x 좌우 0.44),
+  라이다 광학 중심 = 전방 `+0.05`. **전륜 구동이라 차축이 차체 앞쪽에 치우쳐 있다.**
+
+### ① 정정 내역
+
+| 대상 | 이전 | 수정 | 영향 |
+|---|---|---|---|
+| `nav2_params.yaml` footprint (local·global) | `[±0.31, ±0.22]` 대칭 | `[+0.10..-0.50, ±0.22]` | 존재하지 않는 전방 0.21 m 를 점유로, 실재하는 후방 0.19 m 를 자유로 오인하고 있었음 |
+| `nav2_params.yaml` DWB critic | `BaseObstacle` (scale 0.02) | `ObstacleFootprint` (scale 0.02) | BaseObstacle 은 Humble 헤더 원문상 "circular robot" 전용 — 중심 셀 1개만 검사 |
+| `lidar.launch.py` static TF x | `0.30` | `0.05` | 0.30 은 차체 최전방(+0.10)보다 0.20 m 앞 = 물리적으로 불가능 |
+| `scan_mask_node.py` 박스 | 원점 대칭 `±0.31 x ±0.16`, 공차 +15% | 비대칭 `x -0.55..+0.05, y ±0.22`, 여유 +0.03 m | 정면 0.357 m 까지 지우고 있었음 = **앞의 벽을 /scan 에서 삭제** |
+
+### ② 새 footprint 기하 (costmap 실측으로 교차검증)
+
+inscribed `0.10` (이전 0.22) / circumscribed `sqrt(0.50²+0.22²) = 0.546` (이전 0.380).
+inflation 은 미변경(local 0.25 / global 0.30)이며, 계산상 gradient 폭 local 0.15 / global 0.20 m.
+costmap 최저 gradient cost 실측 **local 62 / global 53** = 계산 예측 62 / 54 와 일치 → inscribed 0.10 반영 확인.
+
+⚠️ inflation_radius 가 circumscribed 0.546 보다 작아 후방 모서리는 포텐셜 필드 밖이다. 후속 과제.
+
+### ③ scan_mask 전방 과잉 마스킹 해소 (`/scan_raw` vs `/scan` 동시 스냅샷)
+
+```
+raw   유효 374/430
+scan  유효 360/430
+  전방 ±30         raw  67/ 72  ->  scan  67/ 72  (제거 0)
+  좌 60~120       raw  54/ 71  ->  scan  50/ 71  (제거 4)
+  우 -120~-60     raw  58/ 72  ->  scan  52/ 72  (제거 6)
+  후방 150~180     raw  26/ 37  ->  scan  24/ 37  (제거 2)
+  전방 ±30 최근접: raw 1.0779999494552612  scan 1.0779999494552612
+```
+
+전방 제거 0빔, 최근접 거리 raw 와 완전 동일 → **정면 벽이 더 이상 지워지지 않는다.** 자기 반사는
+측면·후방에서만 제거된다.
+
+### ④ 🔴 기존 지도 전량 폐기 대상
+
+`map_home` / `map_home_v2` / `map_home_v3` 는 모두 `base_link->laser_frame x=0.30` 상태에서 매핑됐다.
+실제는 0.05 이므로 스캔 원점이 **0.25 m 전방으로 평행이동**된 채 누적된 지도다. 파일은 보존하되
+운용 지도로 쓰지 않는다 → `map_home_v4` 재매핑.
+
+**✅ `map_home_v4` 재매핑·저장 완료** (teleop 0.12 m/s / 0.90 rad/s, 4파일 생성).
+기존 3세트는 타임스탬프 변동 없이 그대로 보존됐다.
+
+```
+-rw-rw-r-- 1 ssafy ssafy  294265 Aug  9 19:13 map_home_v4.data
+-rw-rw-r-- 1 ssafy ssafy    4703 Aug  9 19:13 map_home_v4.pgm
+-rw-rw-r-- 1 ssafy ssafy 5295127 Aug  9 19:13 map_home_v4.posegraph
+-rw-rw-r-- 1 ssafy ssafy     129 Aug  9 19:13 map_home_v4.yaml
+
+image: map_home_v4.pgm / mode: trinary / resolution: 0.05
+origin: [-1.72, -1.78, 0] / negate: 0 / occupied_thresh: 0.65 / free_thresh: 0.25
+```
+
+🔴 저장 중 `save_map.sh` 의 **따옴표 버그**를 발견해 고쳤다. ②단계가
+`"{filename: '$HOME/maps/$NAME}'"` (닫는 따옴표가 중괄호 뒤) 라서 YAML 파싱이 실패하고
+**posegraph/data 가 조용히 안 만들어졌다** — yaml/pgm 만 생기고 스크립트는 성공처럼 끝난다.
+`'$HOME/maps/$NAME'}` 로 정정했고, v4 는 서비스를 직접 호출해 4파일을 확보했다
+(`SerializePoseGraph_Response(result=0)`).
+
+### ⑦ ✅ map_home_v4 + 새 footprint 로 P2P 1회 성공 (벽 충돌 없음)
+
+`map_home_v4` localization(scan_fit **현재 0.997** / 최적 1.000 @ dyaw +5°) 위에서
+inflation 0.25/0.30 -> **0.60/0.60** 으로 올린 뒤(cost_scaling 3.0 유지) 넓은 공간 P2P 1회.
+
+**주행 전 읽기 전용 확인** — footprint 방향·벽 정합·정면 스캔 3종:
+
+```
+① published_footprint (base_link 기준):
+   [(0.101, 0.22), (0.101, -0.22), (-0.499, -0.219), (-0.499, 0.221)]
+   전방 최대 +0.101 / 후방 최소 -0.499  -> ✅ 앞 짧고 뒤 긺
+② 정적 지도 occupied 344칸  vs  global costmap lethal 344칸  -> 비 1.00 ✅ 이중벽 없음
+③ 전방 ±30° 스캔점 66개 중 local costmap lethal 63개 (95%) 최근접 1.099 m ✅ 정면 벽 살아있음
+```
+
+**inflation 0.60 효과** — lethal 은 안 늘고 gradient 만 넓어졌다(내접 0.10 은 불변):
+
+| | lethal | inscribed(99) | gradient(1-98) | 최저 gradient cost |
+|---|---|---|---|---|
+| local 0.25 | 343 | 855 | 1168 | 62 |
+| local 0.60 | 343 | 855 | **3739** | **22** |
+| global 0.30 | 344 | 908 | 1560 | 53 |
+| global 0.60 | 344 | 908 | **2450** | **22** |
+
+계산 예측 `252*exp(-3*(0.60-0.10))` -> occupancy 22 와 실측 22 가 일치.
+
+**⚠️ 전역 경로 여유는 이 지도에선 안 늘었다** (`plan_probe.py`, 주행 없이 `ComputePathToPose`):
+
+```
+로봇 (map): (-0.40, 0.08)   시험 목적지: (1.31, 1.50)   직선거리 2.22 m
+A) inflation 0.60: 점 87개  경로길이 2.18 m  벽 최소거리 0.200 m  평균 0.672 m
+B) inflation 0.25: 점 88개  경로길이 2.19 m  벽 최소거리 0.200 m  평균 0.657 m
+```
+
+같은 구간의 **최대 병목 여유가 0.15~0.20 m** (연결성 이분탐색) 라 0.200 m 는 **기하학적
+한계**다 — inflation 을 어떻게 잡아도 그 지점은 개선되지 않는다. 넓은 구간의 평균만 늘었다.
+
+**P2P 실주행 1회** (`p2p_watch.py`, 읽기 전용 관찰):
+
+```
+  [  18.5s] 상태 -> EXECUTING
+  [  32.6s] 상태 -> SUCCEEDED
+
+최종 상태      : SUCCEEDED
+상태 전이      : [(18.5, 'EXECUTING'), (32.6, 'SUCCEEDED')]
+/cmd_vel       : 290건 (0 명령 10건), max |v|=0.150 m/s, max |w|=0.897 rad/s
+footprint 샘플 : 70개
+footprint-벽 최소거리 : 0.051 m  (lethal 셀이 footprint 내부였던 프레임 0개)
+footprint 마지막 : [(1.14, 0.81), (1.45, 0.5), (1.02, 0.08), (0.71, 0.39)]
+```
+
+주행 14.1초. nav2.log 신규 19줄 중 경고 2건뿐이며 둘 다 1회성이다
+(`Behavior Tree tick rate 100.00 was exceeded!`, `No goal checker was specified in
+parameter 'current_goal_checker'`). **recovery(spin/backup/wait) 0건, trajectory
+rejection 0건.** 마지막 footprint 변 길이는 0.438 x 0.60 으로 설정과 일치한다.
+
+⚠️ **footprint 와 벽의 최소 거리가 0.051 m 까지 좁혀졌다.** costmap 상 충돌(폴리곤 내부에
+lethal 셀)은 0 프레임이지만 여유 5 cm 는 얇다. 이번 목적지가 넓은 공간이었음에도 이 값이
+나온 것이라 후속 시험에서 재현되는지 볼 것.
+
+### ⑧ 5cm 근접의 출처 규명 + 보수적 원형 global A/B (둘 다 주행 없음)
+
+**출처**: 최소 여유는 목적지가 아니라 **출발 직후 선회 구간**에서 나왔다. 전역 경로의
+**중심** 기준 최소 벽거리는 0.437 m 로 넉넉한데, 그 위에 실제 차체를 접선 방향으로
+얹으면 **0.007 m** 까지 좁아진다 — 벽은 차체 기준 **+159.2°(거의 정후방)**. 종료 pose 는
+0.384 m 로 여유로웠다. 즉 **A(planner 가 벽에 붙임)도 B(DWB 가 접근함)도 아니고,
+후방 0.50 m / 외접 0.546 m 인 비대칭 차체가 선회할 때 뒤가 쓸리는 C** 다.
+실주행 실측 0.051 m 는 접선 모델(0.007)보다 7배 나은 값으로, ObstacleFootprint 가
+실제로 후미를 지켜낸 것으로 보인다 (rejection 0 · 충돌 0).
+
+**cost_scaling_factor 는 해법이 아니다** (같은 경로 재계획, 이후 3.0 복원):
+
+| cost_scaling_factor | 경로 점 | footprint 최소여유 | 경로 중심 최소 벽거리 |
+|---|---|---|---|
+| 3.0 | 50 | 0.007 m | **0.437 m** |
+| 1.5 | 48 | 0.002 m | **0.437 m** |
+| 0.8 | 53 | 0.000 m | **0.437 m** |
+
+**경로 중심선이 전혀 움직이지 않는다.** 이 방(3.35x3.5 m)은 inflation 0.60 이 거의 전
+영역을 덮어 gradient 가 균일 오프셋처럼 작용하고, NavFn 경로는 사실상 기하/길이로
+결정된다. inflation_radius 0.25<->0.60 A/B 에서 경로가 안 바뀐 것과 같은 이유다.
+
+**보수적 원형 global (`footprint: "[]"` + `robot_radius: 0.55`) A/B** — local 은 실제
+polygon + ObstacleFootprint 유지, 목적지 좌표 고정:
+
+| 케이스 | polygon global (baseline) | circle global r=0.55 |
+|---|---|---|
+| A 넓은 공간 (실제로 SUCCEEDED 했던 경로) | ✅ 1.24 m, 중심여유 0.437 | 🔴 **실패** |
+| B 대표 free-space (병목 0.600) | ✅ 1.71 m, 중심여유 0.600 | ✅ 1.70 m, 중심여유 0.605 |
+| C 좁은 통로 (병목 0.112) | ✅ 1.29 m, 중심여유 0.180 | 🔴 **실패** |
+
+**판정: 이 환경에서 `robot_radius=0.55` 는 과도하게 보수적.** 실제로 완주한 A 조차
+계획 불가가 된다. 원복 후 runtime 재확인 — global footprint polygon, robot_radius 0.1
+(footprint 가 있어 미사용), local polygon 불변, inflation 0.6/0.6, critics 불변,
+A/B/C 재계획 결과가 baseline 과 일치(A 1.24/0.437, B 1.70/0.605, C 1.30/0.173).
+
+**장기 대안**: NavFn 은 비대칭 footprint 의 yaw 를 다루지 못하므로, 전역 단계에서
+후방 스윙을 처리하려면 `nav2_smac_planner` 의 **State Lattice**(또는 Hybrid-A*) 처럼
+yaw 를 상태로 갖고 footprint 충돌을 검사하는 플래너로의 교체를 검토할 필요가 있다
+(이번 단계에서는 교체하지 않았다).
+
+### ⑨ ObstacleFootprint.scale 0.02 -> 0.20 A/B (실주행 1회씩)
+
+| | scale 0.02 | scale 0.20 |
+|---|---|---|
+| 결과 | SUCCEEDED | SUCCEEDED |
+| footprint-벽 최소거리 | 0.051 m | **0.059 m** |
+| footprint 내부 lethal | 0 프레임 | 0 프레임 |
+| recovery | 0 | 0 |
+| trajectory rejection | 0 | 0 |
+| max cmd | v 0.150 / w 0.897 | v 0.150 / w 1.074 |
+| `/cmd_vel` | 290건 (0명령 10) | 313건 (0명령 10) |
+| 주행시간 | 14.1 s | 15.2 s |
+
+```
+  [  98.4s] 상태 -> EXECUTING
+  [ 113.6s] 상태 -> SUCCEEDED
+최종 상태      : SUCCEEDED
+/cmd_vel       : 313건 (0 명령 10건), max |v|=0.150 m/s, max |w|=1.074 rad/s
+footprint 샘플 : 76개
+footprint-벽 최소거리 : 0.059 m  (lethal 셀이 footprint 내부였던 프레임 0개)
+footprint 마지막 : [(-0.38, 1.05), (-0.11, 1.4), (0.36, 1.02), (0.09, 0.68)]
+```
+
+nav2.log 신규 19줄, 경고 1건(1회성 `No goal checker was specified`), recovery·rejection 0.
+
+⚠️ **두 시험의 경로가 다르다** (0.02 는 대략 (-0.40,0.08)->(0.64,0.69), 0.20 은
+(0.64,0.69)->(약 0.0,1.04)). 따라서 +0.008 m 는 통제된 비교가 아니며 **개선의 증거로
+읽으면 안 된다.**
+
+**판정: B(변화 없음) — `ObstacleFootprint.scale` 은 이 상황의 핵심 레버가 아니다.**
+기전이 설명된다: `ObstacleFootprintCritic::getScale()` 이 resolution(0.05)을 곱하므로
+0.20 의 실효 가중치는 **0.01** 이고, PathAlign/PathDist(32.0) 대비 3000배 작다.
+게다가 두 시험 모두 rejection 0 이었다 — 즉 이 critic 은 실제로 **연속적인 척력이 아니라
+lethal 침범 시의 거부권(veto)** 으로만 작동하고 있다. 여유를 늘리려면 scale 을 path
+추종 항과 겨룰 수준(명목 수백)까지 올려야 하는데 그건 현실적이지 않다.
+
+### ⑩ 🔴 local footprint_padding 0.05 A/B — 안전은 확보, **주행은 실패**
+
+`ObstacleFootprint.scale` 은 0.02 로 복원하고, `local_costmap` 에만
+`footprint_padding: 0.05` 를 적용했다 (global 은 0.0 유지). padding 적용은
+`published_footprint` 를 base_link 로 역변환해 직접 확인했다:
+
+| | x 범위 | y 범위 |
+|---|---|---|
+| 실제 차체 (param) | -0.500 .. +0.100 | ±0.220 |
+| **local published (padded)** | **-0.550 .. +0.150** | **±0.270** |
+| global published | -0.500 .. +0.100 | ±0.220 |
+
+전 방향 정확히 +5 cm. global 은 실제 기하 유지.
+
+**결과 — 목표에 도달하지 못했다** (`p2p_watch.py` 는 padded 봉투와 실제 차체를 분리 측정):
+
+```
+  [ 200.0s] 상태 -> EXECUTING
+최종 상태      : EXECUTING (관찰 창 300초 내 종료 없음)
+/cmd_vel       : 2005건 (0 명령 15건), max |v|=0.063 m/s, max |w|=0.442 rad/s
+footprint 샘플 : published 506개 / 실제 506개
+① published(padded) -벽 최소거리 : 0.163 m  (내부 침범 0)
+② **실제 차체(unpadded)** -벽 최소거리 : 0.225 m  (내부 침범 0)
+```
+
+nav2.log 신규 198줄 요약:
+
+```
+6 [WARN]  [BehaviorTreeEngine]: Behavior Tree tick rate 100.00 was exceeded!
+5 [WARN]  [controller_server]: [follow_path] [ActionServer] Aborting handle.
+5 [ERROR] [controller_server]: Failed to make progress
+3 [WARN]  [controller_server]: Control loop missed its desired rate of 20.0000Hz
+1 [WARN]  [planner_server]: Planner loop missed its desired rate ... Current loop rate is 1.2183 Hz
+1 [WARN]  [behavior_server]: Collision Ahead - Exiting Spin
+1 [WARN]  [behavior_server]: spin failed
+```
+
+| | scale 0.02 / padding 0 | **padding 0.05** |
+|---|---|---|
+| 결과 | SUCCEEDED (14.1 s) | **미도달** — follow_path abort x5 |
+| 실제 차체-벽 최소거리 | 0.051 m | **0.225 m** |
+| recovery | 0 | **spin(실패) + wait** |
+| max cmd | v 0.150 / w 0.897 | v **0.063** / w **0.442** |
+
+**판정: C — 이 환경에서 5 cm padding 은 너무 보수적이다.** 안전 방향으로는 확실히
+작동했다(실제 여유 0.051 -> 0.225 m, 4배). 그러나 padding 은 local 내접반지름을
+0.10 -> 0.15 로 올리고 충돌 봉투를 0.70 x 0.54 m 로 키우는데, 이 집 경로의 병목이
+0.15~0.20 m 라 통과 가능한 회랑이 사라진다. 카트는 기어가다(0.063 m/s) progress
+checker 에 걸리고, spin 회복마저 `Collision Ahead` 로 실패했다.
+
+⚠️ 시험 종료 직후 Nav2 스택 프로세스가 통째로 사라졌다(마지막 로그 이후 6분간 무기록,
+크래시 트레이스 없음). 시각이 관찰 스크립트의 300초 창 종료와 정확히 일치해
+**프로세스 그룹 정리에 의한 실행 환경 아티팩트**로 보이며 padding 과 무관하다.
+카트는 정지 상태로 안전했다 (`/stm/connected true`, wheel target [0,0], fault NONE,
+`/cmd_vel` publisher 0).
+
+### ⑥ localization -> mapping 전환 시 소유권 정리 (`switch_to_mapping.sh` 신규)
+
+`restart_slam.sh` 를 그대로 쓰면 amcl/map_server/lifecycle_manager 가 살아남아
+**map->odom 이 이중 발행**되고, static_transform_publisher 도 안 죽어 TF publisher 가
+2개가 된다. 전용 전환 스크립트로 소유권을 먼저 끊었다. 이때 **고아 `zupt_node.py` 1개**
+(첫 `ekf.launch.py` 잔재, PID 5323)도 정리 — `/odom_zupt` 가 13.35Hz(이중 발행)에서
+**9.98Hz** 로 정상화됐다.
+
+전환 후 확인: amcl/map_server 없음, slam_toolbox 1개, `/map` publisher 1개(slam_toolbox),
+`rf2o publish_tf=False`(odom->base_link 는 EKF 단독), `base_link->laser_frame [0.050, 0, 0.320]`,
+`/scan` 11.49Hz(publisher 1), `/scan_raw` 11.69Hz, inverted=True.
+
+### ⑤ 회귀 테스트
+
+<details>
+<summary>ruff + pytest 원본 출력</summary>
+
+```text
+$ ruff check embedded/Lidar/src/choll_slam_bringup/scripts/scan_mask_node.py \
+             embedded/Lidar/src/choll_slam_bringup/launch/lidar.launch.py
+All checks passed!
+
+$ cd embedded/Lidar && python3 -m pytest src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.11s
+```
+
+</details>
+
+<details>
+<summary>runtime 확인 원본 출력</summary>
+
+```text
+$ ros2 run tf2_ros tf2_echo base_link laser_frame
+- Translation: [0.050, 0.000, 0.320]
+- Rotation: in RPY (radian) [0.000, -0.000, 0.000]
+
+[scan_mask_node]: /scan_raw -> /scan | 박스(laser_frame) x -0.55..+0.05 y -0.22..+0.22
+  여유 +0.03m → 경계 정면 0.080 / 좌 0.250 / 우 0.250 / 후방 0.580 m | 섹터 마스킹 0개
+[scan_mask_node]: 컷오프 재계산: 430빔, 섹터 전체제거 0빔, inc=0.8392deg
+
+$ ros2 param get /local_costmap/local_costmap footprint
+[ [0.10, 0.22], [0.10, -0.22], [-0.50, -0.22], [-0.50, 0.22] ]
+$ ros2 param get /global_costmap/global_costmap footprint
+[ [0.10, 0.22], [0.10, -0.22], [-0.50, -0.22], [-0.50, 0.22] ]
+$ ros2 param get /controller_server FollowPath.critics
+['RotateToGoal', 'Oscillation', 'ObstacleFootprint', 'GoalAlign', 'PathAlign', 'PathDist', 'GoalDist']
+[controller_server]: Using critic "ObstacleFootprint" (dwb_critics::ObstacleFootprintCritic)
+
+$ ros2 topic hz ...
+/scan_raw          11.526 Hz
+/scan              11.565 Hz
+/odom_rf2o          9.994 Hz
+/odom_zupt         13.351 Hz
+/odometry/filtered  9.984 Hz
+/stm/connected     data: true
+```
+
+</details>
+
+## 2026-08-09 19:50 — ✅ `status/nav-result` 상행 중계 구현·실브로커 E2E 통과 / 🔴 실기 미기동으로 정지 캡처 보류 (Claude, 노트북)
+
+- **환경**: 노트북 Ubuntu 22.04 + ROS2 Humble, `~/choll/embeded`. 브랜치 `em/feature/motor-Lidar-integrated` @ `9e5ee56`.
+- **범위**: 노트북 단독 가능한 것만. 카트 실기는 미기동 상태였다.
+
+### ① 🔴 팀원 요청(정지 중 `status/position` 30초 캡처) — **불가, 카트 offline**
+
+실브로커 `your-server.example.com:1883`에 붙어 `status/#` + `cmd/#`를 30초 구독:
+
+```
+[connect] rc=0 (성공)
+[subscribe] status/# (QoS1)
+19:46:48.853 [  1.42s] status/cart {"status": "offline"}     <- retained
+============================================================
+총 수신 1건 / 30초
+  status/cart                     1건   0.03 Hz
+```
+
+`status/position` **0건**. 젯슨 스택이 안 떠 있어서다. 브로커·인증은 정상.
+캡처 스크립트는 준비돼 있으므로 실기 기동 후 노트북에서 그대로 재실행하면 된다.
+
+⚠️ `status/cart {"status":"offline"}`는 **리테인 잔재**다. `embedded/CLAUDE.md` 표에도
+"하트비트 미구현"으로 적혀 있는데 브로커에 값이 남아 있어 오해하기 쉽다.
+
+### ② ✅ `status/nav-result` 계약 확인 — BE에 이미 수신부가 있었다
+
+`status/nav`를 신설 제안 중이었으나, BE 소스에 **이미 구현돼 있었다**:
+
+| BE 파일 | 내용 |
+|---|---|
+| `MqttProperties.java:20` | `navResultTopic = "status/nav-result"` |
+| `MqttNavResultMessageHandler` | `{"status":...}` 우선, 아니면 페이로드 전체를 상태로 파싱 |
+| `NavigationService.applyCartNavResult` | switch 7종 |
+
+받는 7종(`IDLE`/`NAVIGATING`/`SUCCEEDED`/`ABORTED`/`CANCELED`/`REJECTED`/
+`NAV2_UNAVAILABLE`)이 ROS `/cart/nav_status` 7종과 **정확히 일치** → 신규 계약 협의
+없이 **중계만** 붙이면 됐다. 제안했던 `requestId` 필드는 불필요.
+
+🔴 BE는 `default -> log.warn` 으로 **모르는 상태를 조용히 버린다.** 그러면 이동 세션이
+끝나지 않아 FE에서 카트가 영원히 "이동 중"으로 남는다. 그래서 브릿지 쪽에서
+계약 밖 문자열을 걸러 내고 경고를 남기도록 했다.
+
+### ③ ✅ 구현 — `/cart/nav_status` → `status/nav-result`
+
+- `bridge_logic.build_nav_result_payload()` (순수 함수) + `NAV_RESULT_STATES`
+- `mqtt_bridge._on_nav_status()` — **상태 전이 시에만** 발행(위치처럼 스로틀하지 않음)
+- 구독 QoS를 `TRANSIENT_LOCAL`로 맞춤 — `goal_forwarder`가 래치 발행이라
+  **브릿지가 늦게 떠도 현재 상태를 즉시 받아** BE와 동기화된다
+- 발행 QoS1 — 유실되면 BE 세션이 안 끝나므로 위치(QoS0)와 다르게 간다
+
+### ④ ✅ 단위 테스트 27개 통과 (신규 6개)
+
+```
+$ PYTHONPATH=. python3 -m pytest test/ -q
+...........................                                              [100%]
+27 passed in 0.03s
+$ ruff check --output-format=concise embedded/Lidar/src/choll_mqtt_bridge/
+All checks passed!
+```
+
+신규 테스트에 **BE switch case 7종과의 집합 일치**를 강제하는 항목을 넣었다
+(`test_nav_result_states_match_backend_contract`). 한쪽만 바뀌면 여기서 깨진다.
+
+### ⑤ ✅ 실브로커 E2E — 테스트 토픽으로 BE 영향 없이 검증
+
+BE 상태를 건드리지 않으려고 `nav_result_topic:=status/nav-result-emtest`로 우회했다.
+
+```
+[ROS 발행] /cart/nav_status = IDLE
+  [MQTT 수신] status/nav-result-emtest {"status":"IDLE"}
+[ROS 발행] /cart/nav_status = NAVIGATING
+  [MQTT 수신] status/nav-result-emtest {"status":"NAVIGATING"}
+[ROS 발행] /cart/nav_status = NAVIGATING          <- 중복, 발행 안 됨 ✅
+[ROS 발행] /cart/nav_status = SUCCEEDED
+  [MQTT 수신] status/nav-result-emtest {"status":"SUCCEEDED"}
+[ROS 발행] /cart/nav_status = PAUSED              <- 계약 밖, 걸러짐 ✅
+[ROS 발행] /cart/nav_status = CANCELED
+  [MQTT 수신] status/nav-result-emtest {"status":"CANCELED"}
+
+ROS 발행 6건 -> MQTT 수신 4건
+RESULT: PASS
+```
+
+### 미검증 (젯슨 실기 필요)
+
+1. 실제 Nav2 주행에서 `/cart/nav_status` 전이가 그대로 상행되는지
+2. BE가 `status/nav-result`를 받아 FE `NAVIGATION_STATUS_UPDATED`까지 흘리는지
+   (⚠️ `mqtt.enabled`·`position-unit` 블로커가 먼저 풀려야 함)
+3. 정지 중 `status/position` 30초 캡처 (팀원 요청분)
 
 ---
+
+## 2026-08-09 03:30 — ✅ EM→BE 위치 발행 배선 검증 + ZUPT 실측 / 🔴 BE 단위 설정이 블로커 (relu 실기 / Claude 실행·기록)
+
+Nav2 P2P 가 막혀 있어, 그보다 낮은 층의 MVP —**카트가 자기 위치를 BE 로 계속 보내는 것**—
+을 먼저 닫았다. 구역별 도서 표시·슬롯 LED 는 NAV 없이 이 하나만으로 성립한다.
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`,
+  브랜치 `em/feature/motor-Lidar-integrated` @ `712186f`
+- **스택**: `bringup.launch.py ekf:=true` (라이다+scan_mask+rf2o+공분산스탬퍼+ZUPT+EKF+slam_toolbox)
+  → `interface.launch.py`(cart_pose_publisher) → `bridge.launch.py`(mqtt_bridge)
+- **신규 도구** (`ros2_ws/log/phase4_20260808/`, gitignore 대상):
+  `mqtt_sniff.py`(paho 로 브로커 `#` 구독 — 구독 전용), `pose_probe.py`(/robot_pose 표류),
+  `launch_position.sh`
+
+### ① 전제 복구 — 브리지 동결 해소 확인 (재부팅 후)
+
+2026-08-09 02:45 항목의 브리지 동결이 젯슨 재부팅으로 사라졌다. 재측정 원본:
+
+```
+=== 결과 ===                          (enc_probe.py 30)
+  수신 건수        : 300  (평균 10.0 Hz)
+  값이 바뀐 횟수   : 0  (정지 중이면 0 이 정상)
+  /stm/connected   : True
+  끊김(>0.5s) : 0 회
+✅ 30초 동안 끊김 없음. 정지 중에도 계속 발행된다.
+   값도 전혀 안 바뀌었다 — ZUPT 판정 조건을 정상적으로 만족한다.
+```
+
+⚠️ **재현 조건은 여전히 미확정**이다. 모터 담당 이관 사항(`main()` spin 루프 방어)은 유효하다.
+
+### ② STEP 1 — 위치 배관 실측 (매핑 모드) ✅
+
+```
+=== /robot_pose 감시 22초 ===          (pose_probe.py 22)
+  수신 건수   : 220  (평균 10.0 Hz)
+  frame_id    : ['map']
+  끊김(>0.5s) : 0 회
+✅ 발행 정상 (10.0 Hz, 끊김 0회)
+```
+
+```
+=== MQTT 트래픽 관찰 25초 ===          (mqtt_sniff.py 25, 필터 '#')
+  ✅ 접속 성공 (rc=0)
+  status/target    건수 115  (4.58 Hz)   {"image_width":640,"image_height":480,"tracks":[]}
+  status/position  건수  45  (1.80 Hz)
+      {"x":-0.008,"y":-0.0,"yaw":0.0591,"timestamp":"2026-08-08T18:14:39.719Z"}
+  carts/status     건수 1   {"status": "offline"}     ← 리테인 잔재
+  status/cart      건수 1   {"status": "offline"}
+  페이로드 키: ['timestamp', 'x', 'y', 'yaw']
+```
+
+**브로커 `#` 구독으로 문서 불일치를 실측 종결했다.** `embedded/CLAUDE.md` 의
+`carts/{cartId}/telemetry/position` · `choll/cart/rfid` · `carts/status` 는 낡았다.
+살아 있는 토픽은 `status/position` · `status/cart` · `status/target` 이다
+(`status/slot`·`cmd/*` 는 관측 구간 0건 — RPi/BE 명령 미가동).
+
+**🔴 yaw 는 EM 이 이미 보내고 있다.** "반영이 안 됐다"의 원인은 BE 쪽이다 —
+`MqttPositionMessageHandler.java:78-83` 의 `record PositionPayload(x, y, timestamp)` 에
+yaw 필드가 없어 파싱조차 안 하고, `CartPositionTelemetryService.java:30` 의
+`TEMPORARY_YAW = BigDecimal.ZERO` 로 FE 에는 항상 0 이 나간다.
+
+### ③ STEP 2 — ZUPT 검증 ✅ 정지 yaw 표류 24° → 2.91° (8.2배)
+
+```
+=== /robot_pose 감시 90초 ===          (pose_probe.py 90, 카트 완전 정지)
+  수신 건수   : 891  (평균 9.9 Hz)    끊김 0회
+  처음 : x=-0.0167  y=-0.0008  yaw=  +4.492 deg
+  마지막: x=-0.0213  y=-0.0013  yaw=  +7.370 deg
+  === 표류량 (최대-최소) ===
+      x   : 0.0049 m      y   : 0.0005 m      yaw : 2.908 deg
+✅ yaw 표류 2.91 deg < 3 deg
+✅ 위치 표류 x 0.005 / y 0.001 m < 0.05 m
+```
+
+ZUPT 가 실제로 발행 중임을 별도 확인 (추정 아님):
+
+```
+[zupt_node.py-6] [INFO] [zupt]: ZUPT 4200건 발행     ← 20초당 200건 = 10Hz
+$ ros2 topic echo /odom_zupt --once
+  frame_id: odom / child_frame_id: base_link
+  twist 전부 0, pose covariance[0] = 1000000.0
+$ python3 enc_probe.py 92 → 903건 9.8Hz, 값변화 0, 끊김 0
+```
+
+비교 기준: 2026-08-08 실측 **`/cmd_vel` 0건인 90초 동안 map→base_link yaw 24°**.
+
+### ④ STEP 3 — AMCL 좌표 재현성 ⏸ 미완 (환경 요인)
+
+`restart_localize.sh ~/maps/map_home.yaml` + `/initialpose` 토픽으로 headless 기동
+(RViz 2D Pose Estimate 없이 됨 — GUI 의존 제거).
+
+**AMCL 모드에서 위치 배관은 오히려 더 안정적이다** (AMCL 이 정지 중 map→odom 을 고정):
+
+```
+=== /robot_pose 감시 14초 ===
+  처음 : x=-0.1494  y=-0.4763  yaw= +79.956 deg
+  마지막: x=-0.1494  y=-0.4765  yaw= +80.036 deg
+  표류량  x 0.0001 m / y 0.0007 m / yaw 0.166 deg
+=== MQTT ===  status/position 27건 (1.81 Hz)
+  {"x":-0.149,"y":-0.477,"yaw":1.3971,"timestamp":"2026-08-08T18:22:31.119Z"}
+```
+
+**미완 사유 — 초기 위치 추정이 수렴하지 않음** (`scan_fit.py`):
+
+| 시도 | 현재 정합 | 격자탐색 최적 |
+|---|---|---|
+| 초기 pose (0, 0, 0) | 0.349 | **0.608** at dx −0.20 dy −0.40 dyaw **+80°** |
+| 보정 (−0.24, −0.46, +80°) | 0.163 | **0.671** at dx −0.40 dy +0.40 dyaw **−175°** |
+
+- 최적 yaw 가 +80° → −175° 로 튄다. **고정 오프셋이 아니므로 라이다 장착 회전이 아니다**
+  (scan_fit.py 의 자동 판정 문구는 이 경우 오독이다 — 세션 초반엔 같은 도구가 +25° 를 냈다).
+- 지도가 87×73 px = **4.35×3.65 m 의 작고 거의 직사각형인 방**, occupied 603칸 →
+  180° 대칭 모호성. 최고 점수도 0.61~0.67 로 낮다.
+- AMCL `update_min_d: 0.25` / `update_min_a: 0.2` → **움직여야만 보정한다.**
+  정지 상태로는 원리적으로 수렴 불가.
+- 사용자 판단으로 중단: "지금 맵 위치가 좀 변경 되서 내일 맵 위치 똑같이 해서 다시".
+
+### 🔴 다음 세션 전제 — 데모는 `library_map` 이다
+
+BE `library_maps` **id=2** 에 8/7 지도 기준 아핀 6계수가 들어 있고 구역 폴리곤도 그 픽셀
+좌표계로 찍혀 있다(사용자 확인). 따라서 `map_home` 이 아니라 아래를 써야 한다.
+
+| 지도 | 해상도 | origin | 크기(px) | 실측 크기 |
+|---|---|---|---|---|
+| `~/maps/library_map.yaml` (8/7 17:02) | 0.05 | [−8.14, −4.75] | 366×319 | 18.3 × 15.95 m |
+| `~/maps/map_home.yaml` (8/9 01:14) | 0.05 | [−2.43, −1.97] | 87×73 | 4.35 × 3.65 m |
+
+### 🔴 BE 블로커 (코드 실측, EM 이 못 고침)
+
+1. `mqtt.enabled` 기본 `false` (`application.properties:16`) — 배포에서 켜져 있는지 확인 필요
+2. **`mqtt.position-unit` 기본 `pixels`** — EM 은 SLAM **미터**를 보낸다.
+   `CartPositionTelemetryService.java:82-91` 이 `meters` 일 때만 변환 블록을 타므로,
+   `pixels` 면 `x=-0.149` 를 **픽셀 −0.149** 로 읽는다 → 지도 밖/구석 → 구역 판정 전멸 →
+   **LED 가 절대 안 켜진다.**
+3. 부수 효과: `NavigationService.java:142-145` 가 `position-unit != meters` 면 MOVE 의
+   `target` 을 `null` 로 보내고, EM 브릿지(`bridge_logic.py:42-46`)가 그 명령을 거부한다.
+   **BE 이동 명령이 EM 에 도달한 적이 없다** — Nav2 튜닝과 별개 문제였다.
+4. ⚠️ `MQTT_MAP_ID=2` 행이 DB 에 없으면 meters 모드에서 매 메시지마다
+   `ResourceNotFoundException("지도", 2)` 가 나고, 이 예외는 핸들러 catch 에 안 걸려
+   트랜잭션이 깨진다 → **3번(지도 등록)을 2번(meters 전환)보다 먼저** 해야 한다.
+
+### 판정
+
+| 항목 | 목표 | 실측 | 결과 |
+|---|---|---|---|
+| `/robot_pose` | ≈10 Hz, frame=map | 10.0 / 9.9 Hz, `['map']`, 끊김 0 | ✅ |
+| MQTT `status/position` | ≈2 Hz | 1.80 / 1.81 Hz | ✅ |
+| 페이로드 키 | x·y 필수 | `['timestamp','x','y','yaw']` | ✅ |
+| 정지 90초 yaw 표류 | < 3° | **2.91°** (이전 24°) | ✅ |
+| 정지 90초 x·y 표류 | < 0.05 m | 0.005 / 0.001 m | ✅ |
+| 엔코더 스트림 | 끊김 0 | 9.8 Hz, 값변화 0, 끊김 0 | ✅ |
+| AMCL 좌표 재현성 | A 왕복 0.2 m | 초기 pose 미수렴 | ⏸ 내일 |
+| FE 화면 카트 위치 | 실이동과 일치 | BE 설정 대기 | ⏸ |
+
+---
+
+## 2026-08-09 — 🔴 EM 실기: 우측 모터 무동작 = **24V 전원 연장선(WAGO) 단선** / teleop 회전 1.50→0.90 재조정 (relu 실기 / Claude 진단·기록)
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`.
+  브랜치 `em/feature/motor-Lidar-integrated`. 브릿지 `mode:=hardware max_wheel_rad_s:=8.0~8.5`
+- **증상**: 우측 바퀴가 전혀 돌지 않음. 좌측만 구동되어 카트가 제자리 선회
+- **원인(확정)**: **24V+ 를 WAGO 커넥터로 연장한 모터 전원선 몇 가닥이 끊어져 있었다** (사용자 육안 발견)
+
+### ① 진단 경로 — 소프트웨어를 전 구간 배제한 뒤 하드웨어로 좁혔다
+
+브릿지 로그 `STATUS` 1014 샘플을 파싱해 좌우를 대조했다.
+
+| 구간 | 좌측 | 우측 | 판정 |
+|---|---|---|---|
+| ROS 명령 계산 `target` | 2.00 | **5.85** | ✅ 정상 |
+| STM32 출력 `pwm` | 20 | **58** | ✅ 정상 |
+| 실제 회전 `actual` | **1.28 rad/s** | **0.00** | ❌ |
+| 엔코더 누적 `enc` | +5,669 | **0 변화** (−34066 고정) | ❌ |
+
+- **좌우 `target`이 같은데 `pwm`이 갈린 샘플은 1014개 중 0개**, 좌우 최대 PWM도 52로 동일 →
+  브릿지·시리얼·펌웨어 PWM 산출까지 결백
+- **우측 엔코더는 살아 있었다**: 좌측 단독 구동으로 카트가 선회할 때 우측 바퀴가 지면에
+  끌려 돌며 `enc R`이 +726 변했다 → 엔코더 4선(5V·GND·A·B)은 정상
+- 따라서 남는 구간은 **드라이버 출력 ~ 모터 전원 2선**뿐이었고, 실제로 그 구간이 끊겨 있었다
+
+⚠️ **`pwm R=58`은 핀 출력을 보장하지 않는다.** STATUS 의 PWM 필드는 펌웨어가 자기가 설정한
+내부 변수를 되돌려주는 값이라, 실제 파형이 PB6/PB7 에 나오는지는 별개로 측정해야 한다.
+
+### ② 왜 끊어졌나 (추정 — 미확정)
+
+`config/stm_serial_bridge.yaml` 에 **2026-08-07 시점 "모터 고정 L자 브라켓이 풀린 상태"**
+기록이 있다. 브라켓이 풀린 채 주행하면 모터가 흔들리고, WAGO 클램프가 선을 고정한 그
+경계 한 점에 굽힘이 반복 집중되어 연선이 피로 파단된다. 시간 순서도 맞는다.
+**단정하지 않는다** — 인장·페룰 미압착·선 굵기 부족도 후보다.
+
+- 재발 방지로 합의된 것 없음. 검토 대상: 커넥터 앞 케이블타이 고정(스트레인 릴리프),
+  서비스 루프, 페룰 압착, 브라켓 토크 정기 점검, WAGO 연장 제거(통선화)
+- ⚠️ **좌측도 같은 방식으로 연장돼 있다면 같은 수명을 살고 있다** — 저항 점검 권장
+
+### ③ 🔴 부수 발견 — 우측 STALL 미검출 (미수정)
+
+`pwm R=58`(데드존 20의 약 3배)을 5초간 주는 동안 `actual R=0.00`, 엔코더 0 변화였는데
+`/stm/fault` 는 **계속 `NONE`** 이었다. 펌웨어의 우측 STALL 판정이 동작하지 않는다.
+**자율주행 중이었다면 바퀴가 멈춘 것을 시스템이 모른 채 진행했을 것이다.** 별건으로 처리 필요.
+
+### ④ teleop 회전 속도 1.50 → 0.90 (직전 값의 60%)
+
+- 08-08 에 0.60→1.50 으로 올렸으나 실기에서 **너무 빨라 90도에서 멈추는 각을 맞추기 어려웠다**
+- 0.90 = 바퀴 2.63 rad/s(PWM 약 26, 실측 데드존 위) · 복합 최악 6.63 rad/s
+  → 브릿지 `max_wheel_rad_s:=8.5` 에서 무축소 수용 (최소 요구 6.7)
+- 90도 선회 소요 = (pi/2)/0.9 ≈ **1.75초** (1.50 일 때 1.05초)
+- `cart_teleop` 테스트 **70 passed** — 기본값 가드 테스트(`test_defaults_match_the_measured_speed_envelope`)도 0.90 으로 동기화
+
+### 검증하지 **않은** 것 (성공으로 단정하지 말 것)
+
+- **0.90 의 실기 체감** — 방금 바꾼 값이라 아직 사람이 몰아보지 않았다
+- 회전각 정확도 — 360도 선회 시간을 재서 `2*pi/0.9 ≈ 7.0초` 와 대조하는 검증 미실시
+- 좌측 전원선 상태, 재발 방지 조치 적용 여부
+- `colcon build` 미실행 (순수 pytest 만 돌림)
+- ruff D403 2건(`teleop_keys.py` 241·420행)은 **이번 변경 이전부터 존재** — 커밋된 HEAD 원본에서도 동일 2건 확인. 범위 밖이라 미수정
+
+<details>
+<summary>원본 출력</summary>
+
+```
+$ python3 - <<EOF   # 브릿지 로그 STATUS 1014 샘플 파싱
+=== 구동 구간 요약 ===
+  좌 actual: 최대 4.74 rad/s,  0이 아닌 샘플 62/68
+  우 actual: 최대 0.84 rad/s,  0이 아닌 샘플 17/68
+  좌 enc 순변화:   433744
+  우 enc 순변화:    -7001
+  ▶ 좌우 target이 같은데 pwm이 갈린 샘플: 0개
+  ▶ 우측 최대 PWM 52 (데드존 임계 20 훨씬 초과)
+
+$ ros2 topic pub -r 20 /cmd_vel ... "{linear: {x: 0.19}, angular: {z: 1.0}}"   # 우측 단독
+STATUS #9562: target L=0.00 R=5.85, actual L=0.00 R=0.00, pwm L=0 R=58, enc L=483504 R=-34066
+STATUS #9568: target L=0.00 R=5.85, actual L=0.00 R=0.00, pwm L=0 R=58, enc L=483504 R=-34066
+STATUS #9585: target L=0.00 R=5.85, actual L=0.00 R=0.00, pwm L=0 R=58, enc L=483504 R=-34066
+   -> 5초간 enc R 단 1카운트도 변하지 않음. /stm/fault 는 계속 NONE
+
+$ ros2 topic pub -r 20 /cmd_vel ... "{angular: {z: -1.0}}"                      # 좌측 단독(대조군)
+STATUS #9848: target L=0.40 R=0.00, actual L=0.00 R=0.00, pwm L=4  R=0, enc L=483556 R=-34069
+STATUS #9854: target L=2.00 R=0.00, actual L=1.28 R=0.11, pwm L=20 R=0, enc L=489225 R=-33343
+   -> 좌측 enc +5,669 (구동) / 우측 enc +726 (끌려 돌며 변화 = 엔코더 정상 증거)
+
+$ cd ros2_ws/src/cart_teleop && python3 -m pytest test/ -q
+...................................................................... [100%]
+70 passed in 0.17s
+
+$ ruff check --config pyproject.toml ros2_ws/src/cart_teleop/cart_teleop/teleop_keys.py
+Found 2 errors.        # D403 x2
+$ git show HEAD:ros2_ws/.../teleop_keys.py > /tmp/orig.py && ruff check /tmp/orig.py
+Found 2 errors.        # 변경 이전에도 동일 -> 이번 작업이 만든 것이 아님
+```
+
+</details>
+
+## 2026-08-09 02:45 — 🔴 브리지 동결 원인 규명: 인스턴스 3중 점유 + spin_once hot loop (relu 실기 / Claude 실행·기록)
+
+`/stm/encoder_total` 이 침묵하는 문제를 **추측 없이 계층별로 측정**해 좁혔다.
+사용자 제안("브리지가 멈췄을 때 값을 보내는지 세는 코드를 짜서 확인")대로 진행했다.
+
+### ① 가설 배제 — 어느 계층인가
+
+| 가설 | 방법 | 결과 |
+|---|---|---|
+| STM32 가 정지 중엔 STATUS 를 안 보낸다 | 브리지 내리고 **시리얼 직접 읽기** 10초 | ❌ **기각** — 143줄/10초 = **14.3 줄/s 로 계속 송신**. 값은 그대로(정지 중이니 정상) |
+| 브리지가 값이 안 바뀌면 발행을 거른다 | 코드 확인 | ❌ **기각** — `_publish_status()` 에 값 비교 분기가 없다. STATUS 받을 때마다 4개 토픽 무조건 발행 |
+| `read_available()` 의 `in_waiting` 방식이 문제 | 브리지와 **동일 방식**(timeout=0.0 + in_waiting, 50Hz)으로 폴링 | ❌ **기각** — 581 B/s (블로킹 방식 460 B/s 와 동등) |
+| DDS 공유메모리 고아 세그먼트 | `/dev/shm/sem.fastrtps_*` 11개 전부 삭제 후 재측정 | ❌ 단독 원인 아님 (증상 유지) |
+
+원본:
+```
+=== 브리지 내리고 시리얼 직접 읽기 10초 ===
+수신 줄 수 : 143  (14.3 줄/s)
+  샘플: b'STATUS,0.00,0.00,0.00,0.00,0,0,-19393,424952\r'
+✅ STM32 는 정상 송신 중 -> 끊김의 원인은 STM32 가 아니라 브리지/ROS 쪽이다.
+
+=== A. 브리지 방식: timeout=0.0 + in_waiting 폴링 50Hz, 10초 ===
+  폴링 497회 중 in_waiting>0 : 118회
+  읽은 총 바이트              : 5806  (581 B/s)
+```
+
+### ② 🔴 발견 1 — 브리지 인스턴스가 **3개** 떠서 같은 포트를 뜯어먹고 있었다
+
+```
+/dev/ttyACM0 을 연 프로세스:  PID 10479, 8344, 9543   ← 셋 다 브리지
+```
+
+셋이 같은 포트에서 바이트를 빼앗아 프레임이 깨졌다:
+```
+손상된 수신 줄 #1 (STATUS: field count 16 != 9):
+  'STATUS,0.00,0.00,0.00,0.00,0,0,-STATUS,0.00,0.00,0.00,0.00,0,0,-19393,424952'
+```
+두 프레임이 구분자 없이 붙어 있다 = 바이트 유실.
+
+**원인은 내 재시작 스크립트다.** `pkill -f`(SIGTERM)로는 브리지가 **죽지 않는다** —
+확인 결과 SIGKILL 이 필요했다. 재시작할 때마다 하나씩 쌓였다.
+
+**수정**: `kill_bridge.sh` 신설 — SIGTERM -> 포트 점유 수 확인 -> 안 죽으면 SIGKILL ->
+**0개 확인 후에만** 기동. 모든 `restart_motor*.sh` 가 이걸 호출하도록 교체.
+
+```
+종료 전 /dev/ttyACM0 점유: 3 개
+SIGTERM 으로 안 죽었다 — SIGKILL
+종료 후 /dev/ttyACM0 점유: 0 개   ✅
+```
+
+### ③ 🔴 발견 2 — 단일 인스턴스로도 재현: 노드가 **1.5초 뒤 정지**
+
+3중 점유를 없애고 하나만 띄워도 증상이 남았다. `ros2 launch` 를 거치지 않고
+`ros2 run` 으로 직접 띄워도 **동일** — launch 래퍼 문제가 아니다.
+
+```
+[1786209672.910] STATUS #1  ... enc L=-19517 R=424954
+[1786209673.471] STATUS #31 ... enc L=-19517 R=424954    <- 0.56초에 31개 처리
+(이후 14.4초 동안 로그 0줄, 카운터 정지)
+```
+
+포트를 쥔 실제 노드 프로세스 상태:
+```
+4초 CPU jiffies: 401   (400 = 코어 1개 100%)
+스레드 상태:  1 x R(running),  15 x S(sleeping)
+```
+
+**한 스레드가 코어 하나를 100% 태우면서 타이머 콜백은 하나도 실행되지 않는다.**
+예외·트레이스백·시리얼 오류 로그는 전혀 없고, `/stm/connected` 도 `false` 로
+내려가지 않는다(= `_update_connected_timeout()` 이 안 돈다).
+
+### ④ 원인 구조 — `main()` 의 spin 루프
+
+`stm_serial_bridge_node.py:1035`
+```python
+while rclpy.ok() and not node.serial_fatal_error:
+    rclpy.spin_once(node, timeout_sec=SPIN_TIMEOUT_SEC)   # 0.1
+```
+주석은 "timeout_sec 가 유한값이므로 busy loop 가 아니다"라고 적고 있으나,
+**`spin_once` 가 대기하지 않고 즉시 반환하면 이 루프는 hot loop 가 된다.**
+관측(코어 1개 100% + 콜백 0회 + 예외 0건)과 정확히 일치한다.
+rcl waitset 이 무효화되면 `spin_once` 는 즉시 반환한다.
+
+⚠️ **`spin_once` 가 왜 즉시 반환하는지는 아직 확정하지 못했다.** 세션 초반에는
+동일 코드로 30분 이상 정상 동작했고(주행·매핑·Nav2 수행), 수십 회 재기동
+(일부 SIGKILL) 이후에 나타났다. 커널 CDC-ACM 상태 / DDS 잔여 상태가 후보다.
+
+### ⑤ 조치·권고
+
+- **즉시**: 젯슨 재부팅. USB CDC-ACM·DDS·공유메모리 상태를 한 번에 초기화한다.
+  데모 전 가장 확실한 수단이다.
+- **모터 담당**: `main()` 의 spin 루프에 방어를 넣을 것 —
+  `spin_once` 가 timeout 보다 훨씬 빨리 반복 반환하면 이를 감지해 오류로 드러내야
+  한다. 지금은 **조용히 100% CPU 를 태우며 아무 일도 하지 않는다** (가장 나쁜 실패 방식).
+- **운영**: 브리지는 반드시 `kill_bridge.sh` 로 내릴 것. `pkill`(SIGTERM) 만으로는
+  안 죽고 포트를 쥔 채 남아, 다음 인스턴스와 바이트를 나눠 먹는다.
+
+### ⑥ 신설 도구 (`ros2_ws/log/phase4_20260808/`)
+
+| 파일 | 용도 |
+|---|---|
+| `enc_probe.py` | 엔코더 스트림 감시 — 수신 Hz·값 변화·**끊김 시각과 길이** 기록 |
+| `serial_raw.sh` | 브리지 내리고 시리얼 직접 읽기 (STM32 송신 여부 판별) |
+| `inwaiting_test.sh` | `in_waiting` 방식 vs 블로킹 방식 비교 |
+| `kill_bridge.sh` | SIGTERM->SIGKILL 확실 종료 + 포트 해제 검증 |
+| `purge_dds.sh` | ROS 전부 내리고 `fastrtps` 공유메모리 완전 삭제 |
+| `bridge_direct.sh` | launch 없이 노드 직접 실행 (래퍼 개입 판별) |
+| `scan_fit.py` | 스캔↔지도 정합 정량화 (yaw/x/y 격자 탐색) |
+| `tf_probe.py` | `odom->base_link` 발행자 수·Hz, EKF 출력 확인 |
+
+### ⑦ ZUPT 는 배선 완료, **검증 불가**
+
+`zupt_node.py` + `ekf.yaml odom2` 배선은 끝났고 노드도 정상 기동한다.
+그러나 `/stm/encoder_total` 이 안 오므로 입력이 없어 **동작을 확인할 수 없다.**
+브리지 문제가 먼저다.
+
+---
+
+## 2026-08-09 01:50 — 🔴 Nav2 P2P 미달성 / ✅ 전역 costmap 이중벽 원인 규명·수정 · ZUPT 구현 · AMCL 전환 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, `ROS_DOMAIN_ID=42`. 브랜치 `em/feature/motor-Lidar-integrated`.
+- **결론 먼저**: P2P 주행은 **성공하지 못했다.** 다만 막고 있던 원인 두 개를 실측으로
+  규명하고 고쳤으며, 세 번째(브리지 동결)는 **미해결로 남는다.**
+
+### ① ✅ 장애물 없는 네모 맵 재작성 — 품질 양호
+
+87x73 격자 (4.35 x 3.65 m), free 3068 / occupied 603, 9.2 m². 원점 (-2.43, -1.97).
+PGM 직접 렌더로 확인 — **벽이 단일 선, 겹침 없음.** `~/maps/map_home.{yaml,pgm,posegraph,data}`.
+
+### ② 🔴 P2P 시도 4회 — 전부 실패. 그 과정에서 원인 2개 규명
+
+| 시도 | 조건 | 결과 |
+|---|---|---|
+| A | 목표 (1.44,-0.14), 데드존 1.2 | ABORTED 22s. `failed to create plan` |
+| C | 도달가능 계산 목표 (0.24,-0.85) | ABORTED 23s. 동일 |
+| D | **전역 costmap 수정 후**, 목표 (-1.80,-1.15) | 90s 타임아웃. **계획은 성공**, 1.3m 전진, 부호반전 45 |
+| E | 데드존 1.2 -> 0.6 | 90s 타임아웃, 부호반전 45 (변화 없음) |
+
+### ③ 🔴 원인 1 — 전역 costmap 의 obstacle_layer 가 벽을 이중으로 그렸다
+
+live costmap 을 직접 읽어 확인:
+
+```
+costmap 87x73 = 6351칸
+  lethal(>=99) 4470 / unknown 496 / low(<50) 888
+  로봇 비용 0, 목표 비용 0  ← 양끝은 자유인데 계획 실패
+BFS(planner 실제 조건 cost<99): 도달 816칸 = 2.04 m2, 목표 도달 False
+```
+
+`cost 99` = `INSCRIBED_INFLATED_OBSTACLE` (내접반지름 0.22 m 이내). 즉 막은 것은
+`inflation_radius` 가 아니라 **footprint 폭**이다. 그리고 lethal 이 정적 지도(603)보다
+**496칸 많았다** — 전역 costmap 이 실시간 `/scan` 을 정적 지도 위에 덧그리는데 위치가
+어긋나 **벽이 두 겹**이 됐고, 각 겹이 0.22 m 씩 부풀어 방을 통째로 막았다.
+
+**수정**: `global_costmap.plugins` 에서 `obstacle_layer` 제거
+(`["static_layer","obstacle_layer","inflation_layer"]` -> `["static_layer","inflation_layer"]`).
+동적 장애물은 local_costmap 이 담당하는 Nav2 표준 구성이다.
+
+```
+수정 후: lethal 1099 -> 665,  도달 가능 2.04 m2 -> 4.40 m2,  최장 목표 1.75 m -> 3.70 m
+계획 성공 (ABORTED 사라짐)
+```
+
+### ④ 🔴 원인 2 — 위치추정이 25° 틀어져 있었다 (slam_toolbox 매핑 모드가 부적절)
+
+RViz 에서 빨간 스캔이 검은 벽과 어긋나는 것을 사용자가 발견. `scan_fit.py` 로 정량화:
+
+```
+지도 87x73 occupied 603칸, 스캔 유효 끝점 361/430
+현재 map->laser_frame (+0.165,-0.836) yaw -46.7deg
+현재 정합 점수 : 0.510
+yaw 만 틀어보기:  +25deg -> 0.848   +30 -> 0.814   +20 -> 0.745
+최적: dx=0.00 dy=0.00 dyaw=+25deg  (평행이동은 도움 안 됨 = 순수 회전 오차)
+```
+
+**장착 회전이 아니다** — 매핑도 같은 TF 를 거쳤으므로 지도에 흡수돼 있다.
+초기 포즈의 yaw 가 25° 틀렸고 **AMCL 이 스스로 못 고친 것**이다:
+
+```yaml
+update_min_d: 0.25   # 이만큼 움직여야 갱신
+update_min_a: 0.2
+recovery_alpha_slow/fast: 0.0   # 전역 재탐색 비활성
+```
+
+→ **AMCL 은 로봇이 실제로 움직여야만 추정을 갱신한다.** 정지 상태에서는 처음 찍어준
+포즈를 영원히 믿는다. 대응: 초기 포즈를 찍은 뒤 teleop 으로 조금 움직여 수렴시킨다.
+
+**매핑 모드 -> 위치추정 모드 전환**: slam_toolbox 대신 `map_server + AMCL`
+(`restart_localize.sh`). map->odom 은 AMCL, odom->base_link 는 EKF 가 발행.
+
+### ⑤ ✅ ZUPT 구현 (`scripts/zupt_node.py`) — 정지 중 yaw 드리프트 대책
+
+사용자 지적: "모터 값이 0인데 왜 움직이나. 모터가 움직일 때만 판단하게 못 하나."
+정확한 지적이며 표준 기법(zero-velocity update)이다.
+
+포즈는 rf2o 스캔매칭이 만들므로 정지 중에도 흐른다(실측: `/cmd_vel` 0건인 90초 동안
+map->base_link yaw 24° 이동). EKF 는 휠에서 vx 만 받고 yaw 는 rf2o 하나에 의존해
+견제가 없었다.
+
+엔코더가 양쪽 다 0 변화면 **정지는 확실한 사실**이다(슬립은 "바퀴는 도는데 안 나간다"
+이지 그 반대가 아니다). 이때만 vx=0·vyaw=0 을 분산 1e-4(rf2o 0.0025 의 1/25)로 발행.
+`ekf.yaml` 에 `odom2: /odom_zupt` 로 배선. **아직 실기 검증 못 함**(⑦ 참고).
+
+### ⑥ ✅ teleop 속도 재배분 — 전진 절반·회전 1.5배
+
+사용자 실기 판단: 전진은 남고 회전이 느리다. 이후 1.50 은 너무 빨라 0.90 으로 재조정.
+
+| | 이전 | 지금 |
+|---|---|---|
+| 전진 | 0.52 m/s (바퀴 8.00) | **0.26 m/s** (바퀴 4.00) |
+| 회전 | 0.60 rad/s (바퀴 1.75, **PWM 17** = 데드존 언저리) | **0.90 rad/s** (바퀴 2.63, PWM 26) |
+| 90° 선회 | 2.62 s | **1.75 s** |
+| 동시 최악 | 9.75 (상한 초과 -> 조용히 축소) | **6.63 < 8.5** |
+
+브리지 `max_wheel_rad_s` 8.0 -> **8.5**. `launch_teleop.sh` 의 `-p` 오버라이드를 제거해
+속도의 출처를 `teleop_keys.py` 한 곳으로 모았다(스크립트와 코드가 달라 헤맨 적이 있다).
+
+⚠️ 이 값은 `speed_profile:=slow`(상한 2.0)로는 낼 수 없다 — 조용히 비례 축소된다.
+
+### ⑦ 🔴 미해결 — 브리지가 조용히 얼어붙는다 (오늘 3회)
+
+```
+/stm/connected: true (래치),  /stm/fault: NONE,  프로세스 살아 있음
+그러나 bridge.log 가 5초 동안 0줄 증가 — STATUS 수신이 끊김
+/stm/encoder_total 0.0 Hz  ->  ZUPT 가 입력을 못 받아 검증 불가
+```
+
+재기동하면 잠시 살아나고 수 분~수십 분 뒤 재발한다. 로그에 오류가 남지 않는다.
+직전 로그에 `손상된 수신 줄 (STATUS: field count 16 != 9)` 이 반복 관측된다 —
+시리얼 프레이밍이 깨지는 것과 관련 있을 수 있으나 **인과는 미확정**.
+**모터 담당자 확인 필요 — 이게 잡히지 않으면 ZUPT·휠 오도메트리가 무의미하다.**
+
+### ⑧ 그 외
+
+- 사용자 질문 "포인트 클라우드는 못 쓰나": X4 Pro 는 **2D 라이다**다.
+  `/point_cloud_raw` 는 `/scan` 과 같은 빔을 다른 메시지 타입으로 담을 뿐 정보가
+  같다. slam_toolbox·AMCL·costmap 은 모두 LaserScan 을 받는다 → **이득 없음.**
+  3D 정보가 필요하면 뎁스 카메라가 있어야 한다.
+- 우측 바퀴 스톨(STALL_RIGHT)의 원인은 **24V+ 전선 헐거움**으로 밝혀졌다.
+  데드존 보상이 원인일 것이라는 앞선 가설은 **철회한다.**
+
+### 다음 (우선순위)
+
+- [ ] 🔴 브리지 동결 — 모터 담당. 이게 1순위다
+- [ ] AMCL 초기 포즈 후 teleop 으로 수렴시키고 스캔↔벽 정합 재측정 (`scan_fit.py`, 목표 >0.6)
+- [ ] 정합 확보 후 Nav2 P2P 재시도. 회전 발진이 남으면 데드존 값을 0.6~1.2 사이에서 조정
+- [ ] ZUPT 실기 검증 (정지 중 yaw 드리프트가 실제로 잡히는지)
+
+---
+
+## 2026-08-08 21:30 — ✅ 데드존 보상이 Nav2 회전 발진을 해소 (부호반전 53회 → 2회) / 🔴 카트 치수 좌우·전후 뒤바뀜 정정 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `c54516a`. `colcon build` 통과.
+- **스택**: 라이다 + `scan_mask_node` + rf2o(`publish_tf=false`) + **EKF 융합** + slam_toolbox
+  + 브릿지(`max_wheel_rad_s=8.0`) + `wheel_odometry`. `/cmd_vel` 발행자는 Nav2 내부만.
+
+### ① ✅ 집 환경 매핑 — 중앙 장애물 추가 후 재작성
+
+1차(장애물 없음): 8.2 m², free 2733 / occ 566. **특징이 없어 rf2o가 매칭 해를 못 좁히고
+카트가 제자리에서 조금씩 도는 증상** → 사용자가 중앙에 장애물 배치 후 재작성.
+
+2차(장애물 있음): 80x68 격자, 7.8 m², free 2677 / occ 436, 원점 (-2.43, -2.48).
+PGM을 직접 렌더해 확인 — **벽이 단일 선(겹침·이중벽 없음) + 중앙 장애물 또렷** = 매칭 성공.
+`~/maps/map_home.{yaml,pgm,posegraph,data}` 4파일 저장.
+
+BE 전달값:
+```
+image: map_home.pgm / mode: trinary / resolution: 0.05
+origin: [-2.43, -2.48, 0] / occupied_thresh: 0.65 / free_thresh: 0.25
+```
+
+### ② ✅ 융합 검증 — 같은 주행에서 휠 yaw가 64° 틀렸다
+
+루프 클로저 직후 두 오도메트리 비교 (실제로는 출발점 복귀):
+
+| | x | y | yaw |
+|---|---|---|---|
+| EKF `/odometry/filtered` | −0.072 | −0.073 | **+7.4°** |
+| 휠 `/wheel/odom` | +0.590 | +0.743 | **−56.6°** |
+
+**휠 yaw를 융합에서 빼고 rf2o에 맡긴 설계가 옳았다는 직접 증거.**
+(2차 주행에서도 EKF −53° vs 휠 +121° 로 재현)
+
+### ③ 🔴 데드존 보상 실기 검증 — 회전 발진 해소 (오늘의 핵심 결과)
+
+**같은 목표**(map 좌표 (+0.10, −0.05))로 데드존 보상만 바꿔 2회 비교.
+
+| | A: `deadzone=0.0` (기존) | B: `deadzone=1.2` |
+|---|---|---|
+| `angular.z` **부호반전** | **53회** | **2회** |
+| yaw 거동 | −79° ↔ −94° **±7° 진동** | −180°→+155°→+133°→+112° **단조 회전** |
+| `linear.x` | 거의 항상 0.000 (전진 못 함) | 정렬 진행 중 |
+| 데드존 미만 회전명령 | 33.8% (534/1581) | 37.5% (24/64) |
+| `/stm/pwm = 0,0` | 20.7% | 71.4% |
+| 결과 | 90s 타임아웃, 1.07 m 남기고 제자리 | ABORTED 27s (계획 실패 — ④) |
+
+A의 원본 (리밋 사이클이 그대로 보인다):
+```
+   44.2s  남은거리 1.093 m  pose(-0.15,-1.11) yaw  -77.9°  cmd v=+0.000 w=+0.480  부호반전 18
+   46.2s  남은거리 1.042 m  pose(-0.16,-1.06) yaw  -92.2°  cmd v=+0.000 w=-0.400  부호반전 19
+   48.2s  남은거리 1.088 m  pose(-0.15,-1.11) yaw  -79.3°  cmd v=+0.000 w=+0.240  부호반전 22
+   50.2s  남은거리 1.035 m  pose(-0.16,-1.05) yaw  -94.9°  cmd v=+0.000 w=-0.257  부호반전 23
+```
+
+B의 원본 (같은 지점에서 단조 회전):
+```
+    4.0s  남은거리 1.075 m  pose(-0.15,-1.10) yaw +155.1°  부호반전 0
+    6.0s  남은거리 1.105 m  pose(-0.09,-1.14) yaw +133.3°  부호반전 0
+   14.0s  남은거리 1.174 m  pose(-0.03,-1.22) yaw +112.1°  부호반전 0
+```
+
+→ **2026-08-07 부터 원인 미확정이던 Nav2 회전 발진은 모터 데드존이었다.**
+`deadzone_wheel_rad_s:=1.2` (launch 인자)로 켠다. 기본값 0 은 여전히 비활성.
+
+### ④ 🔴 Nav2 경로 계획 실패 — inflation_radius 가 통로 여유보다 컸다
+
+```
+[planner_server] GridBased: failed to create plan with tolerance 0.50.
+[planner_server] Planning algorithm GridBased failed to generate a valid path to (0.10, -0.05)
+[behavior_server] Collision Ahead - Exiting Spin
+[bt_navigator] Goal failed
+```
+
+지도 전체 최대 여유 **0.75 m** < global `inflation_radius` **1.0 m** →
+자유 셀이 하나도 남지 않아 계획 불가. 이 값들은 원래 `TODO-팀확인`으로 미검증이었다.
+
+### ⑤ 🔴 카트 치수 정정 — 좌우와 전후가 뒤바뀌어 있었다
+
+사용자 실측: **좌우 폭 320 mm / 전후 620 mm**, 트레드 중심선 380 mm, 타이어 접지 폭 60 mm.
+2026-08-07 에 "가로 630 / 세로 330" 을 좌우/전후로 해석해 **두 축을 뒤집어** 넣었던 것.
+
+| 항목 | 이전 | 정정 |
+|---|---|---|
+| `scan_mask_node` 박스 | 전후 ±0.165 / 좌우 ±0.315 | 전후 **±0.31** / 좌우 **±0.16** |
+| Nav2 `footprint` | 0.70 x 0.64 | **0.62 x 0.44** |
+| 내접반지름 | 0.32 m | **0.22 m** |
+| `footprint_padding` | (Nav2 기본 0.01) | **0.0** 명시 |
+| `inflation_radius` local/global | 0.8 / 1.0 | **0.25 / 0.30** |
+
+→ 벽 하나가 잡아먹는 폭이 0.33 m → 0.22 m. 양쪽 합쳐 0.24 m 회복.
+
+**부수 효과 — 두 모순이 동시에 해소됐다:**
+- `base_link->laser_frame x=0.30` vs 전후 치수: 전방 한계가 0.31 m 이므로 라이다가
+  앞단 바로 안쪽에 놓인다 (이전 해석 ±0.165 로는 라이다가 카트 밖에 있어야 했다).
+- `wheel_separation_m 0.38` vs 본체 폭 0.32: 바퀴 안쪽 = 0.19 − 0.03 = **0.16 =
+  본체 반폭과 정확히 일치** → 바퀴가 본체 옆면에 붙어 바깥으로 달린 구조.
+  바퀴 바깥 = 0.22 → 최대 폭 0.44 m. **0.38 은 맞는 값이고 0.265 기각이 옳았다.**
+  footprint 좌우 ±0.22 는 본체가 아니라 이 바퀴 바깥면 기준이다.
+
+### ⑥ 단위 테스트·린트
+
+```
+489 passed in 5.13s      (src/stm_serial_bridge/test/)
+ruff check src/choll_slam_bringup/  → All checks passed!
+colcon build --packages-select choll_nav2 choll_slam_bringup  → 2 packages finished
+```
+
+### ⑦ 아직 검증되지 않은 것 (정직하게)
+
+- **⑤의 새 footprint/inflation 으로 Nav2 를 돌린 결과가 없다.** ④ 실패는 이전 값(0.8/1.0)
+  기준이고, 중간에 시도한 0.35/0.40 은 사용자가 실행 전에 중단했다 — 데이터 없음.
+- 데드존 보상 켠 상태의 **주행 완주(SUCCEEDED) 미달성.** 회전 발진 해소만 확인됐다.
+- 정지 중 map->base_link yaw 가 90초에 24° 움직였다(−77°→−53°, `/cmd_vel` 0건).
+  slam_toolbox 의 map->odom 보정으로 추정하나 **원인 미확정.**
+
+### 다음
+
+- [ ] 넓고 네모난 구간으로 재매핑 → 새 footprint/inflation 으로 포인트-투-포인트 주행
+- [ ] STM32 재부팅 탐지 → `wheel_odometry.rebaseline()` 연결 (모터 담당)
+- [ ] 좌측 구동 슬립 — 커플링 볼트 조임 완료. 개선 확인 필요
+
+---
+
+## 2026-08-08 19:40 — ✅ EKF 융합 배선·실기 검증 완료 (TF 소유권 이전 확인) / 데드존 보상 구현 (기본 비활성) — 매핑은 배터리 충전으로 중단 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `535b33f`. `colcon build` 통과(2패키지).
+- **방향 전환**: 스펀지 타이어는 유효 구름반지름이 하중·속도에 따라 변한다 →
+  "정확한 바퀴 상수"는 원리적으로 존재하지 않는다. **상수 추적을 중단**하고
+  불확실성을 공분산으로 선언해 EKF가 가중 평균하게 맡기는 쪽으로 전환.
+
+### ① ✅ 데드존 보상 구현 (`deadzone_compensator.py`) — 기본값 0 = 비활성
+
+펌웨어가 개루프(`motor_pi_kp=0, motor_pi_ki=0`)라 `PWM = 10 x rad/s` 이고
+바닥 데드존이 PWM 10~12 → **바퀴 1.0~1.2 rad/s 미만 명령은 전송돼도 안 돈다.**
+Nav2 DWB의 작은 조향 보정이 전부 소실되어 bang-bang이 되던 것의 직접 원인.
+
+살아 있는 구간 `[deadzone, max]`로 affine 재사상한다. 좌우 비율은 보존되지 않으며
+(그게 본질이다) `limit_wheel_rad_s()` **뒤에** 적용해야 한다 — 먼저 걸면 제한이
+offset을 도로 축소한다.
+
+```
+[stm_serial_bridge]   max_wheel_rad_s     = 8.0
+[stm_serial_bridge]   deadzone_wheel_rad_s= 0.0  <-- 0 = 보상 비활성(기존 거동). 실측 참고 1.0~1.2
+```
+
+실주행 튜닝은 `deadzone_wheel_rad_s:=1.2` 로 launch 인자를 주면 된다. **아직 실기 미검증.**
+
+### ② ✅ 공분산 설정 — 2026-08-08 실측에서 유도
+
+| 소스 | vx 분산 | vyaw 분산 | 근거 |
+|---|---|---|---|
+| 휠 `/wheel/odom` | **0.0025** (σ 0.05 m/s) | **0.25** (σ 0.5 rad/s) | 스케일 산포 −2.30/−3.54/−4.94% / 좌측 슬립 전진 4.79%·후진 11.86% |
+| rf2o `/odom_rf2o_cov` | 0.001 | **0.0025** | 스캔매칭은 슬립과 무관 |
+
+vyaw가 **100배** 차이나는 것이 설계의 핵심 — EKF가 yaw는 rf2o에서, vx는 휠에서 가져간다.
+
+### ③ 🔴 발견: rf2o는 공분산을 전혀 채우지 않는다
+
+upstream `CLaserOdometry2DNode.cpp:217-225` 에 covariance 대입이 **한 줄도 없다** →
+36원소 전부 0. EKF는 0을 "오차 없음"으로 읽으므로 그대로 넣었으면 rf2o만 절대
+신뢰해 융합이 성립하지 않았다. upstream 수정 금지라 `odom_covariance_node` 중계로 우회.
+
+### ④ ✅ EKF 실기 검증 — TF 소유권 이전 확인
+
+```
+=== rf2o publish_tf ===   Boolean value is: False
+=== EKF publish_tf ===    Boolean value is: True
+
+=== 20.0초 관측 ===
+parent -> child                        건수      Hz
+map -> odom                          1000    50.0
+odom -> base_link                     201    10.0
+✅ odom -> base_link 10.0 Hz — 발행자 하나
+
+/odometry/filtered : 200건 (10.0 Hz)
+  frame=odom child=base_link
+  pose x=+0.6991 y=+0.2415      (2.5분 전 +0.7140/+0.2436 → 정지 드리프트 x −1.5cm, y −0.2cm, 유계)
+  twist vx=-0.0000 vyaw=+0.0188
+```
+
+STM32 재연결 후 융합 실동작:
+
+```
+/wheel/odom         10.1 Hz  (81건)
+/odom_rf2o_cov      10.1 Hz  (81건)
+/odometry/filtered  10.0 Hz  (80건)
+  진단 [0] ekf_filter_node: The robot_localization state estimation node appears to be functioning properly.
+```
+
+EKF 발행이 설정값 20 Hz가 아니라 입력에 맞춰 10 Hz로 나온다. Nav2 요구(≥10 Hz) 충족이라 그대로 둠.
+
+### ⑤ 🔴 도중 발견: STM32 USB가 뽑혀 있었다
+
+```
+[stm_serial_bridge] ERROR: Serial port open failed: port=/dev/ttyACM0,
+  reason=[Errno 2] could not open port /dev/ttyACM0: No such file or directory
+/dev/serial/by-id/ → CP2102(라이다) 하나뿐, ttyACM* 없음
+```
+
+이 상태에서 EKF는 **rf2o 단독**으로 돌고 있었다(융합처럼 보이지만 아니다).
+재연결 후 `usb-STMicroelectronics_STM32_STLink_066FFF...-if02 -> ttyACM0` 확인,
+`/stm/connected: true`, 첫 엔코더 `(L=0, R=-10)` — USB 재연결로 STM이 이미 리셋된 상태.
+
+### ⑥ 단위 테스트
+
+```
+489 passed in 5.13s      (src/stm_serial_bridge/test/, 신규 13개 포함)
+ruff check embedded/Lidar/src/choll_slam_bringup/  → All checks passed!
+```
+
+`test_covariance_is_left_unset` → `test_covariance_diagonal_is_filled` 로 교체.
+그 테스트 자신이 "EKF 연결 단계에서 값을 채우면 함께 바뀌어야 한다"고 명시해 둔 것.
+
+### ⑦ ⏸ 매핑 중단 — 배터리 충전
+
+SLAM 스택을 원점에서 깨끗하게 재기동(`pose x=+0.0068 y=+0.0030`)하고 teleop 직전까지
+갔으나, 사용자가 보조배터리 충전을 위해 젯슨 전원을 내림. **지도 미작성.**
+
+종료는 규약 순서대로: 상위 노드 → `/stm/pwm` 확인 → 브릿지 → 라이다.
+
+```
+=== /cmd_vel 발행자 ===  Publisher count: 0
+pwm 샘플: [[0, 0], [0, 0], [0, 0]]     전부 0인가: True
+=== 남은 프로세스 ===  (비어 있음)
+```
+
+### 재개 방법 (전원 복구 후)
+
+```bash
+D=~/S15P11C101/ros2_ws/log/phase4_20260808
+bash $D/restart_motor.sh                 # 브릿지 + 휠 오도메트리
+bash $D/launch_slam_ekf.sh               # 라이다 + rf2o + EKF + slam_toolbox
+python3 $D/tf_probe.py 10                # odom->base_link 발행자 1개 확인
+bash $D/launch_teleop.sh                 # ← 사용자가 직접 (키 입력)
+bash $D/save_map.sh map_home             # 다 돌면 저장
+bash $D/stop_all.sh                      # 안전 종료
+```
+
+### 남은 일
+
+- [ ] 집 환경 매핑 → `~/maps/map_home` 저장
+- [ ] Nav2 자율주행 재검증. 회전 발진이 남으면 `deadzone_wheel_rad_s:=1.2` 로 브릿지 재기동
+- [ ] STM32 재부팅 탐지 → `wheel_odometry.rebaseline()` 연결 (모터 담당, EKF 신뢰성 전제)
+- [ ] 좌측 구동 슬립 — 커플링 볼트는 조임(2026-08-08). 재측정으로 개선 확인 필요
+
+---
+
+## 2026-08-08 18:20 — ✅ 휠 오도메트리 실기 검증 완료: `/wheel/odom` 정상·부호 규약 검증 / 🔴 좌측 바퀴 슬립 확정(구동계 문제)·스케일 −3.6% 재보정 필요 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `98aa910`. `colcon build` 통과(2패키지).
+- **범위**: EKF는 붙이지 않음. `/wheel/odom` 실기 검증만.
+- `wheel_odometry`는 launch 미포함이라 `ros2 run` + `--params-file`로 별도 기동
+  (실행파일 `wheel_odometry_node`, **노드 이름 `wheel_odometry`** — yaml 키와 일치해야 함).
+
+### ① ✅ `/wheel/odom` 발행 확인
+
+```
+[wheel_odometry] wheel_radius_m = 0.0587 / wheel_separation_m = 0.38
+                 counts_per_wheel_rev = 68160.0
+                 /stm/encoder_total -> /wheel/odom (m/count=0.000005411)
+                 TF는 발행하지 않는다 — odom -> base_link는 EKF의 몫이다.
+[WARN]           pose/twist covariance는 0으로 남겨둔다 — EKF 연결 전 반드시 설정할 것
+```
+
+`nav_msgs/Odometry`, `frame odom → base_link`, TF 미발행 ✅.
+`m/count`의 역수 = **184,809 counts/m**로 기대값 184,804과 일치.
+`/stm/encoder_total`은 **`Int32MultiArray`** (`/stm/pwm`의 Int16과 다름 — echo 시 주의).
+
+### ② 1 m 직진 (단방향, 실측 1.08 m)
+
+```
+encoder_total raw 시작 : L=5,773     R=-872
+encoder_total raw 종료 : L=202,808   R=187,152
+델타                   : ΔL=+197,035  ΔR=+188,024
+좌우 비율 ΔL/ΔR        : 1.0479  (+4.79%)
+평균                   : 192,529.5 counts
+
+/wheel/odom 시작 : x=+0.0156 y=+0.0507 yaw= -6.41°
+/wheel/odom 종료 : x=+1.0432 y=-0.1164 yaw=-13.76°
+보고 이동거리    : 1.0411 m      Δyaw = -7.35°
+```
+
+**물리 실측**(사용자): 이동 1.08 m / 횡이탈 거의 없음 /
+**진행방향 왼쪽** 기준선까지 앞바퀴 7 cm·뒷바퀴 13 cm, 휠베이스 42 cm
+→ `atan(6/42)` = **좌회전 +8.13°**
+
+🔴 **크기는 맞는데(8.13 vs 7.35) 부호가 반대**다. 코드 규약은 정상
+(`delta_theta = (d_right − d_left) / L`, REP-103).
+
+### ③ ✅ 밀기 대조 실험 — 가장 중요한 결과 (모터 정지, 손으로 1.00 m)
+
+```
+encoder_total raw 시작 : L=123,743  R=239,123
+encoder_total raw 종료 : L=300,077  R=414,156
+델타                   : ΔL=+176,334  ΔR=+175,033
+좌우 비율 ΔL/ΔR        : 1.0074  (+0.74%)
+브릿지 로그 (밀던 내내): target L=0.00 R=0.00, pwm L=0 R=0   ← 모터 무구동 확인
+```
+
+**좌우 지면 이동거리가 물리적으로 같은 조건에서 비율이 1.0074다.**
+→ **센서·기구는 대칭이다.** 주행 시의 4.79%(전진)·11.86%(후진) 비대칭은
+**구동계 문제**로 확정 — 좌측 바퀴가 구동할 때만 헛돈다.
+②의 "오도메트리는 우회전, 실제는 좌회전" 모순도 이것으로 설명된다:
+좌측이 헛돌아 카운트만 늘고 추진은 우측이 더 하니 카트는 왼쪽으로 돈다.
+
+### ④ ✅ 제자리 좌회전 90° — 채널 뒤바뀜 아님 / 회전 +18.8% 과대보고
+
+```
+encoder_total raw 시작 : L=202,742  R=187,043
+encoder_total raw 종료 : L=123,743  R=239,123
+델타                   : ΔL=-78,999   ΔR=+52,080
+```
+
+좌회전(CCW)의 물리 기대는 **오른쪽 전진(+)·왼쪽 후진(−)** 이고 관측이 정확히 그렇다
+→ **엔코더 좌우 채널 뒤바뀜 가설 기각** ✅
+
+```
+(ΔR−ΔL)×m/count    : 0.70929 m
+보고 Δyaw          : +106.95°   (실측 90°)  → +18.8% 과대보고
+역산 유효 트레드   : 0.4515 m   (설정 0.38)
+/wheel/odom 쿼터니언 대조: z=0.803571 w=0.595208 → +106.95° (계산과 일치)
+```
+
+0.4515는 실측 0.38보다 18.8% 크지만 **제자리 회전은 바퀴가 옆으로 문지르며(scrub) 도는
+동작이라 엔코더가 과다 계수하는 것이 전형적**이다. 기구 실측 0.38을 기각할 근거가 아니다.
+
+### ⑤ ✅ 후진 1.05 m — 부호 규약 정상 / 좌측 슬립은 더 심함
+
+```
+encoder_total raw 시작 : L=300,077  R=414,156
+encoder_total raw 종료 : L=99,886   R=235,195
+델타                   : ΔL=-200,191  ΔR=-178,961   ← 둘 다 음수 ✅
+좌우 비율 |ΔL/ΔR|      : 1.1186  (+11.86%)
+/wheel/odom            : x=-1.0105  y=-0.1506  yaw=+17.32°   ← x 음수 ✅
+보고 이동거리          : 1.0216 m  (실측 1.05 m → -2.70%)
+```
+
+전진 +4.79% / 후진 +11.86% — **방향은 둘 다 "좌측 과다"로 같다.** 센서 비대칭이면
+밀기에서도 나왔어야 하므로 ③과 합쳐 **구동 시 좌측 슬립**으로 확정.
+
+### 🔴 거리 스케일 — 오늘 3개 측정이 모두 같은 방향, 오전 값과 충돌
+
+| 측정 | 실측거리 | counts/m | 설정(184,804) 대비 | 신뢰 |
+|---|---|---|---|---|
+| ② 1차 (전진→후진→전진, 오염) | ~0.95 m | 206,337 | +11.65% | 낮음 |
+| ② 2차 (단방향 주행) | 1.08 m | 178,268 | **−3.54%** | 중간 |
+| **③ 밀기 (슬립 0)** | 1.00 m | **175,684** | **−4.94%** | **최고** |
+| ⑤ 후진 주행 | 1.05 m | 180,549 | **−2.30%** | 중간 |
+
+오염된 1차를 빼면 **셋 다 −2.3 ~ −4.9%로 방향이 일치**한다. 평균 178,167 →
+**−3.6%, 함의 `r_eff` ≈ 0.0609** (밀기 단독 기준은 0.0617).
+`0.0617 / 0.0629`(줄자 원주 39.5 cm 기하값) = 98.2% → 하중 압축 1.8%로 자연스럽다.
+현재 0.0587은 93.4%로 눌림이 과하다.
+
+⚠️ **오전(08-08 12:00)의 +0.15%와 어긋난다.** 오늘은 서로 다른 3개 시험이 같은 방향을
+가리키므로 오늘 데이터가 더 강하지만, **변경은 보류했다** — 다음 두 테스트를 함께
+고쳐야 하고 오전 데이터와의 충돌이 미해결이기 때문이다:
+`test_wheel_radius_intentionally_differs_from_the_bridge`(0.0587 고정),
+`test_calibrated_radius_cancels_the_measured_scale_error`(배율 1.1068 고정).
+→ **팀 결정 사항.** 시험 삼아 0.0617로 바꿨다가 되돌렸고 **`pytest` 538 passed 확인**.
+
+### 🔴 STM32 재부팅 미탐지 — 실기에서 재현됨
+
+소스에 명시된 미구현 항목(`wheel_odometry_node.py:25-33`)이 실제로 터졌다.
+세션 중 STM32가 리셋돼 카운터가 `(200540, 191501) → (5773, -872)`로 돌아갔는데,
+노드가 이를 **진짜 후진으로 적분**했다(ΔL ≈ −200,540 counts ≈ −1.08 m).
+당시 오도메트리가 약 +1.06 m에 있어 우연히 0 근처(0.0156, 0.0507)로 보였을 뿐이다.
+`rebaseline()`은 준비돼 있으나 호출 조건이 없다. **EKF 연결 전 필수 선행 과제.**
+
+### ⚠️ 세션 중 DDS 참가자 이탈 2회
+
+브릿지·`wheel_odometry`·teleop이 **프로세스는 살아 있는데 ROS 그래프에서 사라졌다**
+(`ros2 node list`에 미표시, `ros2 topic info` → Unknown topic). 브릿지는 그동안
+시리얼로 `SET_WHEEL_VEL,0.000,0.000`만 계속 보냈고 **teleop 키를 눌러도 카트가 움직이지
+않았다.** `ros2 daemon stop` 후 재조회 + 브릿지·오도메트리 재기동으로 복구.
+원인 미확정(노드를 여러 번 죽였다 살린 것과 관련 가능성). 재발 시 절차:
+`ros2 daemon stop` → `ros2 node list` 확인 → 안 보이면
+`ros2_ws/log/phase3_20260808/restart_odo.sh`.
+
+### 모터 담당자 이관 항목
+
+1. **좌측 바퀴 구동 슬립** — 밀기 0.74% vs 전진 4.79% vs 후진 11.86%. 접지·하중 배분·
+   L자 브라켓 조임, STM32 PI 게인(현재 `motor_pi_kp=0, motor_pi_ki=0` 순수 개루프)
+2. **STM32 재부팅 탐지 → `rebaseline()` 호출 조건** (EKF 전 필수)
+3. 거리 스케일 `r_eff` 0.0587 → 0.0609~0.0617 재보정 여부 (위 표)
+
+### RF2O 회신 정보 (젯슨 설정 실측 확인)
+
+| 항목 | 값 |
+|---|---|
+| output topic | `/odom_rf2o` |
+| frames | `odom → base_link` |
+| **`publish_tf`** | **True** — rf2o가 `odom→base_link` TF를 직접 발행 중. EKF 도입 시 False로 (`embedded/Lidar/src/choll_slam_bringup/launch/laser_odom.launch.py`). **지금은 slam_toolbox가 이 TF에 의존하므로 EKF 준비 전에 끄지 말 것** |
+| covariance | rf2o upstream 기본값 (우리가 설정한 적 없음) |
+| 입력 | `/scan_raw` (마스킹 전 원본 — 마스킹된 `/scan`을 주면 정지 시 −0.4°/s 드리프트) |
+
+- **증거 파일** (`.gitignore`의 `log/`로 커밋 제외): `ros2_ws/log/phase3_20260808/`
+  `A1/A2/A3_*.log`(노드 기동), `B1/B2/B3_*.log`(주행 측정 원본),
+  재현용 스크립트 `odo_probe.py`, `launch_bridge.sh`, `launch_wheel_odom.sh`,
+  `launch_teleop.sh`, `restart_odo.sh`, `restart_wheelodom.sh`, `env.sh`
+
+---
+
+## 2026-08-08 14:00 — 🔴 기구 실측 정정: L자 브라켓 풀림 → `wheel_separation` 0.265 기각·0.38 복귀 / ✅ 바퀴 원주 39~40 cm 실측으로 스케일 모순 해소 (사용자 실측 / Claude 반영·분석)
+
+- **환경**: 노트북(병합·검증만). 브랜치 `em/feature/motor-Lidar-integrated`에
+  `origin/em/feature/motor-control`(`1376c37`) 병합.
+- **발단**: 08-07 Nav2 회전 발진의 원인으로 `wheel_separation_m` 0.38 → 0.265 정정이
+  커밋됐으나(`17ace56`), 이후 **모터 고정 L자 브라켓이 풀려 있었음**이 발견됐다.
+
+### ① 브라켓 조임 후 재실측 — `wheel_separation_m` = **0.38** (0.265 기각)
+
+| 시점 | 값 | 조건 |
+|---|---|---|
+| 08-04 | 0.38 | 트레드 중심선 간 |
+| 08-07 | 0.265 | **브라켓 풀린 상태** — 기각 |
+| **08-08** | **0.38** | **브라켓 조인 뒤 좌우 접지면 간 실측** |
+
+→ 08-04 값과 일치. **"L 모델 오차 1.43배가 Nav2 발진의 원인"이라는 08-07 가설은 기각**된다.
+회전 발진 원인은 다시 미확정이며, **모터 데드존(PWM<20)으로 회전이 bang-bang**이 되는
+쪽이 유력하다(08-07 17:40 항목의 PWM 17 관측).
+
+### ② ✅ 바퀴 원주 실측으로 모순 해소 — 실물은 100 mm가 아니라 약 **127 mm**
+
+**줄자를 트레드에 감아 실측: 원주 39~40 cm** (2회, 감고 풀어 재확인).
+→ 지름 **12.4~12.7 cm**, 기하 반지름 **0.062~0.064 m**.
+
+즉 육안 "10 cm" 추정이 틀렸고, 카트에 실제로 달린 것은 **오프로드 타이어(스펀지 내장,
+사진 확인)** 다. 프로젝트 CLAUDE.md의 "130파이 → 100 mm 솔리드휠 교체 완료" 기록과
+현물이 다르므로 **문서 쪽을 실물 기준으로 갱신해야 한다.**
+
+**이로써 계산이 전부 맞아떨어진다:**
+
+| 값 | 크기 | 해석 |
+|---|---|---|
+| 기하 반지름 (실측 원주 39.5 cm 기준) | 0.0629 m | 무부하 |
+| 명령 경로 `wheel_radius_m` | 0.065 | 명목값 — 기하 실측과 3% 차 |
+| 오도메트리 보정 상수 | **0.0587** | 기하값의 **93.4%** |
+
+하중을 실은 스펀지 타이어가 눌려 유효 구름반지름이 약 **6.6% 작아진 것**으로 설명된다
+(1회전당 0.395 m → 실측 0.369 m). 08-08 오전에 "r=0.065를 참으로 두면 counts/rev가
+75,439로 펌웨어 명목 77,520에 가깝다"던 관찰도 **기각**된다 — 기하 반지름이 0.0629이면
+그 논거의 전제가 성립하지 않는다. **손회전 실측 68,160이 여전히 유효**하고,
+10.7% 차이는 반지름이 아니라 **타이어 압축·슬립**으로 설명된다.
+
+#### 🔴 이 결과가 명령 경로에 주는 영향 (Jetson 확인 필요)
+
+`/cmd_vel` → 바퀴 rad/s 변환에는 **유효 구름반지름**이 들어가야 맞다. 현재 0.065를
+쓰므로 **실제 주행 속도가 명령의 약 90.3%** (0.0587/0.065)다. Nav2 입장에서는 플랜트
+게인이 0.9배인 셈. 명령 경로를 0.0587로 맞출지는 **실주행 속도 측정 후 결정**한다
+(바꾸면 속도 봉투 표 4.615/1.754/6.369가 전부 재계산된다).
+
+08-08 1m 직진 보정이 확정한 것은 **곱** `2πr / counts_per_rev` 하나뿐이므로:
+
+| 참으로 두는 값 | 함의되는 counts/rev | 측정값과의 관계 |
+|---|---|---|
+| r = 0.065 (현재 명목) | 약 75,439 | 펌웨어 명목 77,520에 가까움 |
+| r = 0.0587 (보정 상수) | 68,160 | 손회전 실측과 일치 |
+| **r = 0.050 (실물 100 mm)** | **약 58,050** | **손회전 68,160·펌웨어 77,520 어느 쪽과도 안 맞음** |
+
+즉 **유효 구름반지름이 58.7 mm로 나왔는데 실물 반지름이 50 mm면 물리적으로 모순**이다
+(하중으로 눌리면 유효 반지름은 오히려 **작아진다**). 셋 중 하나가 틀렸다:
+①바퀴 지름 육안 실측 ②손회전 counts/rev 68,160 ③1m 직진의 "1 m" 기준거리.
+
+**⚠️ 이 모순이 풀리기 전까지 `wheel_radius_m`을 명령 경로(`stm_serial_bridge.yaml`)에서
+바꾸지 않는다.** 바꾸면 속도 봉투 표(4.615/1.754/6.369)와 실제 주행 속도가 전부 바뀐다.
+
+#### 남은 실측 (Jetson 세션)
+
+1. ~~줄자로 바퀴 둘레 측정~~ → **완료: 39~40 cm**
+2. **하중 상태 축-바닥 높이** — 눌림량 직접 확인 (예상 유효 반지름 0.0587 = 5.87 cm)
+3. **밀기 대조 실험** — 모터를 끄고 벽·직선자를 따라 밀어 1 m 이동시키며
+   `/stm/encoder_total` 델타 기록. 좌우 지면 이동거리가 같음이 물리적으로 보장되므로
+   `ΔL/ΔR`가 1.00이면 주행 시 관측된 8% 비대칭은 **구동계 문제**(PI 게인 0),
+   여기서도 1.08이면 **센서·기구 비대칭**이다 — 이 실험이 yaw drift 원인을 가른다
+4. `counts/m = Δ/실측거리`를 현재 설정 함의값 **184,804 count/m**와 비교
+
+### ③ 병합 검증 (노트북)
+
+- `pytest` **538 passed** (`stm_serial_bridge` + `cart_teleop`) — 두 YAML의
+  `wheel_separation_m`·`counts_per_wheel_rev` 일치 강제 테스트 포함, 0.38 정정이 일관됨
+- `tests/TEST_LOG.md` 충돌 7건은 **양쪽 항목을 모두 보존**한 뒤 날짜 최신순으로 재정렬
+- ⚠️ `ruff check ros2_ws/src/` 122건은 **병합 전 원본에도 동일하게 존재**(모터팀 원본
+  `stm_serial_bridge_node.py` 단독 검사에서도 같은 19건). 남의 패키지를 대량 재포맷하지
+  않고 그대로 두었다 — 정리는 모터 담당자와 합의 후 별건으로
+
+<details>
+<summary>pytest 원본 출력</summary>
+
+```text
+$ PYTHONPATH=src/stm_serial_bridge:src/cart_teleop python3 -m pytest src/stm_serial_bridge/test/ src/cart_teleop/test/ -q
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..................................                                       [100%]
+538 passed in 1.76s
+```
+
+</details>
+
+## 2026-08-08 12:00 — ✅ EM+ROS2 실기: 보정 후 1m 직진 x2 재검증 — 거리 +0.15% 확인 / ⚠️ yaw drift는 오히려 +67.5% 증가 (relu 실기 / Claude 분석)
+
+- **배경**: 11:00 항목에서 `wheel_radius_m` 을 0.065 → **0.0587** 로 보정한 뒤, 같은 1 m 직진을
+  2회 재수행했다. **코드는 수정하지 않았다**(사용자 지시: 분석·기록만).
+- 대상 커밋: `1a1f7a5` (working tree)
+
+### 실측 (relu, 실기)
+
+| 회차 | 시작 (x, y, yaw) | 종료 (x, y, yaw) | Δx | Δy | **보고 `\|Δ\|`** | Δyaw |
+|---|---|---|---|---|---|---|
+| 1 | -0.607, 0.411, -0.584 | 0.159, -0.219, -0.781 | +0.766 | -0.630 | **0.9918** | -0.197 (-11.3°) |
+| 2 | -0.546, 0.407, -0.653 | 0.196, -0.280, -0.863 | +0.742 | -0.687 | **1.0112** | -0.210 (-12.0°) |
+
+실제 이동거리는 2회 모두 약 1.0 m 직진.
+
+### ✅ 결과 1 — 거리 스케일 보정 확인
+
+평균 보고 이동거리 **1.0015 m** → 오차 **+0.15%**. `wheel_radius_m=0.0587` 과
+`counts_per_wheel_rev=68160` 조합은 거리에 대해 맞는다. 보정 전 +10.7% 에서 해소됐다.
+
+### ⚠️ 결과 2 — yaw drift 는 줄지 않고 **커졌다** (예측 빗나감)
+
+11:00 항목에서 "반지름 보정으로 보고 drift 가 약 9.7% 축소될 것"이라고 예측했으나,
+**실제로는 정반대로 커졌다.**
+
+비교는 **곡률 `κ = Δyaw / d_c` (rad/m)** 로 해야 한다 — `Δθ` 와 `d_c` 가 둘 다 `r` 에
+비례하므로 **`κ` 와 `d_L/d_R` 은 `r` 에 무관**하고, 따라서 보정 전후를 직접 비교할 수 있다.
+
+| 회차 (시간 순) | r | 보고 `\|Δ\|` | Δyaw | **κ (rad/m)** | **d_L/d_R** |
+|---|---|---|---|---|---|
+| S1-1 | 0.065 | 1.1012 | -0.095 | -0.0863 | +3.33% |
+| S1-2 | 0.065 | 1.1136 | -0.161 | -0.1446 | +5.65% |
+| S1-3 | 0.065 | 1.1055 | -0.147 | -0.1330 | +5.18% |
+| S2-1 | 0.0587 | 0.9918 | -0.197 | -0.1986 | +7.84% |
+| S2-2 | 0.0587 | 1.0112 | -0.210 | -0.2077 | +8.22% |
+| **세션1** | | 1.1068 | -0.1343 | **-0.1213** | **+4.72%** |
+| **세션2** | | 1.0015 | -0.2035 | **-0.2032** | **+8.03%** |
+
+**κ 가 +67.5% 증가**했다. κ 는 `r` 에 무관하므로 **보정 탓이 아니라 물리적 좌우 비대칭
+자체가 커진 것**이다. 회차별로도 3.33 → 5.65 → 5.18 → 7.84 → 8.22% 로 대체로 증가한다.
+
+### 분석
+
+**관측 1 — 비대칭은 상수가 아니다.** 좌우 엔코더 counts/rev 차이나 바퀴 지름 차이는
+**상수여야 하는데 관측은 상수가 아니다.** 고정 원인의 설명력이 떨어지고, 슬립·마찰·기구
+헐거워짐·속도 의존 edge 누락처럼 **조건에 따라 변하는 원인**이 남는다.
+(표본 5개이고 S1-3 < S1-2 이므로 "단조 증가"로 단정하지는 않는다.)
+
+**관측 2 — 공통 성분은 안정, 차동 성분만 증가.** `r=0.065` 기준 환산:
+
+| | 공통 `d_c` | 차동 `d_L - d_R` | d_L | d_R |
+|---|---|---|---|---|
+| 세션1 | 1.1068 | 0.0510 | 1.1323 | 1.0813 |
+| 세션2 | 1.1090 (**+0.2%**) | 0.0856 (**+68%**) | 1.1518 | 1.0662 |
+
+**평균은 그대로인데 좌우가 평균을 중심으로 대칭적으로 벌어졌다.** 이것은 **실제로 원호를
+그렸을 때의 서명**이다 — 원호에서는 바깥 바퀴가 더 가고 안쪽이 덜 가며 **평균 = 경로 길이**다.
+한쪽 센서만 틀렸다면 평균도 함께 움직였어야 한다.
+
+**관측 3 — 실제로 휠 메커니즘이 존재한다.** `motor_config.h` 의 `MOTOR_PI_KP`/`MOTOR_PI_KI`
+가 **아직 0.0f** 이다(문서 `current.md:67` 에도 명시). 즉 STM 은 바퀴 속도를 **폐루프로 맞추지
+않고 Feedforward(개루프)만** 쓴다. 좌우 모터·기어박스·마찰이 조금만 달라도 같은 목표 rad/s 에서
+**실제 속도가 달라져 카트가 실제로 휜다.** 배터리 전압 변화로 불균형이 변할 수 있어 관측 1과도
+맞는다.
+
+→ **현재 가장 유력한 가설: 카트가 실제로 우측으로 휘고 있고 오도메트리는 그것을 옳게 보고하고
+있다.** 그렇다면 오도메트리 버그가 아니라 **구동계 불균형**이며, 해결도 `wheel_separation_m` 이
+아니라 **PI 속도 제어 튜닝**이다.
+
+**관측 4 — 자로 재면 바로 판별된다.** 원호 가정 시 1 m 주행 후:
+
+| | 곡률반경 | **횡방향 이탈** | **최종 방위** |
+|---|---|---|---|
+| 세션1 | 8.25 m | **6.1 cm** | 6.9° |
+| 세션2 | 4.92 m | **10.1 cm** | 11.6° |
+
+10 cm 이탈과 11.6° 기울어짐은 **눈으로 보인다.** 실제로 벗어나 있으면 오도메트리는 정상이다.
+
+### 다음 실측(raw encoder)에서 기록할 값
+
+⚠️ **raw count 만으로는 결론이 나지 않는다** — 오도메트리 `Δθ` 가 애초에 그 count 에서 나온
+값이라 `ΔL/ΔR ≈ 1.08` 은 산술적으로 반드시 나온다. **바닥 기준 ground truth 를 함께 재야**
+새 정보가 생긴다. 가장 깨끗한 실험은 **모터 끄고 벽·직선자를 따라 밀기**(좌우 지면 이동거리가
+같음이 보장됨) → 그 조건의 `ΔL/ΔR` 은 센서·기구 비대칭만 담는다.
+
+기록 항목·계산식·기준값(**184,804 count/m**)은 `ros2_ws/CLAUDE.md`
+"다음 실측: raw `encoder_total` 측정에서 기록할 값" 절에 정리했다.
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `ros2_ws/CLAUDE.md` | 보정 후 재검증 결과 + drift 분석 전면 개정 + 다음 측정 기록 항목 |
+| `tests/TEST_LOG.md` | 이 항목 |
+
+**코드·파라미터는 변경하지 않았다** — `wheel_radius_m`(0.0587), `wheel_separation_m`(0.38),
+`counts_per_wheel_rev`(68160), STM 펌웨어 모두 그대로다.
+
+<details>
+<summary>분석 계산 원본 출력</summary>
+
+```
+=== 회차별 (시간 순) ===
+run   |  r     | 보고|Δ| | Δyaw   | 곡률 κ=Δyaw/d_c | d_L/d_R  | r=0.065 환산 d_c
+S1-1 | 0.0650 | 1.1012  | -0.095 |   -0.08627      | 1.03333 (+3.33%) | 1.1012
+S1-2 | 0.0650 | 1.1136  | -0.161 |   -0.14458      | 1.05649 (+5.65%) | 1.1136
+S1-3 | 0.0650 | 1.1055  | -0.147 |   -0.13297      | 1.05184 (+5.18%) | 1.1055
+S2-1 | 0.0587 | 0.9918  | -0.197 |   -0.19863      | 1.07844 (+7.84%) | 1.0982
+S2-2 | 0.0587 | 1.0112  | -0.210 |   -0.20767      | 1.08216 (+8.22%) | 1.1197
+
+세션1 (08-08 오전): 보고 d_c=1.1068, r=0.065환산 d_c=1.1068, κ=-0.12127 rad/m, d_L/d_R=+4.72%
+세션2 (보정 후): 보고 d_c=1.0015, r=0.065환산 d_c=1.1090, κ=-0.20315 rad/m, d_L/d_R=+8.03%
+
+=== 핵심 ===
+곡률 κ (r 무관): 세션1 -0.12127 -> 세션2 -0.20315   (+67.5%)
+세션1 (r=0.065 환산): 공통 d_c=1.1068,  차동 d_L-d_R=0.05100,  d_L=1.1323, d_R=1.0813
+세션2 (r=0.065 환산): 공통 d_c=1.1090,  차동 d_L-d_R=0.08561,  d_L=1.1518, d_R=1.0662
+
+=== 실제로 휘었다면 관측돼야 할 값 (원호 가정) ===
+세션1: 곡률반경 8.25 m -> 1 m 주행 시 횡방향 이탈 6.1 cm, 최종 방위 6.9°
+세션2: 곡률반경 4.92 m -> 1 m 주행 시 횡방향 이탈 10.1 cm, 최종 방위 11.6°
+
+=== 다음 측정의 기준값 ===
+현 설정 counts/m (좌우 공통) = 184,804
+세션2 비대칭(+8.03%)이 그대로 재현될 경우 1 m 주행 예상치:
+  ΔL ≈ 191,938   ΔR ≈ 177,671   평균 184,804  비 1.08030
+```
+
+</details>
+
+## 2026-08-08 11:00 — ✅ EM+ROS2 실기: Wheel Odometry 1m 직진 x3 → 거리 스케일 보정(r 0.065→0.0587), 538 tests 통과 / ⚠️ yaw drift 원인 미확정 (relu 실기 / Claude 분석·반영)
+
+- **배경**: 앞 항목(10:00)의 `wheel_odometry` 노드를 **실제 하드웨어**에서 처음 검증했다.
+  1 m 직진을 3회 수행하고 시작/종료 포즈를 기록했다.
+- 대상 커밋: `1a1f7a5` (working tree)
+
+### 실측 (relu, 실기)
+
+| 회차 | 시작 (x, y, yaw) | 종료 (x, y, yaw) | Δx | Δy | Δyaw | **보고 `\|Δ\|`** |
+|---|---|---|---|---|---|---|
+| 1 | 0.102, 0.374, -0.096 | 1.197, 0.257, -0.191 | +1.095 | -0.117 | -0.095 | **1.1012** |
+| 2 | 0.123, 0.479, -0.169 | 1.207, 0.224, -0.330 | +1.084 | -0.255 | -0.161 | **1.1136** |
+| 3 | 0.172, 0.496, -0.237 | 1.229, 0.172, -0.384 | +1.057 | -0.324 | -0.147 | **1.1055** |
+
+실제 이동거리는 3회 모두 약 **1.0 m 직진**.
+
+- **거리**: 평균 배율 **1.1068** → 오도메트리가 약 **10.7% 크게** 보고. 3회 모두 재현.
+- **yaw**: 3회 모두 **음(-) 방향**으로 drift. 평균 -0.1343 rad/m.
+
+시작 방위가 0이 아니므로(-0.096 / -0.169 / -0.237) `Δx` 가 아니라 **변위 크기 `|Δ|`** 로
+비교했다(회전 불변). 보고 경로가 휘어 호 길이가 현보다 길지만 차이는 **0.1% 미만**이라
+무시했다(호 보정 시 r 이 0.046 mm 달라질 뿐 — 측정 스프레드 ±0.56%보다 훨씬 작다).
+
+### 1. 거리 스케일 보정 (적용함)
+
+```
+r_new = 0.065 / 1.106788 = 0.058728  →  채택 0.0587   (잔차 -0.05%)
+```
+
+**오도메트리 설정에만 적용**했다. `counts_per_wheel_rev=68160` 과 STM 펌웨어 77520 은
+지시대로 **변경하지 않았다.**
+
+⚠️ **이 0.0587 은 "바퀴 반지름 실측치"가 아니다.** 거리에는 `2*pi*r / counts_per_rev` 라는
+**곱만** 들어가므로 직진 시험으로 r 과 counts_per_rev 를 분리할 수 없다. (유효 구름반지름 +
+슬립 + 엔코더 스케일 오차)를 전부 흡수한 **보정 상수**다.
+
+⚠️ **브리지의 `wheel_radius_m` 은 0.065 로 유지**했다(의도적 분리):
+
+- 브리지의 r 은 `/cmd_vel`(m/s) -> 바퀴 rad/s 변환에 쓰는 **명목 기구 치수**이며 엔코더가
+  전혀 개입하지 않는 개루프 명령 경로다.
+- `r=0.065` 를 참으로 두면 이번 데이터가 가리키는 유효 counts/rev 는 약 **75,439** 로,
+  손회전 실측 68,160 보다 **펌웨어 명목 77,520 에 훨씬 가깝다**(2.7% 차이).
+  즉 10.7% 의 상당 부분이 반지름이 아니라 **미해결 엔코더 스케일**일 가능성이 있다.
+- 명령 경로에 옮기면 실제 주행 속도와 속도 봉투 표(4.615/1.754/6.369)가 모두 바뀐다.
+
+두 파일의 `wheel_radius_m` 이 갈렸으므로, 기존 "두 YAML 일치" 테스트에서 이 키를 빼고
+**"의도적으로 다르다"를 명시적으로 고정하는 테스트**로 교체했다.
+`wheel_separation_m`·`counts_per_wheel_rev` 는 계속 일치를 강제한다.
+
+### 2. yaw drift — 분석만, 코드 수정 없음 (지시대로)
+
+`Δθ = (d_R - d_L) / L` 이므로 이것은 각도 문제가 아니라 **좌우 이동거리 차이** 문제다:
+
+```
+d_L - d_R = 0.1343 x 0.38 = 0.051 m   ->   d_L=1.1323, d_R=1.0813   (좌우 4.72% 차이)
+```
+
+**`wheel_separation_m` 은 원인이 될 수 없다** — `d_L = d_R` 이면 `L` 이 얼마든 `Δθ = 0` 이다.
+`L` 을 바꾸면 drift 의 **표시 크기만** 줄고 원인은 남은 채 **진짜 회전까지 왜곡**된다.
+(지시하신 "임의로 바꾸지 말 것"이 맞다.)
+
+⚠️ **이번 반지름 보정으로 보고 drift 가 약 9.7% 작아진다**(`Δθ` 도 r 에 비례,
+-0.1343 → 약 -0.1213). **개선이 아니라 눈금이 줄어든 것**이다.
+
+원인 후보와 다음 실측 순서는 `ros2_ws/CLAUDE.md` "직진 시 yaw drift" 절에 정리했다.
+요지: ① 바퀴 지름 실측(가장 싸고 결정적) → ② 3~5 m 주행으로 **실제 방위 ground truth** 확보
+(현재 거리만 확인됐고 방위는 미측정 — "실제로 안 직진했을" 가능성이 배제되지 않았다) →
+③ raw `encoder_total` 로 좌우 델타 직접 측정 → ④ 모터 끄고 밀기 → ⑤ 후진 → ⑥ 속도·하중 변경.
+`L` 캘리브레이션(360° 회전)은 **좌우 스케일 정리 후에** 한다 — 순서를 바꾸면 두 오차가
+서로를 가린다.
+
+참고 정황: `r=0.065`·무슬립 가정으로 역산한 유효 counts/rev 는 **L 77,178 / R 73,699** 로,
+**좌측이 펌웨어 명목 77,520 과 0.44% 차이**다. 후보 ①·④를 가리키지만 가정 의존이 커서
+근거로 확정하지 않았다.
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `config/wheel_odometry.yaml` | `wheel_radius_m` **0.065 → 0.0587** + 보정 근거·한계 |
+| `wheel_odometry_node.py` | 같은 기본값 + 주석 |
+| `config/stm_serial_bridge.yaml` | **값 변경 없음.** r 을 0.065 로 두는 이유 명시 + `counts_per_wheel_rev` 가 사본임을 명시 |
+| `stm_serial_bridge_node.py` | 주석만 (`counts_per_wheel_rev` 소비자는 별도 노드) |
+| `test_wheel_odometry_node.py` | 상수 갱신, 일치 테스트에서 `wheel_radius_m` 제외, 신규 3개(의도적 분리 / 배율 상쇄 / 실기 count 재현) |
+| `ros2_ws/CLAUDE.md` | 스케일 보정 절 + yaw drift 분석 절 |
+
+### 명령·결과
+
+```bash
+cd ros2_ws
+export ROS_LOCALHOST_ONLY=1
+source /opt/ros/humble/setup.bash && colcon build --symlink-install
+source install/setup.bash
+python3 -m pytest src/stm_serial_bridge/test/ src/cart_teleop/test/ -q
+```
+
+**538 passed** (직전 537 + 신규 3 − 파라미터 축소 2).
+
+<details>
+<summary>pytest 원본 출력</summary>
+
+```
+........................................................................ [ 13%]
+........................................................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 66%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+..................................                                       [100%]
+538 passed in 1.95s
+```
+
+</details>
+
+<details>
+<summary>보정 계산 원본 출력</summary>
+
+```
+run |  |Δ| (보고 이동거리) | 실제 1.0m 대비 | Δyaw
+ 1  |      1.101233       |   +110.12%      | -0.095
+ 2  |      1.113589       |   +111.36%      | -0.161
+ 3  |      1.105543       |   +110.55%      | -0.147
+
+평균 배율 k = 1.106788  (스프레드 1.1012~1.1136, ±0.56%)
+보정 반지름 r = 0.065 / k = 0.058728 m
+→ 채택 0.0587 m  (잔차 -0.048%)
+
+[검산] 호 길이 보정 시 k=1.107659 → r=0.058682 m (차이 0.046 mm, 측정 스프레드보다 훨씬 작음)
+
+=== 좌우 분해 (평균) ===
+Δyaw 평균 -0.1343 rad → d_L - d_R = 0.05105 m
+d_L = 1.13231 m,  d_R = 1.08127 m,  d_L/d_R = 1.04721  (+4.72%)
+역산 count: L=188,974  R=180,455   (1.0m = 2.448538 rev, r=0.065 가정)
+→ 유효 counts/rev:  L=77,178   R=73,699   평균=75,439
+   비교: 손회전 실측 68,160 / 펌웨어 명목 77,520
+
+=== 보정 r=0.0587 적용 후 (같은 count 재계산) ===
+이동거리 0.999515 m (목표 1.0),  Δyaw -0.121309 rad (보정 전 -0.1343)
+→ yaw drift 는 사라지지 않고 -9.7% 만큼 '축소'될 뿐이다
+```
+
+</details>
+
+### ⚠️ 이 기록의 한계
+
+- **보정은 "실제 1.0 m"라는 기준에 전적으로 의존한다.** 사용자 보고값이 "약 1.0 m"이므로,
+  기준이 1% 틀리면 r 도 1% 틀린다. 시종점 표시 방법과 오차는 기록되지 않았다.
+- **표본 3개**다. 스프레드는 ±0.56%로 좁지만, 계통 오차(슬립·엔코더 스케일)의 **귀속**은
+  이 데이터로 해결되지 않는다.
+- **방위 ground truth 없음** — 거리만 확인됐다. yaw drift 중 실제 회전분이 얼마인지 모른다.
+- **보정 후 실기 재검증은 하지 않았다.** 0.0587 이 실제로 1.0 m 를 재현하는지는
+  **다음 주행에서 확인해야 한다.** 현재는 같은 count 입력에 대한 계산 일치만 테스트로 고정했다.
+- **`ruff check` 미실행** (환경에 `ruff`·`pip` 없음).
+- **작업 중 사고 재발 1건**: `colcon build` 를 리포지토리 루트에서 다시 실행해
+  루트 `build/`·`install/`·`log/` 가 생성됐다(셸 작업 디렉터리가 초기화된 상태에서 실행).
+  즉시 삭제했고 세 디렉터리 모두 `.gitignore` 대상이라 추적 파일 변화는 없다.
+
+## 2026-08-08 10:00 — ✅ ROS2: 별도 `wheel_odometry` 노드 + `/wheel/odom` 발행, 537 tests 통과 + 실행 파일 E2E (Claude)
+
+- **배경**: 앞 항목(09:30)의 순수 모듈을 ROS 에 배선했다. **기존
+  `stm_serial_bridge_node` 와 분리된 별도 노드**로 만들었다(사용자 지시).
+- 대상 커밋: `1a1f7a5` (working tree)
+
+### 신규·변경 파일
+
+| 파일 | 내용 |
+|---|---|
+| `stm_serial_bridge/wheel_odometry_node.py` | 신규. `/stm/encoder_total` 구독 → `/wheel/odom`(`nav_msgs/Odometry`) 발행 |
+| `config/wheel_odometry.yaml` | 신규. 노드 이름 `wheel_odometry` 키 |
+| `test/test_wheel_odometry_node.py` | 신규. 49 tests |
+| `setup.py` | `wheel_odometry_node` console_script 추가 |
+| `package.xml` | `nav_msgs` exec_depend 추가 |
+| `ros2_ws/CLAUDE.md` | 10c 완료 + 10d/10e 남은 항목 |
+
+### 지시받은 조건과 구현 상태
+
+| 조건 | 상태 |
+|---|---|
+| 첫 `encoder_total` 은 적분 없이 rebaseline 만 | ✅ 발행도 하지 않는다 (속도 0을 지어내지 않기 위해) |
+| `counts_per_wheel_rev` = 68160.0 사용 | ✅ 기본값·YAML 모두 |
+| `wheel_radius_m`/`wheel_separation_m` 기존 값 사용 | ✅ 두 YAML 일치를 테스트로 강제 |
+| `/stm/wheel_actual_rad_s` 미사용 | ✅ 구독조차 하지 않음 (`ros2 node info` 로 확인) |
+| TF 미발행 | ✅ `/tf` 발행자 없음 확인 |
+| 최종 `/odom` 미발행 | ✅ `/wheel/odom` 만 |
+| EKF 코드 없음 | ✅ |
+| 브리지와 분리된 별도 노드 | ✅ Serial 포트를 열지 않는다 |
+
+### 명령·결과
+
+```bash
+cd ros2_ws
+export ROS_LOCALHOST_ONLY=1
+source /opt/ros/humble/setup.bash && colcon build --symlink-install
+source install/setup.bash
+python3 -m pytest src/stm_serial_bridge/test/ src/cart_teleop/test/ -q
+```
+
+**537 passed** (기존 488 + 신규 49).
+
+<details>
+<summary>pytest 원본 출력</summary>
+
+```
+........................................................................ [ 26%]
+........................................................................ [ 40%]
+........................................................................ [ 53%]
+........................................................................ [ 67%]
+........................................................................ [ 80%]
+........................................................................ [ 93%]
+.................................                                        [100%]
+537 passed in 1.44s
+```
+
+</details>
+
+### 실행 파일 E2E (pytest 밖, 실제 `ros2 run` + CLI 발행)
+
+```bash
+ros2 run stm_serial_bridge wheel_odometry_node --ros-args --params-file \
+  install/stm_serial_bridge/share/stm_serial_bridge/config/wheel_odometry.yaml
+ros2 topic pub --once /stm/encoder_total std_msgs/msg/Int32MultiArray "{data: [20000, 22000]}"
+ros2 topic echo /wheel/odom --once
+```
+
+<details>
+<summary>노드 시작 로그 + 수신한 /wheel/odom (요약)</summary>
+
+```
+[INFO] [wheel_odometry]:   counts_per_wheel_rev = 68160.0  <-- 2026-08-08 실측(좌우 공통). ⚠️ 펌웨어 명목 77520 과 다름
+[INFO] [wheel_odometry]: wheel_odometry 시작: /stm/encoder_total -> /wheel/odom (m/count=0.000005992)
+[INFO] [wheel_odometry]: TF는 발행하지 않는다 — odom -> base_link는 EKF의 몫이다.
+[WARN] [wheel_odometry]: pose/twist covariance는 0으로 남겨둔다 — 근거 있는 값이 아직 없다. EKF에 연결하기 전에 반드시 설정할 것
+[INFO] [wheel_odometry]: 첫 encoder_total: 적분 없이 기준만 잡는다 (L=10000, R=11000)
+```
+
+```
+header: {frame_id: odom},  child_frame_id: base_link
+pose.pose.position:    x: 0.06291286233320988   y: 0.000496019207449503   z: 0.0
+pose.pose.orientation: z: 0.007883980687644131  w: 0.9999689209413045
+twist.twist:           linear.x: 0.06675738255312783   angular.z: 0.016731173572212498
+pose.covariance / twist.covariance: 전부 0.0
+```
+
+```
+$ ros2 node info /wheel_odometry
+  Subscribers:  /stm/encoder_total: std_msgs/msg/Int32MultiArray
+  Publishers:   /wheel/odom: nav_msgs/msg/Odometry   (그 외 /rosout, /parameter_events)
+$ ros2 topic list | grep '^/tf'
+  (없음)
+```
+
+</details>
+
+**손계산 대조** — 델타 `(10000, 11000)` count, `m/count = 5.9919e-6`:
+
+| 값 | 손계산 | 수신값 |
+|---|---|---|
+| `d_c` | 0.0629149 m | x = 0.0629129 (mid-angle cos 반영) |
+| `Δθ` | 0.0157681 rad | — |
+| `orientation.z` = sin(Δθ/2) | 0.0078840 | **0.00788398** ✅ |
+| `y` = d_c·sin(Δθ/2) | 4.9603e-4 | **0.000496019** ✅ |
+
+첫 샘플이 적분되지 않고(로그), `/tf` 발행자가 없으며, `/stm/wheel_actual_rad_s` 를
+구독하지 않는다는 것까지 실행 상태에서 확인했다.
+
+### ⚠️ 이 기록의 한계 / 남은 것
+
+- **하드웨어 미검증.** `ros2 topic pub` 으로 만든 **가짜 count** 로만 확인했다. 실제 주행에서
+  오도메트리가 실제 이동량과 얼마나 맞는지는 **측정하지 않았다.**
+- **STM32 재부팅을 탐지하지 않는다(10d).** 실행 중 카운터가 0으로 초기화되면 포즈가 크게
+  튄다. `rebaseline()` 은 준비돼 있으나 **호출 조건이 없다** — `/stm/connected` 전이만으로는
+  모든 reset 을 잡을 수 없으므로 탐지 방법부터 정해야 한다.
+- **공분산이 0이다(10e).** EKF 연결 전 반드시 설정해야 한다. 노드가 시작 시 경고를 남기고,
+  테스트도 "0이 맞다"가 아니라 **"아직 설정하지 않았다"는 현재 상태를 고정**한다.
+- **launch 파일 미통합.** 현재는 `ros2 run` 으로만 띄운다.
+- **`ruff check` 미실행** (환경에 `ruff`·`pip` 없음). `py_compile` + 88자 검사로 대체했고
+  신규 2개 파일 모두 초과 줄 없음. `D`/`ANN`/`I` 규칙은 미검증.
+- E2E 확인 후 백그라운드 노드 프로세스를 종료했다(`ps` 로 잔여 없음 확인).
+
+## 2026-08-08 09:30 — ✅ ROS2: `wheel_odometry.py` 순수 모듈 + 단위 테스트 70개, 488 tests 통과 + 뮤테이션 검증 (Claude)
+
+- **배경**: 앞 항목(09:00)에서 확정한 실측 68160 count/rev 를 소비하는 **순수 계산 모듈**을
+  구현했다. 이번 단계는 계산 로직까지이며 **ROS publisher·`/wheel/odom` 발행·TF 는 손대지
+  않았다**(사용자 지시).
+- 대상 커밋: `1a1f7a5` (working tree)
+
+### 신규 파일
+
+| 파일 | 내용 |
+|---|---|
+| `stm_serial_bridge/wheel_odometry.py` | `WheelGeometry`/`OdometryState`(frozen) + `encoder_delta`·`wheel_distances`·`twist_from_distances`·`advance`·`rebaseline`·`initial_state`·`normalize_angle` |
+| `test/test_wheel_odometry.py` | 70 tests |
+
+`rclpy`·ROS 메시지·serial·**시계**에 의존하지 않는다. dt 는 인자로만 받는다.
+
+### 설계상 확정한 것
+
+- **속도는 엔코더 델타로 계산한다.** `/stm/wheel_actual_rad_s`(명목 77520 기준, 약 12% 작음)는
+  쓰지 않는다. 이 결정을 테스트로도 고정했다 —
+  `test_measured_scale_differs_from_firmware_nominal_by_about_12_percent`
+- **int32 래핑 보정**: `((curr - prev + 2**31) % 2**32) - 2**31`. 단순 뺄셈은 경계에서
+  `-4294967295` 라는 가짜 델타를 만든다(테스트로 고정)
+- **포즈 적분은 midpoint(2차)**. 원호 구간에서 진행 방향이 현(chord) 방향과 정확히 일치하므로
+  오차는 "호 길이 대신 현 길이" 뿐이다
+- `theta` 는 `(-pi, pi]` 정규화
+- **포즈는 dt 무관 / 속도만 dt 비례** (STATUS 에 타임스탬프가 없어 dt 는 수신 시각 차이)
+
+### 10c(노드 배선) 단계 제약 — 문서에 고정
+
+`ros2_ws/CLAUDE.md` "휠 오도메트리" 절에 기록했다:
+① `/odom` 이 아니라 **`/wheel/odom`** 별도 토픽, ② **TF 발행 안 함**(최종 `/odom` 과
+`odom -> base_link` 는 이후 EKF 담당), ③ **`rebaseline()` 호출 정책 미정** — `/stm/connected`
+false→true 전이만으로 모든 STM reset 을 잡을 수 있다고 **가정하지 않는다**,
+④ 노드 내장 vs 별도 `wheel_odometry_node` 분리 **미결정**.
+
+### 명령·결과
+
+```bash
+cd ros2_ws
+source /opt/ros/humble/setup.bash && colcon build --symlink-install
+source install/setup.bash
+python3 -m pytest src/stm_serial_bridge/test/ src/cart_teleop/test/ -q
+```
+
+**488 passed** (기존 418 + 신규 70).
+
+<details>
+<summary>pytest 원본 출력</summary>
+
+```
+......................................................................   [100%]
+70 passed in 0.05s
+```
+
+```
+........................................................................ [ 14%]
+........................................................................ [ 29%]
+........................................................................ [ 44%]
+........................................................................ [ 59%]
+........................................................................ [ 73%]
+........................................................................ [ 88%]
+........................................................                 [100%]
+488 passed in 1.22s
+```
+
+</details>
+
+### 뮤테이션 검증 — 테스트가 실제로 버그를 잡는지 확인
+
+"70개 통과"가 공허한 통과가 아님을 보이기 위해, 소스에 의도적 결함을 넣고 테스트가
+실패하는지 확인한 뒤 원본으로 복원했다.
+
+| 뮤테이션 | 결과 |
+|---|---|
+| M1: 래핑 보정 제거 (`curr - prev`) | **7 failed**, 63 passed |
+| M2: midpoint → Euler (`theta + dtheta/2` → `theta`) | **1 failed**, 69 passed |
+| M3: omega 부호 반전 | **6 failed**, 64 passed |
+| 복원 후 | **70 passed** (소스 원본과 `diff` 일치 확인) |
+
+M2 를 잡는 테스트가 1개인 것은 의도한 대로다 — 해석적 원호 수렴 테스트
+(`test_advance_converges_to_the_analytic_arc`)가 그 목적으로 작성된 유일한 테스트다.
+
+### ⚠️ 이 기록의 한계
+
+- **`ruff check` 미실행** — 이 환경에 `ruff`·`pip` 가 없다. 대신 `py_compile` 문법 검사와
+  88자 초과 줄 검사를 수행했다(신규 2개 파일 모두 **초과 줄 없음**).
+- **실기·mock 미검증**: 순수 함수만 구현했고 노드에 배선하지 않았으므로 실행 경로에 아무
+  영향이 없다. `/stm/encoder_total` 실데이터로는 아직 한 번도 돌리지 않았다.
+- **작업 중 사고 1건**: `colcon build` 를 **리포지토리 루트에서** 실행해 루트에
+  `build/`·`install/`·`log/` 가 생성됐다(09:20:50). 기존 루트 워크스페이스가 없었음을
+  확인한 뒤 삭제했고, 세 디렉터리 모두 `.gitignore` 대상이라 추적된 파일 변화는 없다.
+  이후 빌드는 모두 `ros2_ws/` 에서 실행했다.
+
+## 2026-08-08 09:00 — ✅ EM+ROS2: 엔코더 count/rev 재측정(판정 A 확정) + `counts_per_wheel_rev` 파라미터 추가, 418 tests 통과 (relu 실측 / Claude 반영)
+
+- **배경**: Wheel Odometry 구현 전에 바퀴 1회전당 엔코더 count 를 재측정했다. 2026-08-03
+  측정(통합 68162.5)이 명목값 77520 보다 약 12.1% 작아 원인 미확정 상태였고,
+  `embedded/motor/docs/current.md` 의 "다음 개발 목표 2번"에 **판정 A/B/C 기준**을 미리
+  정해 두었다.
+- 대상 커밋: `1a1f7a5` "[feat] ROS2 수동 주행 teleop 추가"
+
+### 실측 (relu, 실기)
+
+방법: 바퀴를 **공중에 띄운 상태**에서 모터를 구동하지 않고 손으로 **1회전씩 좌우 각 10회**
+`encoder_total` 변화량을 측정, **이상치 제거 후 평균**.
+
+| 대상 | 2026-08-03 (각 4회전) | **2026-08-08 (각 10회)** | 차이 |
+|---|---|---|---|
+| Left | 68107.75 | **약 68420** | +312 |
+| Right | 68217.25 | **약 67913** | -304 |
+| **좌우 전체 평균** | **68162.5** | **약 68167** | **+4.5** |
+
+- **판정 A 확정** — 통합 평균이 기존 실측과 사실상 동일하게 재현됐다. 명목 77520(=380×51×4)
+  과의 약 -12.1% 차이는 **1회성 측정 실수가 아니다.**
+- ⚠️ **좌우 편차는 재현되지 않았다.** 08-03 은 Right 가 약 0.16% 컸고, 08-08 은 Left 가 약
+  0.75% 크다 — **크기도 부호도 달라졌다.** 두 측정 모두 손 회전이라 "정확히 1회전"을 맞추는
+  오차가 값에 섞여 있다. **좌우 차이를 하드웨어 특성으로 확정하지 않으며, 좌우 개별 보정값도
+  도입하지 않는다.** (사전 합격 기준의 "좌우 편차 1% 이내"는 만족한다.)
+- ⚠️ **원인은 여전히 미확정.** CPR 380 의 정의 / Quadrature 배율(TI12=x4 가정) / 타이머 입력
+  필터(IC1/IC2Filter=8) / 실제 감속비 중 무엇인지 이 측정으로는 구분되지 않는다. 재측정은
+  "실측값이 맞다"만 확인했을 뿐 **원인 규명이 아니다.**
+
+### 결정 (relu)
+
+- **ROS Wheel Odometry 는 좌우 공통 `68160` count/rev 를 기준값으로 쓴다.**
+- **STM 펌웨어(77520)와 mock 은 이번 작업에서 바꾸지 않는다.** 그 상수는 `actual_rad_s`
+  뿐 아니라 **PI 제어 입력과 Stall 판정까지 함께** 바꾸므로, 별건의 Encoder Scale
+  Calibration 작업으로 남긴다.
+- 따라서 **`/stm/wheel_actual_rad_s`(77520 기준)와 ROS odometry 속도(68160 기준)의 스케일이
+  현재 서로 다르다.** 의도된 일시적 불일치이며, 두 값을 같은 축에서 직접 비교하지 않는다.
+  이 사실을 아래 4개 문서에 명시했다.
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `ros2_ws/.../config/stm_serial_bridge.yaml` | **`counts_per_wheel_rev: 68160.0` 신규**(+근거 주석). 파라미터 10 → **11개** |
+| `ros2_ws/.../stm_serial_bridge_node.py` | 같은 이름 `declare_parameter` + `_log_parameters()` 출력 추가 |
+| `ros2_ws/.../mock_stm.py` | 주석만. `DEFAULT_COUNTS_PER_WHEEL_REV` **값은 77520 유지** — mock 이 흉내내는 대상은 odometry 가 아니라 펌웨어이기 때문 |
+| `motor_config.h` | **주석만. 매크로 값 변경 없음** (재측정 결과 + ROS/STM 스케일 불일치 명시) |
+| `embedded/motor/docs/serial_protocol.md` | 재측정 절 + "펌웨어와 ROS의 스케일 불일치" 절 신규 |
+| `embedded/motor/docs/current.md` | 캘리브레이션 항목 갱신, "다음 개발 목표 2번" **완료 처리** |
+| `ros2_ws/CLAUDE.md` | 엔코더 스케일 절 갱신 + 스케일 불일치 절 신규. 파라미터 개수 표기 `9개` → `11개` (기존 표기가 이미 실제 10개와 어긋나 있었다) |
+
+⚠️ `counts_per_wheel_rev` 는 **선언·로깅만 되고 아직 소비하는 코드가 없다.** `wheel_odometry.py`
+구현은 다음 단계로 분리했다.
+
+### 명령·결과
+
+```bash
+cd ros2_ws
+source /opt/ros/humble/setup.bash && colcon build --symlink-install
+source install/setup.bash
+python3 -m pytest src/stm_serial_bridge/test/ src/cart_teleop/test/ -q
+```
+
+**418 passed** (기존과 동일 — 이번 변경은 기존 동작을 건드리지 않았다).
+
+<details>
+<summary>colcon build + pytest 원본 출력</summary>
+
+```
+Starting >>> cart_teleop
+Starting >>> stm_serial_bridge
+Finished <<< stm_serial_bridge [1.11s]
+Finished <<< cart_teleop [1.13s]
+
+Summary: 2 packages finished [1.29s]
+```
+
+```
+........................................................................ [ 17%]
+........................................................................ [ 34%]
+........................................................................ [ 51%]
+........................................................................ [ 68%]
+........................................................................ [ 86%]
+..........................................................               [100%]
+418 passed in 1.40s
+```
+
+</details>
+
+<details>
+<summary>파라미터 스모크 테스트 (YAML ↔ 노드 기본값 일치 + 시작 로그)</summary>
+
+```
+[INFO] [1786147443.150505076] [stm_serial_bridge]: 파라미터:
+[INFO] [1786147443.150792885] [stm_serial_bridge]:   serial_port         = /dev/ttyACM0
+[INFO] [1786147443.150998590] [stm_serial_bridge]:   baud_rate           = 115200
+[INFO] [1786147443.151242435] [stm_serial_bridge]:   wheel_radius_m      = 0.065
+[INFO] [1786147443.151547075] [stm_serial_bridge]:   wheel_separation_m  = 0.38  <-- 2026-08-04 좌우 구동 바퀴 트레드 중심선 간 실측값
+[INFO] [1786147443.151820489] [stm_serial_bridge]:   counts_per_wheel_rev= 68160.0  <-- 2026-08-08 실측(좌우 공통). ⚠️ 펌웨어 명목 77520 과 다름
+[INFO] [1786147443.152082241] [stm_serial_bridge]:   tx_rate_hz          = 20.0
+[INFO] [1786147443.152381194] [stm_serial_bridge]:   cmd_vel_timeout_sec = 0.5
+[INFO] [1786147443.152753601] [stm_serial_bridge]:   dry_run             = True
+[INFO] [1786147443.153007414] [stm_serial_bridge]:   max_wheel_rad_s     = 1.0  <-- ⚠️ 실제 모터 정격 확정 전 임시 벤치 제한
+[INFO] [1786147443.153242897] [stm_serial_bridge]:   rx_poll_hz          = 50.0
+[INFO] [1786147443.153531257] [stm_serial_bridge]:   status_timeout_sec  = 0.5
+
+yaml counts_per_wheel_rev = 68160.0
+node default              = 68160.0 (float)
+YAML == node default      = True
+yaml key count            = 11
+```
+
+</details>
+
+### ⚠️ 이 기록의 한계
+
+- **실측값은 사용자 구두 보고값이다.** 10회 개별 측정의 원본 `encoder_total` 값과 이상치
+  제거 기준은 이 로그에 확보되지 않았다(08-03 기록에는 구간별 원본이 남아 있다).
+- **`ruff check` 를 돌리지 못했다** — 이 환경에 `ruff` 가 설치돼 있지 않고 `pip` 도 없다.
+  대신 `py_compile` 문법 검사와 88자 초과 줄 검사를 직접 수행했다: **추가한 줄은 모두 88자
+  이하**이며, 초과 줄 4개(`stm_serial_bridge_node.py:60,728,729`, `mock_stm.py:339`)는
+  `git show HEAD:` 비교로 **변경 전부터 있던 것**임을 확인했다(신규 위반 없음).
+- **첫 pytest 실행은 무효였다.** `install/` 이 심볼릭이 아닌 **복사본**이라 수정 전 코드가
+  로드됐다(파라미터 스모크 테스트가 `ParameterNotDeclaredException` 으로 이를 드러냈다).
+  `colcon build --symlink-install` 재실행 후의 결과만 위에 기록했다.
+- **실기 미검증**: 이번 변경 자체는 하드웨어에서 돌리지 않았다. 파라미터가 선언·로깅된다는
+  것만 확인했고, 소비하는 로직이 없으므로 주행 동작에 영향이 없다.
+
+## 2026-08-08 00:30 — ✅ E2E: 실좌표(아핀 초기값)로 전체 사슬 재검증 (Claude)
+
+- **배경**: 사람이 제공한 이미지 3장(RViz 스크린샷 원본 2732×1799 / 좌우반전본 906×645 /
+  평면도 1000×600)으로 world→평면도 아핀 초기 계수를 이미지 정합으로 산출
+- **정합 방법** (표준 라이브러리+numpy, PNG 디코더 자작):
+  1. pgm 장애물(5,649px) ↔ 반전본 벽 마스크를 FFT 상관으로 탐색 —
+     **좌우반전 + 회전 -25.85° + 배율 5.550** (겹침 1,568점, 사람 진술과 일치)
+  2. 반전본에서 안쪽 벽 크롭 후보 조합 × 서가 특징 잔차 최소화 → 크롭 x[30..812] y[30..643]
+  3. 합성 아핀: A=[[-127.74, -61.89],[47.37, -97.77]], t=(834.80, 357.11) —
+     행렬식 +15,422 (반전 상쇄로 고유회전, 예측대로), 방 크기 약 7.0×5.5m
+  4. 검증 렌더: 평면도 위에 pgm 장애물 투영 — 벽이 캔버스 가장자리에, 정사각 구조물이
+     100·000 서가 블록 안에 정확히 안착. 서가 잔차 3~62px(평면도가 도식화된 그림인 한계)
+- **적용**: `library-map-affine-initial.sql` → 로컬 DB, BE 재기동(아핀 컬럼 생성),
+  가짜 Jetson `--start-world=-0.743,2.096` (START_POSITION의 실좌표)
+- **E2E 결과** (모두 실좌표):
+  - 위치 상행: SLAM(-0.743, 2.096) → BE 변환 image=(800.00, 116.98) → FE 마커 (80%, 19.5%) —
+    목표 START(800,117)와 0.02px 오차
+  - 반납 테이블 클릭: BE 하행 `target=(-1.451, 1.538)` = 사전 계산 예측값과 정확히 일치 →
+    가짜 Jetson 주행 → 마커 (92.497%, 23%) 정지 + "반납 테이블에 도착했어요"
+- **한계·후속**: 이 계수는 **이미지 정합 기반 초기 근사값** (서가 기준 수십 cm 오차 가능).
+  시연 장소에서 `calibrate_map_transform.py` 3점 캘리브레이션으로 교체할 것
+
+## 2026-08-07 23:30 — ✅ BE: 지도 아핀 변환 + 캘리브레이션 도구 (Claude)
+
+- **배경**: EM의 실지도(library_map.pgm 366×319, res 0.05, origin [-8.14,-4.75]) 분석 결과
+  ① 방이 SLAM 좌표계에서 ~25° 회전, ② FE 평면도는 그 지도를 **좌우반전+회전+크롭**해 제작
+  (사람 확인). 반전이 섞이면 world→픽셀 변환의 부호가 뒤집혀 기존 resolution·origin
+  (세로반전식)으로는 수학적으로 표현 불가 → 일반 아핀 변환 필요. pgm 특징(서가 클러스터)으로
+  초기값 역산을 시도했으나 클러스터 배열이 평면도와 불일치해 **역산 포기, 캘리브레이션 방식 채택**
+- **변경** (`backend/feature/navigation-uplink`):
+  - `LibraryMap`에 아핀 6계수(affine_a11·a12·a21·a22·tx·ty, nullable) — REST 밖, SQL로만 주입
+  - `SlamCoordinateConverter`: 계수가 있으면 픽셀=A·world+t (역변환은 역행렬), 행렬식 0이면
+    조용한 오좌표 대신 IllegalStateException. 계수 없으면 기존 방식 폴백 (기존 테스트 무수정 통과)
+  - `scripts/calibrate_map_transform.py` 신규 — 대응점 3+개("wx,wy=px,py")로 최소제곱 아핀을
+    풀고 잔차와 library_maps UPDATE SQL 출력. 외부 의존 없음(가우스 소거 직접 구현)
+- **명령·결과**: `gradlew.bat test` → **92 tests, 0 failures** (신규 3: 아핀 우선 적용 /
+  아핀 왕복 ±0.5px / 퇴화 행렬 명시적 실패)
+- **스크립트 자가 검증**: 알려진 변환 A=[[50,50],[50,-50]], t=(180,230)의 대응점 4개 입력 →
+  정확히 복원, 잔차 0.0px, 행렬식 -5000(반전 포함) 판정 정상
+- **남은 것**: 실제 계수 — 시연 장소에서 카트를 아는 지점 3곳에 놓고 SLAM 좌표를 받아
+  스크립트 실행(도크스트링에 절차). 그 전 초기 근사값은 FE 디자인 툴의 레이어 배치 정보로 계산 예정
+
+## 2026-08-07 18:20 — ✅ FE+BE: SLAM 실측 평면도 반영, 전 좌표 재측정 (Claude)
+
+- **배경**: SLAM으로 실측해 다시 그린 평면도(1000×600)로 map.png 교체 → 통로·테이블·서가
+  배치가 모두 이동. 1px 캔버스 스캔으로 재측정해 FE 좌표와 BE 시드를 동시 갱신
+- **실측값** (픽셀 [L,T,R,B]): Z3 [10,128,255,582] / Z2 [450,128,631,582] / Z1 [827,128,989,582],
+  서가 800·200 블록 [266,263,439,393](중앙 분할 352) / 100·000 블록 [642,263,815,393](분할 728),
+  사서 테이블 [0,0,362,107] / 반납 테이블 [850,0,999,107]
+- **변경**:
+  - FE: `ZONE_RECTS`·`CORRIDOR_Y`(19.5)·`START_POSITION`·`MAP_LANDMARKS`(테이블 2+서가 4,
+    정차점 6개) 갱신. **사서 테이블 정차점(35, 23)이 구역 밖 흰 바닥이 됨** — 자유 좌표
+    이동이라 허용하고, 정차점 불변식을 "구역 안"→"장애물 밖"으로 완화
+    (서가 정차점 4개는 여전히 해당 통로 안 강제). zoneStore 테스트의 옛 좌표 하드코딩 수정
+  - BE 시드: 존 폴리곤 3개 + 책장 4면 좌표(면 중심 y=328) 갱신, 로컬 DB 적용
+- **명령·결과**: `pnpm test --run` → **20 files, 138 tests, 0 failures** / `tsc` 0 / `eslint` 0
+  (1차 실패 1건: zoneStore.test의 옛 좌표 → 신 좌표로 수정 후 통과)
+- **브라우저 검증**:
+  - 오버레이 정합(버튼 내부 기대 색 비율): 구역 99.0~99.3%, 서가 93.5~95.5%, 테이블 93.1~97.4%
+  - E2E(실 BE+가짜 Jetson): 000 총류 서가 클릭 → 마커 정확히 신 정차점 (87.7%, 54.7%),
+    신 폴리곤으로 구역 판정 → "1구역에 도착했어요!" 모달
+- **주의**: `library_maps`의 resolution·origin은 여전히 가값(0.01, 0,0) — 실기 연동 시
+  SLAM map.yaml 기준으로 평면도가 덮는 범위를 계산해 입력해야 좌표 변환이 맞는다
+
+## 2026-08-07 17:50 — ✅ FE+BE: 자유 좌표 이동 (스냅 제거) + E2E (Claude)
+
+- **배경**: 이동 명령을 2갈래로 확정 — ① 바닥(구역·통로) 아무 좌표나 찍으면 그 지점으로,
+  ② 장애물(서가 4면·테이블 2개)을 찍으면 그 앞 고정 정차점으로. 어제 넣은 BE 스냅은
+  통로 클릭까지 구역 안으로 끌어당겨 ①과 충돌 → 제거
+- **변경**:
+  - FE (`frontend/feat/map-landmarks`): `MAP_LANDMARKS`에 서가 4면 추가(클릭 영역=서가 면,
+    정차점=그 면이 보는 통로 안 0.5m 여유). 도착 안내를 랜드마크별로 구분 —
+    서가행은 구역 정리 모달(`arrival:'zone'`), 테이블·자유 지점은 이름 토스트(`arrival:'toast'`).
+    통로 클릭은 "지정한 위치"로 안내
+  - BE (`backend/feature/navigation-uplink`): `snapIntoZone` 제거, 클릭 좌표 그대로 하행.
+    장애물 회피는 FE 책임 + Nav2 거부(status/nav-result ABORTED·REJECTED→FAILED)가 안전망.
+    `PolygonZoneMatcher`는 구역 판정 `contains`만 남김(깨진 폴리곤 관용 파싱은 유지),
+    `navigation.snap-margin-meters` 삭제
+- **명령·결과**:
+  - `frontend: pnpm test --run` → **20 files, 137 tests, 0 failures** / `tsc` 0 / `eslint` 0
+  - `backend: gradlew.bat test` → **89 tests, 0 failures** (스냅 테스트 7개 제거)
+- **E2E** (BE bootRun + 가짜 Jetson + FE 8081 실연동):
+  - 흰색 상단 통로 (50%, 17%) 클릭 → 마커 (49.9%, 17%) 정지 (**스냅이 있었다면 y가
+    구역 top 20.2% 안으로 끌려갔을 좌표**), "지정한 위치로/에 …" 토스트, 모달 없음
+  - 800 문학 서가 클릭 → 마커 정확히 고정 정차점 (18.6%, 57%),
+    "800 문학 서가로 …" 시작 토스트 → 도착 시 "3구역에 도착했어요!" 구역 정리 모달
+  - 사서/반납 테이블은 직전 로그에서 검증(도착 토스트, 모달 없음) — 동작 유지
+- **삽질 기록**: 가짜 Jetson을 FE 브랜치 체크아웃 상태에서 `scripts/fake_jetson.py`로 실행하면
+  파일이 없다(BE 브랜치에만 커밋됨) — `git show`로 꺼내 임시 경로에서 실행
+
+## 2026-08-07 17:40 — ✅ EM Phase 3-④ 매핑 완료(97 m² 지도 저장) / 🔴 ⑤ Nav2 회전 발진으로 SUCCEEDED 미달 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble, **`ROS_DOMAIN_ID=42`**(같은 네트워크의
+  다른 사람 ROS와 격리 — 사용자 지시). 브랜치 `em/feature/motor-Lidar-integrated` @ `50163ce`.
+- 세션 중 젯슨 1회 재부팅(사용자), 전원 사고 없음.
+
+### ④ 매핑 — ✅ 통과
+
+| 항목 | 값 |
+|---|---|
+| 주행 방식 | 사용자 teleop 수동 주행, Claude가 Hz·TF·지도 감시 |
+| `/scan` · `/odom_rf2o` | 11.0~11.7 Hz · 9.3~10.3 Hz (전 구간 안정) |
+| 감시 경고 | **기동 직후 3건뿐**, 주행 중 0건 (지도 찢어짐 없음) |
+| 관측 셀 | 9,265 → **38,673** / 격자 116,754 |
+| 관측 면적 | 약 **97 m²** |
+| 저장 파일 | `~/maps/library_map.{yaml,pgm,posegraph,data}` **4개** ✅ |
+
+**BE 전달값** (`SlamCoordinateConverter` 입력 / `mqtt.position-unit=meters` 전환 조건):
+
+| 항목 | 값 |
+|---|---|
+| `resolution` | **0.05** m/셀 |
+| `origin` | **[-8.14, -4.75, 0]** |
+| 격자 | **366 × 319 셀** = 18.30 m × 15.95 m |
+| 좌표 범위 | x `-8.14 ~ 10.16` m, y `-4.75 ~ 11.20` m |
+| `mode` | trinary (`occupied_thresh 0.65` / `free_thresh 0.25`) |
+
+### ④에서 확정한 속도 계층 — 두 곳을 같이 올려야 한다
+
+사용자가 "속도가 너무 느리다"고 두 번 지적. 원인은 **teleop 자체 상한**이었다.
+브릿지 cap은 "그 이상 못 나가게 막는" 방어선일 뿐, teleop이 안 보내면 무의미하다.
+`teleop_node.py:111-115`가 `__init__`에서 한 번만 읽어 `TeleopState`에 박으므로
+**`ros2 param set`은 성공을 반환하지만 효과가 없다** (브릿지와 동일한 함정) → 재기동 필수.
+
+| 계층 | 기본 | 최종 |
+|---|---|---|
+| teleop `max_linear_mps` | 0.13 | **0.52** (4배) |
+| teleop `max_angular_rps` | 0.60 | 0.60 (유지 — 올리면 스캔당 회전각이 커져 지도가 찢어짐) |
+| 브릿지 `max_wheel_rad_s` | 2.0 | **8.0** (PWM 80 / `MOTOR_PWM_MAX` 99) |
+
+하드웨어 한계는 **9.9 rad/s** (`MOTOR_OPEN_LOOP_PWM_PER_RAD_S=10` × `MOTOR_PWM_MAX=99`).
+정지 거리: 0.13 m/s에서 1.0 s·8 cm → **0.52 m/s에서 2.5 s·78 cm**, 브릿지 사망 시 **2.9 m**.
+
+### ⑤ Nav2 — 🔴 불합격 (`/cmd_vel` 계약 3/4 통과, `SUCCEEDED` 미달)
+
+기동은 전부 정상: lifecycle `Managed nodes are active` 1회 통과(Humble DDS 레이스 없음),
+`/cart/nav_status` 래치 IDLE, `/robot_pose` **9.99 Hz**, `/cmd_vel` 발행자는 Nav2 내부만
+(`velocity_smoother` + `behavior_server` — teleop·AI 없음), goal은 `/cart/target_pose`로만 투입.
+
+**시도 3회:**
+
+| # | goal | `max_vel_theta` | 결과 | PWM max | 진단 |
+|---|---|---|---|---|---|
+| 1 | (0.0, 1.0) | 0.6 | 150초 NAVIGATING, `linear.x` max **0.016** | **17** | 🔴 PWM 17 < 데드존 20 → **회전 자체가 안 됨** |
+| 2 | (0.0, 1.0) | 1.2 | 120초 NAVIGATING, `linear.x` max 0.134 | 38 | 데드존 탈출·전진 시작, 그러나 미도달 |
+| 3 | (0.0393381, 0.0393381) | 1.2 | 180초 NAVIGATING, `linear.x` max **0.150**(포화) | 49 | 🔴 **제자리 좌우 발진** |
+
+**🔴 근본 원인 — 회전 액추에이터가 bang-bang이다.**
+
+| 명령 | 바퀴 rad/s | PWM | 실제 |
+|---|---|---|---|
+| < 0.68 rad/s | < 2.0 | < 20 | **안 돎** (Phase 1 실측 데드존) |
+| 0.68 ~ 1.2 | 2.0 ~ 3.5 | 20 ~ 35 | 돎 |
+
+사용 가능한 제어 대역이 0.68~1.2 rad/s뿐이라 사실상 on/off다. 여기에 rf2o의 지연된
+yaw 피드백이 겹쳐 DWB의 비례 제어가 리미트 사이클에 빠진다.
+
+`Oscillation` 크리틱은 이미 critics 목록에 있으나 **기본값 `oscillation_reset_dist: 0.05 m`**
+때문에 무력화된다 — 위치가 0.1 m씩 흔들리므로 매 주기 잠금이 풀린다.
+
+또 **위치추정 자체가 튄다**: PWM 8(데드존 미만, 물리적으로 안 도는 상태)인데
+`map→base` yaw가 2초에 33° 점프하고 되돌아왔다. slam_toolbox가 두 가설 사이를 스냅한다.
+지도가 드리프트 있는 오도메트리로 만들어져 내부 정합이 완전하지 않은 것으로 보인다.
+
+<details><summary>시도 3 원본 — 제자리 발진 궤적 (`S15_monitor.log`)</summary>
+
+```
+   t[s] | scanHz odomHz | map->base x,y,yaw          | pwm L,R
+ 1413.4 |   11.3   10.0 | +0.837 +2.778   +61.8deg   |  -16,  16
+ 1415.4 |   11.3   10.0 | +0.720 +2.894   +24.2deg   |   12, -12
+ 1417.4 |   11.3   10.0 | +0.800 +2.789   +55.3deg   |   -8,  12
+ 1419.4 |   11.3   10.0 | +0.719 +2.865   +30.6deg   |   20, -20
+ 1421.4 |   11.3   10.0 | +0.815 +2.782   +61.0deg   |  -20,  24
+ 1423.4 |   11.7   10.0 | +0.706 +2.889   +26.7deg   |   24, -20
+ 1425.5 |   11.3   10.0 | +0.781 +2.799   +53.8deg   |  -24,  24
+ 1427.5 |   11.3   10.0 | +0.710 +2.875   +29.8deg   |   28, -28
+ 1429.5 |   11.3   10.0 | +0.753 +2.787   +52.3deg   |  -28,  32
+ 1431.5 |   11.3   10.0 | +0.704 +2.870   +32.2deg   |   32, -32
+ → PWM 부호가 2초마다 반전, 위치는 (0.63~0.84, 2.77~2.89)에서 벗어나지 않음
+```
+</details>
+
+<details><summary>시도 3 계약 검증 원본 (`S18_navverify.log`)</summary>
+
+```
+=== 결과 ===
+  nav_status 전이: NAVIGATING
+  /cmd_vel 수신    : 3463건
+  linear.x 범위    : +0.0000 ~ +0.1500 m/s
+  |angular.z| 최대 : 1.2000 rad/s
+  PWM 최대         : 49
+
+  🔴 NAVIGATING → SUCCEEDED  ← 위반
+  ✅ 0 <= linear.x <= 0.15
+  ✅ |angular.z| <= 1.2
+  ✅ 음수 linear.x 0건        ← 후진 금지 설계 검증됨
+
+  종합: 🔴 불합격
+```
+</details>
+
+<details><summary>시도 1 원본 — 데드존 미만으로 회전 불가 (`S14_navverify.log`)</summary>
+
+```
+  [   3.6s] nav_status → NAVIGATING
+  [  10.1s] NAVIGATING  cmd_vel   130건  lin [+0.000, +0.000]  |ang| max 0.600  pwm max 17
+  ...
+  [ 140.3s] NAVIGATING  cmd_vel  2552건  lin [+0.000, +0.016]  |ang| max 0.600  pwm max 17
+  → |angular.z|가 150초 내내 상한 0.6에 붙어 있었고 PWM 17로 데드존 미만
+```
+</details>
+
+### ⑤ 때문에 바꾼 `nav2_params.yaml` (커밋 `50163ce`)
+
+| 파라미터 | 이전 | 이후 | 근거 |
+|---|---|---|---|
+| `FollowPath.max_vel_x` | 0.3 | **0.15** | 회전 확보를 위해 절반 (사용자 지시) |
+| `FollowPath.max_vel_theta` | 0.6 | **1.2** | PWM 17 → 35, 데드존 탈출 |
+| `FollowPath.max_speed_xy` | 0.3 | 0.15 | 위와 정합 |
+| `FollowPath.acc_lim_theta` | 0.8 | **1.6** | 데드존 구간 빠르게 통과 |
+| `velocity_smoother.max_velocity` | [0.3,0,0.6] | **[0.15,0,1.2]** | ROS 쪽 유일한 클램프 |
+| `behavior_server.max_rotational_vel` | 0.5 | **1.2** | velocity_smoother 우회 경로 |
+| `behavior_server.min_rotational_vel` | 0.15 | **0.70** | 0.15는 PWM 4로 데드존. 파일의 `TODO-팀확인: 모터 데드밴드 실측 후 조정` 해소 |
+| 브릿지 `max_wheel_rad_s` (⑤용) | 2.0 | **6.0** | 회전 1.2는 바퀴 3.51, 조합 명령 최대 5.82 → 비례 축소 없이 통과 |
+
+🔴 **계약 변경**: `docs/ROS2_API.md` ROS2-10의 `|ω| ≤ 0.6`이 **≤ 1.2**로 바뀌었다.
+`/cmd_vel`은 EM 내부(Nav2→브릿지) 경로지만 명세 문서에 기재돼 있으므로 갱신 필요.
+
+### 다음 세션 우선순위 (⑤ 해결)
+
+1. **휠 오도메트리** — 근본 해결. STATUS에 `enc L/R`이 이미 올라온다(`enc L=8010097 R=10030923`).
+   ⚠️ 사용자 확인: **현재 작업 불가 상태**
+2. **데드존 보상** — 브릿지 또는 펌웨어에서 `|목표| > 0`일 때 최소 PWM(≈20)을 깔아 주면
+   회전 제어 대역이 0부터 열린다. bang-bang이 비례 제어로 바뀌므로 발진이 사라진다
+3. **`Oscillation` 크리틱 실효화** (yaml만) — `oscillation_reset_dist: 0.05 → 0.3`,
+   `oscillation_reset_angle: 0.2 → 0.5`. 위치 지터로 잠금이 풀리는 것을 막는다
+4. **`PathAlign.scale 32` / `GoalAlign.scale 24` 하향** — 회전 지향 압력을 줄인다
+5. **지도 재작성 검토** — 위치추정 스냅이 지도 내부 정합 문제일 수 있다.
+   1·2 해결 후 재매핑하면 지도 품질이 올라간다
+
+### 세션 중 발견한 부수 사실
+
+- **`/stm/pwm`은 `Int16MultiArray`다** (`Int32MultiArray` 아님). 이전 기록에서 "pwm이 항상 0"이라고
+  본 것은 구독 타입 불일치였다 — 브릿지 버그가 아니다. **정정**
+- `ROS_DOMAIN_ID=42`로 전환 후 노트북 RViz가 안 보였다. 젯슨 쪽은 무죄(`ufw`·`nftables` inactive,
+  멀티캐스트 `239.255.0.1` 가입, 노트북 `192.168.0.79` ping 3/3). 공유기 멀티캐스트 차단 의심 →
+  유니캐스트 우회 XML을 `ros2_ws/log/phase3_20260807/fastdds_peer_laptop.xml`에 준비
+- **젯슨 로컬 모니터(`:0`)로 RViz를 띄울 수 있다** — `launch_rviz.sh`가 `DISPLAY=:0` +
+  `XAUTHORITY=/run/user/1000/gdm/Xauthority`로 SSH 세션에서도 로컬 화면에 띄운다. 네트워크 무관
+- 합판 절단면이 라이다에서 **좌 0.165 m / 우 0.27 m**로 비대칭. 막힌 총량 약 30°(8%), 남는 시야 330°
+- 기둥은 **2020 프로파일 2개**(좌 −81.6~−73.4°, 우 +70.1~+78.3°, 8.2° = 19.8 mm).
+  가운데가 무응답으로 갈라져 4개로 보였던 것은 T슬롯 홈
+
+- **증거 파일** (`.gitignore`의 `log/`로 커밋 제외): `ros2_ws/log/phase3_20260807/`
+  `S11_save_map.log`(지도 저장), `S14/S17/S18_navverify.log`(Nav2 3회), `S15_monitor.log`(발진 궤적),
+  `S16_bridge.log`(STATUS·엔코더), `S5_box.log`·`S5_detail.log`(합판·기둥 실측),
+  `S6_drift_box.log`·`S7_drift_clear.log`(드리프트), 재현용 스크립트 일체
+  (`restart_all42.sh`, `launch_teleop.sh`, `save_map.sh`, `nav_verify.py`, `monitor.py`, `drift.py`)
+
+---
+
+## 2026-08-07 15:25 — ✅ BE: status/nav-result 상행 수신 + E2E 재검증 (Claude)
+
+- **배경**: EM이 ROS2 `/cart/nav_status`(ROS2-16, 7종)를 MQTT `status/nav-result`로 중계해주기로
+  확정(2026-08-07). 직전 E2E에서 확인된 공백 — BE가 ARRIVED를 못 보내 도착 안내가 안 뜨고
+  `carts.operation_status`가 NAVIGATING에 남던 문제 — 을 메우는 수신부 구현
+- **변경**:
+  - `MqttNavResultMessageHandler` 신규 — `{"status":"..."}` JSON과 평문 문자열(std_msgs/String
+    브리지 대비) 모두 수용, `mqtt.cart-id`로 귀속 (기존 수신 4종과 같은 단일 카트 제약)
+  - `NavigationService.applyCartNavResult` — NAVIGATING→WS STARTED / SUCCEEDED→ARRIVED /
+    CANCELED→CANCELLED / ABORTED·REJECTED·NAV2_UNAVAILABLE→FAILED(+failReason) / IDLE·미지의 값 무시.
+    종료 상태는 세션을 닫고 카트를 IDLE로. **세션이 없으면 이벤트 없이 DB 정리만** —
+    REST 취소 직후 카트의 CANCELED 확인 응답이 중복 CANCELLED를 만들지 않게
+  - `mqtt.nav-result-topic=status/nav-result` 프로퍼티 + MqttConfig 구독·라우팅
+  - `scripts/fake_jetson.py` — MOVE 수락 시 NAVIGATING, 도착 시 SUCCEEDED, 취소 시 CANCELED,
+    target 없는 MOVE엔 REJECTED 발행
+- **명령·결과**: `gradlew.bat test` → **BUILD SUCCESSFUL, 96 tests 0 failures**
+  (신규 4: SUCCEEDED 종결·세션 재사용 / ABORTED 사유 / 세션 없는 CANCELED 무이벤트 정리 / IDLE·미지 값 무시)
+- **E2E 재검증** (BE·가짜 Jetson 재기동, FE 8081 실연동):
+  - 2구역 클릭 → 마커 점진 이동(80%→68.9→56.9→49.5% 정지) → 토스트 "2구역으로 …" →
+    **도착 모달 "2구역에 도착했어요!"** — 직전 로그에서 "안 뜬다"던 공백이 실경로로 메워짐
+  - 반납 테이블 클릭 → "반납 테이블로 …" → **"반납 테이블에 도착했어요" 토스트만** (모달 없음),
+    마커 정확히 (93.7%, 23%) 정지
+  - BE 로그: `[MQTT RECEIVE] topic=status/nav-result {"status":"NAVIGATING"}` → "카트 주행 시작" /
+    `{"status":"SUCCEEDED"}` → "카트 주행 종료 status=ARRIVED" (navigationId 1·2 모두)
+
+<details>
+<summary>BE 로그 발췌</summary>
+
+```text
+이동 명령 접수 cartId=1, navigationId=2, zoneId=1, pixel=(937.0, 138.0), target=Target[x=9.37, y=4.62]
+[MQTT RECEIVE] topic=status/nav-result, payload={"status": "NAVIGATING", ...}
+카트 주행 시작 cartId=1, navigationId=2
+[MQTT RECEIVE] topic=status/nav-result, payload={"status": "SUCCEEDED", ...}
+카트 주행 종료 cartId=1, navigationId=2, status=ARRIVED, failReason=null
+```
+
+</details>
+
+## 2026-08-07 15:05 — ✅ FE: 테이블행 이동의 안내 문구 분리 (Claude)
+
+- **배경**: 사서/반납 테이블 버튼을 눌러도 안내가 "1구역으로 이동을 시작해요 → 1구역에 도착했어요
+  (꽂을 책 0권)"로 나왔다. NAV-01·WS-FE-06에는 구역 id만 있어 BE는 테이블행임을 모른다 — FE가 기억해야 한다
+- **변경**:
+  - `cartMapStore.landmarkDestination` 신규 — `startMove('반납 테이블')`로 기록, 이동 종료
+    (ARRIVED·CANCELLED·FAILED·워치독)마다 소거. **테이블행 도착은 구역 정리 모달(arrivalZone)을
+    열지 않는다** (테이블에는 꽂을 책이 없어 "0권" 모달이 소음)
+  - `useCartMapEvents`: ARRIVED 수신 시 landmarkDestination이 있으면 `"○○에 도착했어요"` 토스트
+    (applyNavigation이 값을 지우기 전에 읽는다)
+  - `MapPanel`: 테이블 클릭 시 시작 토스트를 `"○○로 카트가 이동을 시작해요"`로. 요청-응답 사이
+    이름 전달은 ref (리렌더가 필요 없는 값)
+- **명령·결과**: `pnpm test --run` → **20 files, 137 tests, 0 failures** (신규 3: 테이블행 도착이
+  모달을 안 여는 것 / 취소 후 구역 이동은 다시 여는 것 / 워치독 소거) / `tsc` 0 / `eslint` 0
+- **브라우저 검증** (dev 8081, MSW on, MutationObserver로 토스트 수집):
+  사서 테이블 클릭 → `"사서 테이블로 카트가 이동을 시작해요"` → `"사서 테이블에 도착했어요"`,
+  ARRIVAL NOTICE 모달 미표시 확인. 구역(통로) 클릭은 기존대로 "N구역…" 안내 유지
+
+<details>
+<summary>브라우저 관찰 원본</summary>
+
+```json
+{
+ "toasts": [
+  "반납 테이블에 도착했어요",
+  "사서 테이블로 카트가 이동을 시작해요",
+  "사서 테이블에 도착했어요"
+ ],
+ "zoneModalOpen": false
+}
+```
+
+(첫 줄 "반납 테이블에…"은 같은 시각 사람이 직접 누른 클릭의 도착 토스트)
+
+</details>
+
+## 2026-08-07 15:00 — ✅ E2E: FE→BE→MQTT→가짜 Jetson 왕복 실구동 (Claude)
+
+- **목적**: 실물 카트 없이 전체 사슬 검증 — FE 클릭이 MQTT 명령으로 하행하고,
+  Jetson(SLAM)의 미터 좌표 위치가 BE에서 png 픽셀로 변환돼 FE 마커를 움직이는지.
+  **FE 마커는 낙관 이동 없이 수신 위치만 따라가야 한다**
+- **구성** (모두 로컬):
+  - MySQL `chollae`에 [test-room-3zones.sql](../backend/src/main/resources/db/test-room-3zones.sql)
+    적용 → Z1(id 1)·Z2(id 3)·Z3(id 4), 지도 meta 1000×600·resolution 0.01·origin (0,0)
+  - `scripts/fake_jetson.py` 신규 — cmd/move/cart 구독, status/cart 하트비트 5초,
+    status/position **SLAM 미터** 발행(이동 5Hz/정지 1Hz), MOVE target으로 0.5m/s 등속 이동
+  - BE `bootRun` — 환경변수로 로컬 브로커·`MQTT_POSITION_UNIT=meters` 오버라이드
+    (backend/.env은 원격 브로커·옛 토픽명이라 손대지 않음)
+  - FE dev 8081, `VITE_ENABLE_MSW=false` (vite proxy → :8080)
+- **관측된 사슬** (사서 테이블 클릭 1회):
+  1. FE → `POST /navigation {"zoneId":4,"x":225,"y":138}` (Z3 + 고정 정차점)
+  2. BE → `cmd/move/cart {"requestId":1,"command":"MOVE","zoneId":4,"target":{"x":2.25,"y":4.62},"pixel":{"x":225.0,"y":138.0}}`
+     — 픽셀→미터 역변환 정확 (225×0.01 / (600−138)×0.01)
+  3. 가짜 Jetson: target까지 등속 이동하며 미터 좌표 발행
+  4. BE: `raw=(2.25, 4.62) → image=(225.00, 138.00), detectedZoneId=4, stable=true` — 미터→픽셀
+     복원과 구역 판정(Z3) 모두 정확
+  5. FE 마커: 80% → 72.05 → 64.95 → 59.95 → 49.81 → 39.74 → 29.68 → **22.5% 정지** (1초 간격 샘플)
+     — 클릭 시점에 점프하지 않고 WS 위치 스트림만 따라 점진 이동, 시작 토스트
+     "사서 테이블로 카트가 이동을 시작해요" 확인
+- **확인된 공백 (실 BE 경로)**: BE가 `NAVIGATION_STATUS_UPDATED`를 ACCEPTED/CANCELLED만 발행
+  (STARTED/ARRIVED는 카트 상행 결과 토픽 미확정) → 도착 토스트·도착 모달이 실서버에서는 뜨지 않고,
+  DB `carts.operation_status`도 NAVIGATING에 머문다. FE는 30초 워치독이 상태를 리셋.
+  → EM과 상행 결과 토픽(예: status/nav-result) 확정이 다음 과제
+
+<details>
+<summary>실측 로그 발췌</summary>
+
+```text
+# 가짜 Jetson
+명령 수신 cmd/move/cart: {"requestId": 1, "command": "MOVE", "zoneId": 4,
+  "target": {"x": 2.25, "y": 4.62}, "pixel": {"x": 225.0, "y": 138.0}}
+이동 시작 → SLAM(2.250, 4.620)
+위치 발행 {'x': 7.501, 'y': 4.894, ...} ... 도착 x=2.250 y=4.620
+
+# BE
+카트 위치 수신 cartId=1, raw=(8.0, 4.92), image=(800.00, 108.00), unit=meters, detectedZoneId=null
+카트 위치 수신 cartId=1, raw=(2.25, 4.62), image=(225.00, 138.00), unit=meters, detectedZoneId=4, stable=true
+
+# FE 마커 샘플 (1초 간격, style.left)
+80% → 72.05% → 64.95% → 59.95% → 49.81% → 39.74% → 29.68% → 22.5% (이후 고정)
+```
+
+</details>
+
+## 2026-08-07 14:20 — ✅ FE: 새 평면도(1000×600) 좌표 실측 교정 + 브라우저 검증 (Claude)
+
+- **배경**: 사람이 `assets/map.png`를 1000×600 신판으로 교체. 어제 눈짐작으로 넣은 좌표를
+  실측으로 교정하고 브라우저에서 동작 확인
+- **측정 방법**: dev 서버(MSW on)에서 지도 페이지의 `<img>`를 canvas에 그려 **1px 픽셀 스캔** —
+  색 분류(청록=통로, 노랑·주황=테이블, 진회색=서가)로 각 영역의 정확한 바운딩 박스를 얻음
+- **교정** (0.1~0.5% 오차):
+  - `ZONE_RECTS`: Z1 left 75.6→75.5, Z2 39.0→38.9, Z3 2.5→2.4, top 20.3→20.2, height 74.2→73.8
+  - `MAP_LANDMARKS`: 사서 width 25.8→25.7, 반납 left 87.5→87.4·width 12.5→12.6
+  - SQL 폴리곤: 실측 픽셀 [755·389·24, 121~564]로, 책장 y 343→342
+- **오버레이 정합 검증** (버튼 rect 내부 픽셀 중 기대 색 비율): Z1~Z3 **99.1~99.2%**,
+  사서 테이블 96%, 반납 테이블 91.4% (모서리 라운딩·글자 픽셀 제외하면 사실상 전면 일치, ≤1px)
+- **기능 검증** (XHR 후킹으로 NAV-01 페이로드 확인):
+  - 사서 테이블 클릭 → `{"zoneId":3,"x":225,"y":138}` = Z3 + 고정 정차점 (22.5%, 23%) ✓
+  - 반납 테이블 클릭 → `{"zoneId":1,"x":937,"y":138}` = Z1 + 고정 정차점 (93.7%, 23%) ✓
+  - 화면: "3구역에 도착했어요"(800번대 책 2권 표시) / "1구역에 도착했어요" + 카트 마커가
+    반납 테이블 바로 아래 정차, Z1 활성 테두리 (스크린샷은 세션 대화에 있음)
+- **단위 테스트 재실행**: `pnpm test --run` → **20 files, 134 tests, 0 failures**
+- 검증용으로 잠깐 켠 `.env.development.local`의 `VITE_ENABLE_MSW`는 false로 원복
+
+<details>
+<summary>실측 원본 (canvas 1px 스캔, % = px/10 · px/6)</summary>
+
+```json
+{"Z3":{"px":[24,121,236,564],"pct":[2.4,20.2,23.6,94]},
+ "Z2":{"px":[389,121,601,564],"pct":[38.9,20.2,60.1,94]},
+ "Z1":{"px":[755,121,967,564],"pct":[75.5,20.2,96.7,94]},
+ "shelves_800_200":{"px":[249,231,375,453]},
+ "shelves_100_000":{"px":[615,231,741,453]},
+ "librarian":{"px":[0,0,257,90],"pct":[0,0,25.7,15]},
+ "return":{"px":[874,0,999,90],"pct":[87.4,0,99.9,15]}}
+```
+
+NAV-01 실측 페이로드:
+
+```json
+[{"method":"POST","url":"/api/carts/1/navigation","body":{"zoneId":3,"x":225,"y":138}},
+ {"method":"POST","url":"/api/carts/1/navigation","body":{"zoneId":1,"x":937,"y":138}}]
+```
+
+</details>
+
+## 2026-08-07 13:45 — ✅ FE+BE: 테이블 고정 정차점 + 평면도 1000×600 교체 (Claude)
+
+- **변경** (`backend/feature/navigation-goal-snap` 이어서):
+  - 스냅 여유 기본값 0.3 → **0.5 m** (사람이 정한 값)
+  - `zones.ts`: 새 평면도(1000×600) 기준으로 `ZONE_RECTS`·`CORRIDOR_Y`·`START_POSITION` 재측정,
+    `MAP_LANDMARKS` 신규 — 사서/반납 테이블의 클릭 영역 + 고정 정차점
+  - `MapPanel`: 테이블 버튼 2개 (클릭 지점이 아니라 `landmark.stop`을 보낸다)
+  - `floorPlanImage.ts` `FLOOR_PLAN_SIZE` 1707×921 → 1000×600, scss `aspect-ratio` 동반 수정
+  - `test-room-3zones.sql`: 존 폴리곤·책장 좌표를 평면도 격자에서 측정해 채움
+- **정차점 불변식**: 정차점이 구역 밖이면 BE `snapIntoZone`이 조용히 옮겨버리므로,
+  "정차점은 반드시 어느 `ZONE_RECTS` 안"을 단위 테스트로 고정했다 (`zones.test.ts`)
+- **명령·결과**:
+  - `frontend: pnpm test --run` → **20 files, 134 tests, 0 failures** (신규 5)
+  - `frontend: tsc --noEmit` 0 / `eslint` 0
+  - `backend: gradlew.bat test` → **24 classes, 92 tests, 0 failures**
+    (스냅 여유 0.5m 반영: 기대값 6.0px → 10.0px)
+- **⚠️ 브라우저 확인은 못 했다.** `frontend/src/assets/map.png`가 아직 옛 그림(1707×921)이다.
+  새 1000×600 파일로 교체하기 전 스크린샷은 클릭 영역이 어긋난 모습이라 검증 가치가 없다 —
+  파일 교체 후 지도 화면에서 테이블 버튼 위치와 정차 지점을 눈으로 확인해야 한다
+
+<details>
+<summary>전체 출력</summary>
+
+```text
+$ ruff check --config pyproject.toml embedded/Lidar/src/choll_mqtt_bridge/
+All checks passed!
+
+$ python3 -m pytest embedded/Lidar/src/choll_mqtt_bridge/test/test_bridge_logic.py -q
+.....................                                                    [100%]
+21 passed in 0.02s
+$ pnpm test --run
+ Test Files  20 passed (20)
+      Tests  134 passed (134)
+   Duration  28.22s
+
+$ pnpm exec tsc --noEmit
+(출력 없음)
+
+$ pnpm lint
+> eslint .
+(출력 없음)
+
+$ gradlew.bat test
+BUILD SUCCESSFUL in 30s
+
+$ awk 집계 (build/test-results/test/*.xml)
+classes=24 tests=92 skipped=0 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-07 12:14 — ✅ BE: 구역 밖 클릭 목적지 스냅 (Claude)
+
+- **배경**: FE가 지도 전체 자유 클릭으로 바뀌면서(`897a9b6`) 서가·테이블 위 좌표도 목적지로
+  올라온다. `MapPanel.tsx:90` 주석은 "BE가 가장 가까운 이동 가능 지점으로 스냅한다"고 적었지만
+  **BE에 그 로직이 없었다** — 장애물 안이 그대로 nav goal로 하행되던 상태
+- **변경** (`backend/feature/navigation-goal-snap`, 베이스 `d8f4deb`):
+  - `PolygonZoneMatcher.closestPointInside(polygonJson, x, y, margin)` 신규 — 폴리곤 안이면
+    그대로, 밖이면 경계 최근접점을 구해 중심 쪽으로 margin만큼 당긴다. 오목 폴리곤에서 당긴 점이
+    다시 밖으로 나가면 중심으로 폴백. 폴리곤 파싱을 `vertices()`로 모으고 null·빈 문자열·깨진
+    꼭짓점을 예외 대신 빈 목록으로 다루도록 정리(기존 `contains`는 꼭짓점이 깨지면 예외를 던졌다)
+  - `NavigationService.snapIntoZone` — 클릭 좌표를 **요청에 실린 구역** 안으로 스냅.
+    다른 구역으로 튀지 않게 한 이유: FE가 이미 가장 가까운 구역을 zoneId로 보내고 그 이름으로
+    사서에게 안내하므로 목적지가 다른 구역이면 안내와 어긋난다
+  - 여유는 `navigation.snap-margin-meters`(기본 0.3) → 구역이 속한 지도의 resolution으로 픽셀 환산
+  - 하행 픽셀을 소수 2자리로 정리 — `0.3 / 0.05 = 5.999999999999999`가 MQTT에 실리던 것
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21, Gradle 9.5.1
+- **결과**: **24 classes, 92 tests, 0 failures** (신규 8: 폴리곤 스냅 5 + NAV 스냅 3)
+- **1차 실패 → 수정**: `snapsClickOutsideZoneToNearestPointInsideZone`가
+  `pixel=Pixel[x=5.999999999999999, y=50.0]`로 실패. 테스트를 느슨하게 고치는 대신 하행 값
+  자체를 픽셀 2자리로 반올림(`roundPixel`) — EM이 읽는 페이로드에 부동소수점 노이즈를 남기지 않는다
+
+<details>
+<summary>1차 실패 출력</summary>
+
+```text
+NavigationServiceTest > snapsClickOutsideZoneToNearestPointInsideZone() FAILED
+    java.lang.AssertionError at NavigationServiceTest.java:186
+
+Expecting actual:
+  "MoveCommand[requestId=1, command=MOVE, zoneId=7, target=null, pixel=Pixel[x=5.999999999999999, y=50.0]]"
+to contain:
+  "pixel=Pixel[x=6.0, y=50.0]"
+
+37 tests completed, 1 failed
+BUILD FAILED in 59s
+```
+
+</details>
+
+## 2026-08-07 10:05 — 🔴→✅ EM Phase 3-③ 드리프트 원인 규명: 드라이버 마스킹이 rf2o를 망가뜨림 → `scan_mask_node`로 이관 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble. 브랜치 `em/feature/motor-Lidar-integrated` @ `a959a1c`.
+- **발단**: 마스킹 확정 후 SLAM 스택(`bringup.launch.py`)을 올려 RViz용 `map` 프레임을
+  만들려는데, **카트가 완전히 정지한 상태에서 오도메트리가 계속 회전**했다.
+
+### 통제 실험 4회 — 정지 상태 드리프트
+
+| # | 조건 | 30초 yaw 변화 | 위치 | `map→base` vs `odom→base` | 판정 |
+|---|---|---|---|---|---|
+| 1 | 드라이버 `ignore_array` 7섹터, `invalid_range_is_inf: false` | **−72 → −84° (−12°, 단조)** | 8 cm | −84° vs −28° (SLAM이 필사적 보정) | 🔴 |
+| 2 | 같은 마스킹 + `invalid_range_is_inf: true` | −45 → −35° (+10°) | 6 cm | 큰 차이 | 🔴 |
+| 3 | **마스킹 없음** | −6.1 → −6.6° (진동, 누적 0) | 7 cm | **완전 일치** | ✅ |
+| 4 | **`scan_mask_node` 이관** (rf2o는 원본) | −5.7 → −8.7° 사이 진동(60초, 누적 0) | 3 cm/55초 | **완전 일치** | ✅ |
+
+**결론: 드라이버 `ignore_array` 마스킹이 rf2o 스캔매칭을 망가뜨린다.**
+스캔의 19.3%가 무효가 되면 rf2o가 range 이미지 경계에서 허위 gradient를 만든다.
+반대로 구조물 포인트는 센서 좌표계에서 완전히 고정이라 스캔매칭을 **붙잡아 주는**
+역할을 하고 있었다 — 실험 3에서 `map→base`가 `odom→base`와 정확히 일치한 것이 근거
+(slam_toolbox가 보정할 게 없었다).
+
+### 부수 발견 — `invalid_range_is_inf`는 마스킹 빔에 적용되지 않는다
+
+`true`로 바꿔도 스캔에 여전히 `zero: 199 / inf: 0`. SDK가 `range=0.0`을 직접 박고
+드라이버의 inf 변환은 거기에 적용되지 않는다. **실험 1과 2의 차이는 파라미터 효과가
+아니라 실행별 산포였다.**
+
+### 거리 기반 필터를 쓰지 않은 이유
+
+`slam_toolbox min_laser_range` / Nav2 `obstacle_min_range`를 0.5로 올리면 구조물이
+사라지지만 **도서관 서가 통로에서 서가 자체가 라이다에서 0.3~0.4 m 거리라 벽이
+지워진다**(카트 폭 0.64 m). 구조물은 특정 각도 섹터에만 있으므로 각도로만 잘라야 한다.
+
+### 채택한 구조 — 소비자별 분리
+
+```
+드라이버 → /scan_raw ──→ rf2o                     (전체 스캔 → 드리프트 0)
+                └→ scan_mask_node → /scan → slam_toolbox / Nav2 / AI
+                    (7섹터 83/430빔=19.3%를 NaN)
+```
+
+- `/scan`이 계약 토픽(ROS2-07)이라 **토픽명·타입·QoS·발행 주기 불변** → 구독 측 영향 0
+- 마스킹 값은 **NaN**: `0.0`은 rf2o처럼 유효값으로 오해할 소비자가 있고, `inf`는 Nav2
+  obstacle_layer가 `range_max − eps`로 바꿔 **raytrace 클리어링**을 유발해 그 방향의
+  실제 장애물을 지운다. NaN은 laser_geometry·RViz·costmap 모두 그냥 버린다.
+- 신규 파일 `src/choll_slam_bringup/scripts/scan_mask_node.py` (ament_cmake라
+  `install(PROGRAMS)`로 설치). `ruff check`·`ruff format --check`·`py_compile` 통과.
+
+<details><summary>실험 4 원본 — `scan_mask_node` 60초 (`S3_drift_60s.log`)</summary>
+
+```
+ t[s] |      odom->base x,y,yaw      |      map->base x,y,yaw       | scanHz
+  5.0 |   -0.161 -0.149   -5.74deg   |   -0.161 -0.149   -5.74deg   | 11.36
+ 10.0 |   -0.153 -0.156   -7.16deg   |   -0.153 -0.156   -7.16deg   | 11.38
+ 15.0 |   -0.164 -0.155   -5.18deg   |   -0.164 -0.155   -5.18deg   | 11.39
+ 20.0 |   -0.161 -0.158   -3.69deg   |   -0.161 -0.158   -3.69deg   | 11.34
+ 25.0 |   -0.168 -0.157   -3.61deg   |   -0.168 -0.157   -3.61deg   | 11.35
+ 30.0 |   -0.136 -0.162   -4.72deg   |   -0.136 -0.162   -4.72deg   | 11.36
+ 35.0 |   -0.134 -0.166   -3.91deg   |   -0.134 -0.166   -3.91deg   | 11.37
+ 40.0 |   -0.133 -0.169   -3.26deg   |   -0.133 -0.169   -3.26deg   | 11.34
+ 45.0 |   -0.137 -0.172   -2.38deg   |   -0.137 -0.172   -2.38deg   | 11.35
+ 50.0 |   -0.146 -0.174   -4.00deg   |   -0.146 -0.174   -4.00deg   | 11.36
+ 55.0 |   -0.161 -0.178   -6.21deg   |   -0.161 -0.178   -6.21deg   | 11.34
+ 60.0 |   -0.171 -0.176   -8.67deg   |   -0.171 -0.176   -8.67deg   | 11.35
+```
+</details>
+
+<details><summary>실험 1 원본 — 드라이버 마스킹 (`S2_drift.log`)</summary>
+
+```
+ t[s] |      odom->base x,y,yaw      |      map->base x,y,yaw       | scanHz
+  5.0 |   -0.812 +0.540  -72.03deg   |   -0.588 +0.030  -33.44deg   | 11.75
+ 10.0 |   -0.811 +0.546  -75.50deg   |   -0.590 +0.035  -36.91deg   | 11.37
+ 15.0 |   -0.819 +0.574  -77.70deg   |   -0.615 +0.052  -39.11deg   | 11.38
+ 20.0 |   -0.822 +0.590  -79.67deg   |   -0.627 +0.063  -41.08deg   | 11.33
+ 25.0 |   -0.832 +0.607  -81.82deg   |   -0.824 +0.031  -25.64deg   | 11.35
+ 30.0 |   -0.836 +0.611  -83.99deg   |   -0.830 +0.030  -27.80deg   | 11.32
+```
+</details>
+
+<details><summary>실험 3 원본 — 마스킹 없음 (`S2_drift_nomask.log`)</summary>
+
+```
+ t[s] |      odom->base x,y,yaw      |      map->base x,y,yaw       | scanHz
+  5.0 |   -0.029 +0.023   -6.11deg   |   -0.029 +0.023   -6.11deg   | 11.36
+ 10.0 |   -0.039 +0.030   -6.94deg   |   -0.039 +0.030   -6.94deg   | 11.38
+ 15.0 |   -0.052 +0.032   -7.70deg   |   -0.052 +0.032   -7.70deg   | 11.39
+ 20.0 |   -0.064 +0.031   -7.06deg   |   -0.064 +0.031   -7.06deg   | 11.34
+ 25.0 |   -0.066 +0.024   -6.97deg   |   -0.066 +0.024   -6.97deg   | 11.35
+ 30.0 |   -0.071 +0.026   -6.63deg   |   -0.071 +0.026   -6.63deg   | 11.36
+```
+</details>
+
+<details><summary>이관 후 `/scan` 마스킹 재검증 + 배선 (`S3_mask_verify_node.log`)</summary>
+
+```
+[scan_mask_node]: scan_mask_node: /scan_raw -> /scan, 섹터 7개
+  [(-180.0,-171.0),(-163.0,-146.0),(-140.0,-136.0),(-90.0,-71.0),(71.0,82.0),(163.0,169.0),(176.0,180.0)]
+[scan_mask_node]: 마스킹 인덱스 재계산: 83/430 빔 (19.3%), inc=0.8392deg
+
+/scan_raw : Publisher 1 / Subscription 2   (드라이버 → rf2o + scan_mask_node)
+/scan     : Publisher 1 / Subscription 1   (scan_mask_node → slam_toolbox)
+
+=== (A) 9개 자기차폐 구간 소멸 확인 === → 전 구간 생존 0개  ✅
+=== (B) 남은 0.6 m 이내 상시 포인트 === → ✅ 없음
+=== (C) 살아있는 시야 품질 ===
+  AI 조회창 ±20°       46/ 48 ( 95.8%)  거리 2.72~3.11 m
+  전방 180°          138/214 ( 64.5%)  거리 1.00~3.85 m
+  전체 360°          231/430 ( 53.7%)  거리 1.00~7.99 m
+```
+</details>
+
+- **남은 잔차(허용)**: yaw ±3° 진동, 위치 3 cm/분. 누적되지 않으며 slam_toolbox가
+  odom을 사전값으로만 쓰므로 매핑 가능. 실행별 초기 오프셋(−6°/−45°/+15.7°)은
+  기동 후 첫 10~15초 수렴 과도구간이며 지도 원점이 그 시점에 잡히므로 무해.
+- **⚠️ 미확정**: 방 안에 사람이 움직이면 rf2o가 그걸 따라갈 수 있다. 매핑 중 조작자
+  다리가 스캔에 들어가는 영향은 이번에 분리 측정하지 못했다 → 지도 품질로 판정.
+
+---
+
+## 2026-08-07 09:20 — ✅ EM Phase 3-③ 라이다 자기차폐 마스킹 확정: 9개 구간 전부 소멸, 0.6 m 이내 상시 포인트 0 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble. 브랜치 `em/feature/motor-Lidar-integrated` @ `08459c3`.
+- **대상**: `embedded/Lidar/src/choll_slam_bringup/config/x4pro.yaml` 의 `ignore_array`
+  (`--symlink-install`이라 재빌드 없이 노드 재기동만으로 반영)
+- **목적**: 08-06 선반 카트 조립 후 자기차폐 재산정. 0.12~0.18 m 포인트는 `base_link`
+  기준 footprint 안쪽이라 마스킹 없이 매핑하면 Nav2 local costmap이 로봇을 상시
+  장애물로 둘러싸 모든 경로 계획이 실패한다.
+
+### 결과 요약
+
+| 단계 | `ignore_array` | 결과 |
+|---|---|---|
+| 구 값 (08-05 오링카) | `-78,-70,72,79` | 🔴 좌 기둥 `-77.49°` 잔존, 신규 자기차폐 8구간 노출 |
+| 1차 확정 | `...,-90,-75,77,82,...` | ✅ 9구간 소멸 / 🔴 구 마스킹에 가려졌던 ±74° 2쌍 노출 |
+| **최종** | `-180,-171,-163,-146,-140,-136,-90,-71,71,82,163,169,176,180` | ✅ **9구간 소멸 + 0.6 m 이내 상시 포인트 0** |
+
+- 총 마스킹 **71.6° / 360° = 19.9%**
+- 최소 관측 거리 **0.13 m → 1.00 m** (구조물 완전 제거)
+- **AI 조회창(실측 화각 40.1° → ±20°) 유효율 95.8%, 거리 2.72~3.11 m** — 08-04에 제기한
+  Phase 2 조회창 블로커가 마스킹 후에도 해소 상태 유지됨을 재확인
+- `/scan` **11.35 Hz**, TF `base_link→laser_frame = [0.300, 0.000, 0.320]`
+
+### 판별 방법 (통행인 오염 배제)
+
+사용자 지적("측정 중 앞을 지나간 사람이 있을 수 있다")에 따라 두 가지 교차검증을 적용했다.
+
+1. **시간 지속성**: 200스캔(18초)을 4구간으로 쪼개 각 구간에서 존재하는지 확인 → 9구간 모두 `OOOO`
+2. **10분 간격 2회 측정 비교**: 1차(08:54, 50스캔) vs 2차(09:05, 200스캔) — 8구간이 같은
+   (방위, 거리)로 재현. `+165..+167°`만 1차에서 임계값 아래였다.
+3. 0.12~0.18 m는 사람이 설 수 없는 거리 (라이다에서 12~18 cm = 프레임 내부)
+
+### 원인 규명 — 구 값에서 경계 빔이 살아남은 이유
+
+`fixed_resolution: true`라 드라이버가 원시 빔을 430~440 빈으로 리샘플링하는데,
+SDK는 **리샘플링 전 원시 각도**로 마스킹한다 → 빈 폭 0.82°만큼 경계 누출이 생긴다.
+구 값에서 `-77.49°`(마스킹 `-78..-70` 안쪽인데 생존)와 `+79.13°`(마스킹 `72..79` 밖)이
+모두 이 현상이다. **부호 반전 문제가 아니었다** — 여유각 ±2°로 해결.
+
+또한 기둥이 **각 측 2개**(±74°, ±79°)인 구조여서, 구 값은 기둥1만, 1차 확정값은 기둥2만
+덮고 있었다. 좌 `-90..-71` / 우 `71..82`로 확대해 둘 다 덮었다.
+
+<details><summary>최종 검증 원본 출력 (150스캔, `S1_mask_verify2.log`)</summary>
+
+```
+### 검증 측정: 150 스캔 / 430 빔
+
+=== (A) 9개 자기차폐 구간 소멸 확인 ===
+  -179.18..-173.44°  후방 좌 0.454m           8빔 → 생존 0개  ✅ 소멸
+  -161.14..-159.50°  좌측 0.121m             4빔 → 생존 0개  ✅ 소멸
+  -157.04..-148.02°  좌측 0.128m (최대)       12빔 → 생존 0개  ✅ 소멸
+  -138.18..-138.18°  좌측 0.185m             1빔 → 생존 0개  ✅ 소멸
+   -88.15.. -85.69°  좌측 0.170m             4빔 → 생존 0개  ✅ 소멸
+   -80.77.. -77.49°  좌 기둥 0.131m           5빔 → 생존 0개  ✅ 소멸
+   +79.13.. +79.95°  우 기둥 0.141m           2빔 → 생존 0개  ✅ 소멸
+  +165.24..+166.88°  후방 우 0.185m           3빔 → 생존 0개  ✅ 소멸
+  +178.36..+180.00°  후방 0.459m             4빔 → 생존 0개  ✅ 소멸
+
+  ✅ 전 구간 마스킹 성공
+
+=== (B) 남은 0.6 m 이내 상시 포인트 (footprint 위험) ===
+  ✅ 0.6 m 이내 상시 포인트 없음 — Nav2 footprint 충돌 위험 제거
+
+=== (C) 살아있는 시야 품질 ===
+  유효율>0.5 빔: 235/430 (54.7%)
+  AI 조회창 ±20°       46/ 48 ( 95.8%)  거리 2.72~3.11 m
+  전방 180°          141/214 ( 65.9%)  거리 1.00~3.85 m
+  전체 360°          235/430 ( 54.7%)  거리 1.00~8.59 m
+```
+</details>
+
+<details><summary>2차 측정 — 시간 지속성 판별 (200스캔, `S1_mask_check_run2.log`)</summary>
+
+```
+### 2차 측정: 200 스캔 / 440 빔 / inc=0.8200deg
+
+=== 0.6 m 이내 근거리 구간 + 시간 지속성 (Q1~Q4 각 ~4.5초) ===
+   지속성: 4개 구간 모두 유효율>0.3 → [구조물], 일부만 → [통행인/변동]
+  -179.18..-173.44°  ( 8 빔)  중앙 0.454 m  폭 0.010  Q=OOOO  [구조물]
+  -161.14..-159.50°  ( 3 빔)  중앙 0.121 m  폭 0.002  Q=OOOO  [구조물]
+  -157.04..-148.02°  (12 빔)  중앙 0.128 m  폭 0.011  Q=OOOO  [구조물]
+  -138.18..-138.18°  ( 1 빔)  중앙 0.185 m  폭 0.000  Q=OOOO  [구조물]
+   -88.15.. -85.69°  ( 4 빔)  중앙 0.170 m  폭 0.001  Q=OOOO  [구조물]
+   -80.77.. -77.49°  ( 5 빔)  중앙 0.131 m  폭 0.008  Q=OOOO  [구조물]
+   +79.13.. +79.95°  ( 2 빔)  중앙 0.141 m  폭 0.000  Q=OOOO  [구조물]
+  +165.24..+166.88°  ( 3 빔)  중앙 0.185 m  폭 0.401  Q=OOOO  [구조물]
+  +178.36..+180.00°  ( 3 빔)  중앙 0.459 m  폭 0.281  Q=OOOO  [구조물]
+```
+</details>
+
+<details><summary>1차 측정 — 구 값 검증 (50스캔, `S1_mask_check.log`)</summary>
+
+```
+=== (A) 마스킹 구간 검증  ignore_array = "-78,-70,72,79" ===
+  좌 기둥 마스킹 대상 (-78..-70°, 10 빔): 살아있는 빔 1개  🔴 남아있음
+       -77.49°  0.137 m  유효율 0.74
+  우 기둥 마스킹 대상 (72..79°, 8 빔): 살아있는 빔 0개  ✅ 마스킹됨
+
+=== 마스킹 밖 반대편 확인 (부호 반전 여부) ===
+  부호반전 시 좌 (-79..-72°): 0.6m 이내 살아있는 빔 2개
+  부호반전 시 우 (70..78°): 0.6m 이내 살아있는 빔 0개
+
+=== 전체 분류 === valid 62.8% / zero 37.2% / other 0.0%
+```
+</details>
+
+- **증거 파일** (`.gitignore`의 `log/`로 커밋 제외): `ros2_ws/log/phase3_20260807/`
+  `S1_scan.log`, `S1_mask_check.log`, `S1_mask_check_run2.log`, `S1_beam_median_run2.csv`(빔별 중앙값),
+  `S1_mask_verify.log`, `S1_mask_verify2.log`, `S1_lidar_run{2,3}.log`
+- **다음**: ④ 매핑 (`bringup.launch.py` + `stm_serial_bridge mode:=hardware speed_profile:=slow`).
+  첫 주행 전 NUCLEO RESET 1회 필요.
+
+---
+
+## 2026-08-07 00:24 — ✅ FE: 슬롯 만적 알림 팝업 추가 (Claude)
+
+- **배경**: 시연 카트는 RFID 리더가 5개만 달려 실물 슬롯이 5칸이다. 다 차면 사서에게
+  "북카트를 정리해달라"고 알려줄 화면이 없었다
+- **변경** (`frontend/feat/map`, 베이스 `494b8ec`):
+  - `PHYSICAL_SLOT_COUNT = 5` (shared/config/cart.ts) — DB 슬롯 12개 중 리더가 달린 범위
+  - `slotCapacity.ts` 신규: `physicalSlots`·`isCartFull`. EMPTY가 아니면 찬 것으로 센다
+    (RECOGNIZING·RECOGNITION_FAILED도 책이 물리적으로 올라가 있어 더 담을 수 없다).
+    실물 슬롯을 다 받지 못한 부분 응답은 만적으로 보지 않는다
+  - `SlotFullModal` 신규 + AppLayout에 마운트 — 슬롯 목록은 WS SLOT_UPDATED로 갱신되는
+    쿼리 캐시에서 오므로 마지막 책이 얹히는 순간 열리고 한 권 꺼내면 닫힌다
+- **막혔던 것 2가지**:
+  1. `react-hooks/set-state-in-effect` — "자리가 생기면 닫음 표시 리셋"을 useEffect + setState로
+     짰다가 린트에서 걸렸다. 조건이 풀리면 안쪽 컴포넌트가 **언마운트되며 상태가 버려지는**
+     구조로 바꿔 해결 (ArrivalModal과 같은 방식, 이펙트 0개)
+  2. 테스트에서 `setQueryData` 후 리렌더가 안 일어남 — TanStack v5가 구독자 알림을
+     `setTimeout(0)`으로 미루기 때문. 관찰용 컴포넌트로 "캐시는 바뀌었는데 렌더 값은 그대로"인
+     것을 확인한 뒤, act 안에서 매크로태스크까지 흘려보내 해결 (`await`만으로는 부족)
+- **결과**: **21 files, 129 tests, 0 failures** (신규 12: 만적 판정 8 + 팝업 6 중 일부) /
+  `tsc --noEmit` 0 / `eslint` 0
+- **스크린샷** (Playwright + 실행 중 dev 서버 5173, MSW on — 데스크톱/근접/모바일/이동 후 4장):
+  `01-slot-full-desktop.png` · `02-slot-full-closeup.png` · `03-after-confirm-slots.png` ·
+  `04-slot-full-mobile.png`
+- **알아둘 것**: MSW 픽스처의 1~5번 슬롯이 모두 OCCUPIED라 모킹 모드에서 앱을 열면 팝업이
+  바로 뜬다. 픽스처 데이터를 정확히 렌더한 결과이지만, 개발 중 거슬리면 픽스처를 실물 5칸
+  기준으로 손보는 별도 작업이 필요하다
+
+## 2026-08-07 00:00 — ✅ FE: 구역 진입 토스트 제거 (Claude)
+
+- **배경**: "카트가 N구역에 진입했어요" 토스트는 구역 단위라 정보가 거칠고, 지도의 구역
+  하이라이트·홈/지도의 현재 위치 카드가 같은 사실을 이미 보여준다. 기획상 원했던 것은
+  **책장 단위 근접 안내**인데 그건 미구현(책장 좌표를 주는 BE 엔드포인트가 없다)
+- **변경** (`frontend/feat/map`, 베이스 `7d9fd10`): `useCartMapEvents`의 토스트 2곳 제거.
+  이 토스트만을 위해 존재했던 반환값도 함께 정리 — `applyPosition`은 `PositionApplied`
+  객체 대신 `moved` 불리언만, `applyZone`은 `void`. 안 쓰이게 된 `zoneLabel` import 제거
+- **남긴 것**: 이동 명령 접수 토스트("N구역으로 카트가 이동을 시작해요")와 도착 모달 —
+  사서가 누른 행동에 대한 응답이라 성격이 다르다
+- **결과**: **19 files, 115 tests, 0 failures** / `tsc --noEmit` 0 / `eslint` 0
+- **브라우저 확인** (dev + MSW): 3구역으로 이동 → 진입 토스트 없음, 구역 하이라이트는 정상.
+  `toastsSeen: ["3구역으로 카트가 이동을 시작해요", "3구역에 도착했어요!"]` — 진입 토스트만 사라짐
+
+## 2026-08-06 23:33 — ✅ FE: 지도 바탕을 번들 평면도로 교체 + 클릭 좌표 전송 검증 (Claude)
+
+- **배경**: BE가 주는 SLAM 지도 그림(`MapInfo.imageUrl` = `/maps/test-room.png`)은 (a) 저장소·
+  배포본 어디에도 파일이 없어 nginx/vite가 `index.html`을 200으로 돌려주고 `<img>` 디코드가 실패,
+  (b) 점유격자 렌더 자체가 사서가 읽기 어려운 그림. FE가 그린 평면도(`assets/map.png`,
+  1707×921, 3통로)로 바탕을 바꾸고 구역 기하도 그 그림 기준으로 다시 잡음
+- **변경** (작업 트리, 브랜치 미분기 — `develop` 위에서 검증):
+  - `floorPlanImage.ts` 신규 (번들 그림 + 원본 크기 + "같은 바닥 범위" 전제 문서화)
+  - `zones.ts` 구역 기하 재작성 (7구역 2행 → 3통로), `zoneStore.ts`는 서버 구역을 **코드로 조인해
+    id만** 채움 (`applyServerZones`) — 위치·이름은 평면도가 정본
+  - `shelfZoneBoundary.ts`(+테스트) 삭제 — 서버 폴리곤을 그림 좌표로 쓰던 경로 제거
+  - `MapPanel.tsx`: 좌표 기준 사각형을 테두리 있는 `.canvas` → `<img>` 로 교정 (1px 테두리 때문에
+    클릭 기준 박스가 그림보다 2px 컸음, 구역 버튼 %는 패딩 박스 기준이라 서로 어긋났다)
+- **좌표 계약은 그대로**: NAV-01 `x`·`y`와 WS 위치는 여전히 BE 지도 이미지 픽셀
+- **결과**: **19 files, 115 tests, 0 failures** / `tsc --noEmit` 0 / `eslint` 0
+  (`prettier --check`는 `src/pages/search/SearchPage.tsx` 1건 경고 — 이번 변경과 무관한 기존 이슈)
+- **명령**: `pnpm --dir frontend test` · `npx tsc --noEmit` · `npx eslint .`
+- **브라우저 검증** (dev 서버 + MSW, DOM/네트워크 계측 — Browser 패널 미표시로 스크린샷 불가):
+  그림 로드·비율 일치, 구역 버튼 3개가 측정 좌표대로 배치, 통로 클릭 → NAV-01 본문이 기대 픽셀과
+  정확히 일치, 서가·테이블 클릭 → 요청 없이 안내 토스트
+
+<details>
+<summary>원본 출력 (vitest 집계 + 브라우저 계측)</summary>
+
+```
+$ npx vitest run
+ Test Files  19 passed (19)
+      Tests  115 passed (115)
+   Duration  6.32s
+
+$ npx tsc --noEmit        # 출력 없음 (exit 0)
+$ npx eslint .            # 출력 없음 (exit 0)
+
+# 브라우저 계측 1 — 그림·구역 배치 (http://localhost:5173/map, MSW on)
+{
+  "imageSrc": "/src/assets/map.png", "imageLoaded": true, "naturalSize": "1707x921",
+  "canvasAspect": 1.8535, "imageAspect": 1.8534,
+  "zones": [
+    { "label": "1구역 총류로 카트 이동",        "left": 70,  "top": 20.6, "width": 16.1, "height": 73.4 },
+    { "label": "2구역 철학·사회과학로 카트 이동", "left": 37,  "top": 20.6, "width": 17,   "height": 73.4 },
+    { "label": "3구역 문학·역사로 카트 이동",    "left": 4.2, "top": 20.6, "width": 16.8, "height": 73.4 }
+  ],
+  "cartCenterPct": { "x": 92.9, "y": 16.2 }     # START_POSITION(93, 16)
+}
+
+# 브라우저 계측 2 — 테두리 교정 전: 클릭 기준 박스가 그림보다 2px 큼
+{ "canvasRect": { "left": 308, "top": 182, "w": 647, "h": 349.08 },
+  "imageRect":  { "left": 309, "top": 183, "w": 645, "h": 347.08 },
+  "borderWidth": "1px / 1px" }
+
+# 브라우저 계측 3 — 교정 후: 클릭 지점 → NAV-01 본문이 기대 픽셀과 일치
+{ "imageRect": { "left": 309, "top": 187.5, "w": 645, "h": 347.08 },
+  "expected": { "x": 741, "y": 665 },
+  "sent": ["{\"zoneId\":2,\"x\":741,\"y\":665}"] }
+
+# 브라우저 계측 4 — 통로 밖(서가) 클릭
+{ "navRequestsSent": [], "toastLike": ["카트가 갈 수 있는 통로를 눌러주세요", ...] }
+```
+
+</details>
+
+## 2026-08-05 12:15 — ✅ EM Phase 2(AI 카메라 추종) 완료: 바닥 실주행 추종 유지율 100% / 🔴 거리 진동 ±0.41 m·후진 37% (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2, ROS2 Humble. 브랜치 `em/feature/motor-Lidar-integrated` @ `50a938b`.
+  라이다·카메라는 쫄래쫄래 선반 카트 실제 장착 위치. AI 스택은 `~/Choll/ai/install`(별개 클론).
+- **범위**: Phase 2 Stage 1(AI 단독 관측) → Stage 2(첫 통전) → Stage 3(바닥 추종 주행).
+- **기록 시점**: 2026-08-07. 주행 직후 보조배터리 방전으로 Jetson이 강제 종료되어 당시 기록을 못 남겼고,
+  증거 파일(`ros2_ws/log/phase2_20260805/`)이 디스크에 남아 있어 이를 근거로 사후 작성했다.
+
+### ✅ Stage 1 — AI 스택 단독 관측 (STM 브릿지 미기동 = `/cmd_vel` 구독자 0 = 모터 위험 0)
+
+AI 9노드 + 라이다 2노드 기동. `/cmd_vel` **Publisher 1 = `control_node`** 확인.
+
+| 토픽 | 실측 | 판정 |
+|---|---|---|
+| `/camera/image_raw` | 11.49 Hz | ⚠️ 요청 30 Hz 대비 낮음 — Brio 100 협상 포맷 한계 추정(미확정) |
+| `/person_detection` | 30.2 Hz | YOLOv10s TensorRT 여유 (자체 타이머로 최신 프레임 재처리) |
+| `/person_tracks` | 29.9 Hz | ByteTrack 정상 |
+| `/target_person` | 등록 전 0 → 등록 후 **31.5 Hz** | `auto_select:=false` 동작 정상 |
+| `/target_distance` | **2.572 m** (NaN 아님) | 라이다 조회 성공 |
+| `/cmd_vel` | 15.0 Hz, `linear.x=0.5` | **예측식 일치**: `0.5×(2.572−1.0)=0.786` → `max_linear_vel` 0.5로 클램프 |
+| `/wheel_speed_cmd` | Pub 1 / **Sub 0** | AI `motor_node` 무해 확인 (micro-ROS agent 미실행) |
+
+### ✅ 포즈 토픽 계약 확인 — `/cart_pose`는 존재하지 않는다
+
+혼동의 원인이 이름 두 개였다: **EM 노드명** `cart_pose_publisher`(발행 토픽은 `/robot_pose`)와
+**AI 파라미터명** `cart_pose_topic`(값이 `/robot_pose`). 실행 그래프에서
+`ros2 node info /target_position_node` → `Subscribers: /robot_pose` 확인, `/cart_pose`는 토픽 목록에 없음.
+→ **양쪽 이미 `/robot_pose`로 일치, 변경 불필요.**
+`target_position_node`의 `카트 포즈 미수신` 경고는 `/robot_pose` Publisher 0(= SLAM 미실행) 때문이며
+**Phase 2에서는 정상**이다(추종은 `control_node`가 `/target_person`+`/scan`만으로 수행).
+
+### 🔴 카메라↔라이다 각도 정합 실측 — `lidar_mirrored=True` 확정, `camera_fov_deg`는 오류
+
+bbox와 `/scan`을 **동시 샘플링**해 판정(라이다 단독으로는 판정 불가 — 영상 내 위치를 모르므로).
+사람 식별은 "사람 없음 기준 대비 변한 클러스터"로 했다.
+
+| 위치 | `center_x_norm` | 사람 라이다 각도 | `mirrored=False` | `mirrored=True` |
+|---|---|---|---|---|
+| 카메라 오른쪽 | +0.727 | **+13.12°** (2.838 m) | −21.07° ❌ | +21.07° ✅ |
+| 카메라 왼쪽 | −0.623 | **−13.94°** (2.758 m) | +18.06° ❌ | −18.06° ✅ |
+
+**판정 1**: `lidar_mirrored=True` **양쪽에서 부호 일치 → 현재 런치값이 맞다.**
+AI 담당자 설명("라이다가 미러링돼 있어 그 값을 처리해서 보낸다")과도 일치. 협의 불필요.
+(드라이버는 `inverted: false`·`reversion: false`인데도 반전 — 장착 방향 추정, 원인 미확정)
+
+**판정 2 — 🔴 `camera_fov_deg=58.0`이 과대하다.** 두 점으로
+`α = center_x_norm × (F/2) − θ₀` 를 풀면 **F ≈ 40.1°, θ₀ ≈ +1.45°**
+(역대입 검증 `−0.623×20.04−1.45 = −13.94` 일치). θ₀=0으로 각 점 단독 환산해도 36.1°/44.8°로
+**둘 다 58°보다 훨씬 작다.** Brio 100의 58°는 **대각** 화각이고 4:3 640×480 크롭 수평 화각이 40°대라는
+계산과 부합. `lidar_yaw_offset_deg=0.0`은 유지 타당(θ₀ 1.45°는 무시 가능).
+⚠️ 미지수 2개·식 2개라 적합은 구조적으로 정확 — **검증에는 세 번째 점 필요.**
+
+**실동작 영향**: 방위각이 1.45배 밖으로 나가 조회 구간이 사람에서 벗어난다.
+오른쪽 사례에서 조회 `+15.29..+26.85°` vs 사람 `+10.25..+15.99°` → **겹침 0.7°(약 1빔)**.
+배경이 3.9 m 이상이라 `min_valid_range_in_span`이 아직 사람 거리를 채택했지만 **위태롭다.**
+→ **AI 파트에 `camera_fov_deg` 58 → 40 제안** (런치 하드코딩이라 협의 필요).
+
+### ✅ Stage 2 — 첫 통전 (바퀴 공중)
+
+브릿지 `mode:=hardware speed_profile:=slow` → `max_wheel_rad_s=2.0`, `dry_run=False`,
+`wheel_separation_m=0.38`, `cmd_vel_timeout_sec=0.5`, Serial connected.
+`check_stm_topics` **✅ 합격**(6토픽), `/stm/connected=true`, `/stm/fault=NONE`.
+
+🔴 **초기 무회전의 원인은 모터 전원 미투입이었다.** 브릿지→STM32 경로는 정상이었고
+(`SET_WHEEL_VEL,1.869,2.000` 송신 → STATUS `target L=1.87 R=2.00, pwm L=18 R=20`)
+`actual L=0.00 R=0.00` + **엔코더가 1327/1603에 완전히 고정**이었다.
+전원 인가 후 동일 조건에서 `actual L=1.47 R=1.56`, 엔코더 1327→**719,115**로 증가.
+→ 앞으로 구동 시험 전 **모터 전원 확인을 절차에 넣을 것**.
+
+| 검증 | 결과 |
+|---|---|
+| 차동구동식 | `v=0.037, ω=−0.080` → 계산 L=0.803 R=0.335 / 실제 target **0.810 / 0.260** ✅ (램프 지연 범위) |
+| **회전 방향** | 사람 오른쪽 → `ω<0` → **좌바퀴가 더 빠름** → 우회전. 4/4 샘플 일치 ✅ |
+| 데드존 | PWM 1~8 구간 `actual 0.00` — 예측표 그대로 ✅ |
+| 비례 축소 | `raw left=7.426 right=7.959` → `limited 1.866/2.000` (scale 0.251) ✅ 비율 보존 |
+
+### 🔴 정지 지연 실측 — 약 1.03초
+
+AI 터미널 Ctrl+C 후 브릿지 로그 타임스탬프 기준:
+
+```
+watchdog active -> timed_out      t=1785898085.758
+첫 SET_WHEEL_VEL,0.000,0.000      t=1785898085.760   (+0.002 s)
+마지막 '회전 중' STATUS            t=1785898085.789
+첫 '정지' STATUS                   t=1785898086.290
+```
+
+watchdog은 마지막 수신 0.5초 후 발동하므로 AI가 발행을 멈춘 시각 ≈ 085.258
+(브릿지가 `/cmd_vel` 로그를 8개마다 1개만 남겨 직접 측정은 ±0.53초 불확실).
+→ **AI 종료 → 바퀴 정지 ≈ 1.03초** = watchdog 0.5 + 램프 약 0.5.
+계획서 예측(최대 ~1.05초)과 일치. 정지 직전 1.89 rad/s(0.123 m/s) → 타행 **약 7~8 cm**.
+
+### 🔴 속도 2배 상향 — `max_wheel_rad_s` 2.0 → 4.0 (사용자 요청)
+
+`speed_profile:=slow` 위에 `max_wheel_rad_s:=4.0`을 launch 인자로 명시 오버라이드
+(로그: `속도 상한: max_wheel_rad_s=4.0 (launch 인자가 프로파일을 덮어씀)`).
+`4.0 × r 0.065 =` **0.260 m/s**. `nav2` 프로파일(6.4)은 실기 미검증이라 쓰지 않았다.
+
+부수 효과(설계상): 데드존은 바퀴 2.0 rad/s(PWM 20)에 고정이고 cap과 무관하므로,
+cap 2.0에서는 오차 ≥0.26 m가 즉시 포화(계단식)였으나 cap 4.0에서는 **오차 0.26~0.52 m 구간이
+비례 제어**가 되고 순수 회전이 ∓2.923(PWM 29)으로 데드존을 넘어 **조향이 살아난다.**
+대가: 타행 8→16 cm, **브릿지 사망 시 0.65 → 1.3 m**(펌웨어 5초 타임아웃), 램프 0.5→1.0초.
+
+### ✅ Stage 3 — 바닥 실주행 추종 (126초, 1257 샘플, 10 Hz 동기 기록)
+
+| 항목 | 결과 |
+|---|---|
+| **추종 유지율** | **1257/1257 = 100%** — 126초 동안 Re-ID가 타겟을 한 번도 놓치지 않음 |
+| `fault` / `connected` | 전 구간 **NONE / true** |
+| **STALL·ERROR** | **0건** |
+| 상한 4.0 도달 | target ±4.00 도달, `|target|>3.5` 샘플 L 94 / R 90 |
+| 엔코더 이동 | L 1,931,842→7,873,221 / R 1,521,292→6,907,509 |
+| 구동 형태 | 양쪽 회전 520 / **한쪽만(피벗) 287** / 정지 450 |
+
+🔴 **거리 유지가 진동한다** (목표 1.00 m):
+
+```
+중앙값 1.076 m (양호)   평균 1.065   표준편차 0.411 m   범위 0.315 ~ 2.996 m
+  < 0.74 m   후진          151  12.0%   ← 최소 0.315 m 까지 접근
+  0.74~1.00  후진(데드존)   389  30.9%
+  1.00~1.26  정지(데드존)   472  37.5%
+  > 1.26     전진          245  19.5%
+```
+
+**후진 명령 469/1257 = 37%**, `cmd_v` 최소 **−0.353 m/s**. 사용자 결정대로 코드가 아니라 절차로
+막기로 했으나 **사람이 자연스럽게 걸으면 1.2 m 유지가 안 된다**는 것이 실측으로 드러났다.
+조향도 거칠다: `angular.z` ±0.87(상한 1.0 근접), 피벗 23%.
+
+`actual`이 최대 ±4.35로 target ±4.00보다 **8.8% 높게** 읽힌다 — Phase 1의 미확정 항목
+(당시 target 2.0 → actual 2.22, +11%)과 **같은 현상이 재현**됐다. 엔코더 스케일 조사 근거.
+
+### 🔴 발견한 버그·오류 2건
+
+| # | 내용 | 근거 |
+|---|---|---|
+| 1 | **`/stm/pwm` 토픽이 항상 0** — 브릿지 자체 STATUS 로그는 `pwm L=18 R=20`을 보고하는데 토픽 발행값은 0. 파싱은 되고 발행만 어긋남 | 동기 기록 835 샘플 전부 `pwm_L=0, pwm_R=0`. `wheel_target`·`actual`·`encoder`는 정상 → 안전 영향 없음. **모터 파트 항목** |
+| 2 | **`choll-em` 별칭 공백 누락** — `mqtt_username:=chollmqtt_password:=CHANGE_ME` → username이 `chollmqtt_password:=CHANGE_ME`, password 빈 문자열 → 브로커 인증 거부 **CONNACK rc=5** | `fe_bridge_node`가 rc를 검사하지 않아 `MQTT 연결됨 (rc=5)`로 성공처럼 로깅(rc=0만 성공). 8~16초 주기 재접속 루프. 수동 ID 지정이면 `fe_bridge:=false`가 정답 |
+
+### 결론 — Phase 2 성공 기준 판정
+
+계획서 성공 기준(경로가 닫혔음을 증명) **충족**: 8노드 기동 · 등록 성공 · `/target_person` 발행 ·
+`/target_distance` 실거리 일치 · `/cmd_vel` Publisher 1 · **큰 오차에 올바른 방향으로 주행** ·
+예측표 부합 · STALL/FAULT 0 · 종료 순서 준수.
+성공 기준에 넣지 않았던 것(매끄러운 추종·보행 속도 추종·미세 조향)은 예상대로 미달이며,
+개선안 2건(`camera_fov_deg` 40, `target_distance_m` 1.3~1.5)은 **AI 파트 협의 대상**이다.
+
+<details>
+<summary>증거 파일 (gitignore 대상 — Jetson 로컬 `ros2_ws/log/phase2_20260805/`)</summary>
+
+```
+S3_floor.csv        172 KB  바닥 추종 1257 샘플 동기 기록 (t,cmd_v,cmd_w,tgt_L/R,act_L/R,pwm_L/R,dist,fault,conn)
+S3_bridge_4.log     840 KB  상한 4.0 주행 전체 STATUS/TX/제한 로그
+S2_bridge.log       2.7 MB  첫 통전 구간 (모터 전원 미투입 → 인가 후)
+S2_drive.csv / S2_drive2.csv   공중 구동 동기 기록
+S1_calib_right.log / S1_calib_left.log   카메라↔라이다 동시 캘리브레이션 원본
+S1_nodes.log / S1_pipeline_hz.log / S1_selected_state.log / S1_pose_topic_check.log
+```
+
+주요 원본 발췌:
+
+```
+=== Stage 1 파이프라인 ===
+/camera/image_raw        average rate: 11.486
+/person_detection        average rate: 30.223
+/person_tracks           average rate: 29.894
+/target_person           average rate: 31.538
+/target_distance         average rate: 14.970   data: 2.572000026702881
+/cmd_vel                 average rate: 15.026   linear.x: 0.5
+
+=== 포즈 계약 ===
+$ ros2 node info /target_position_node
+  Subscribers:
+    /robot_pose: geometry_msgs/msg/PoseStamped
+$ ros2 topic info /robot_pose      Publisher count: 0   Subscription count: 1
+$ ros2 topic info /cart_pose       토픽 없음
+
+=== Stage 2 모터 전원 미투입 (엔코더 고정) ===
+STATUS #1031: target L=1.87 R=2.00, actual L=0.00 R=0.00, pwm L=18 R=20, enc L=1327 R=1603
+  (STATUS 2826건 전체에서 enc 고유값 단 1개 = 무회전)
+=== 전원 인가 후 ===
+STATUS #22150: target L=1.43 R=2.00, actual L=1.47 R=1.56, pwm L=14 R=20, enc L=719115 R=566271
+
+=== 상한 4.0 적용 + 후진 ===
+제한 후 저장: raw left=4.063 right=4.230  -> limited left=3.842 right=4.000, max=4.000
+제한 후 저장: raw left=-4.232 right=-3.277 -> limited left=-4.000 right=-3.098, max=4.000
+
+=== 회전 방향 검증 (4/4 일치) ===
+w=-0.100 (음수=우회전)  tgt L= 0.660 > R= 0.280  ✅
+w=-0.063                tgt L= 0.760 > R= 0.290  ✅
+w=-0.089                tgt L= 0.850 > R= 0.270  ✅
+w=-0.080                tgt L= 0.810 > R= 0.260  ✅
+```
+
+</details>
+
+## 2026-08-05 09:10 — ✅ EM Jetson 실기: choll_mqtt_bridge 실브로커 E2E + Phase 2 조회창 재측정으로 어제 블로커 반증 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `d8f2583`(노트북 커밋 2개 머지 직후).
+  라이다는 **쫄래쫄래 선반카트에 장착된 실제 위치** (오링카 아님).
+- **범위**: 머지·빌드 → MQTT 브릿지 실브로커 검증 → Phase 2 Stage 0 재측정.
+  **브릿지(STM)·teleop·AI 스택 미기동** → `/cmd_vel` 구독자 0, **모터 경로 열린 적 없음**(모터 위험 0).
+
+### 🔴 어제(2026-08-04 18:20) 항목의 측정치는 무효 — 다른 위치에서 측정됨
+
+사용자 확인: 어제 측정 시 팀원들이 카트를 다른 곳으로 옮긴 상태였다. **라이다 장착 위치는 바뀌지 않았다.**
+같은 측정을 실제 카트 위치에서 재실행한 결과가 정반대다.
+
+| 구간 | 어제 (다른 장소) | **오늘 (실제 카트 위치)** |
+|---|---|---|
+| **AI 조회창 ±29°** | 유효율>0.6 빔 6/70 = **8.6%** | **valid 71.4%** (2800 샘플 중) |
+| 정면 −5°~+5° | 유효 빔 **0개** | **전 빔 valid, 약 5.37 m** |
+| 전방 180° | 22% | **61.5%** |
+| 전체 360° | — | **65.5%** |
+
+원시값 분류(40스캔): **`above_max`·`inf`·`NaN` 0건.** 전부 `valid` 아니면 `zero`(산발적 드롭아웃).
+즉 "그 방향이 비어서 range_max를 넘었다"가 아니고, "구조물이 창을 막았다"도 아니다.
+→ **어제 기록한 블로커는 카트 위치 문제였고, 실제 장착 형상에서는 존재하지 않는다.**
+
+### ✅ 카트 자기 구조물(기둥) 위치 확정 — 조회창 밖
+
+```
+-75.85..-72.57deg   0.130 m  (5~6 빔, 3회 측정 모두 재현)
++75.03..+75.85deg   0.150 m  (2 빔)
+```
+
+메모리 실측(2026-08-03: −80..−70° 0.130 m / +76..+83° 0.140 m)과 일치.
+**AI 조회창 ±29°에서 46° 이상 이격** → Phase 2 무영향.
+단 `x4pro.yaml:54 ignore_array: ""`가 비어 있어 `range_min: 0.12`를 통과하므로
+**매핑(Phase 3) 전에는 반드시 마스킹**해야 지도·costmap에 영구 장애물로 박히지 않는다.
+
+### 🔴 새로 실측 확정 — 카메라↔라이다 각도 정합 (`lidar_mirrored`)
+
+사람을 세워 3회 측정. 기준 상태 대비 **새로 생긴 클러스터**로 사람을 식별했다.
+
+| 시나리오 | 측정 클러스터 | 중심 | 거리 |
+|---|---|---|---|
+| 사람 없음(기준) | 해당 구간 4.0~5.4 m | — | — |
+| 카메라 정면 1.5 m | `−7.79..+2.87°` (14빔) | **≈ −2.5°** | **1.571 m** |
+| 카메라 오른쪽 1 m 이동 | `+20.91..+31.57°` (14빔) | **≈ +26.2°** | **1.94 m** |
+
+**판정 1 — `lidar_yaw_offset_deg = 0.0`이 맞다.** 정면 클러스터 중심이 −2.5°
+(1.5 m에서 측면 6.5 cm = 사람이 정확히 중앙에 서지 않은 정도). 라이다 0° ≈ 카메라 광축.
+클러스터 폭 11.5°(14빔×0.82°)는 1.571 m에서 몸통 0.31 m에 해당(`2·atan(0.155/1.571)=11.3°`) — 계산과 일치.
+
+**판정 2 — `lidar_mirrored = True`가 맞다 (현재 런치값 유지).**
+`control_node.camera_bearing_to_lidar_angle`은 `bearing = -center_x_norm·(fov/2)` 후
+`mirrored`면 부호 반전. 화면 오른쪽(`center_x_norm=+1`) → `mirrored=True`면 **+29°**.
+실측은 카메라 오른쪽 사람이 **+26.2°** → 부호 일치. `mirrored=False`면 −29°로 반대편을 조회하게 된다.
+
+⚠️ **정정**: 나(Claude)는 드라이버가 `inverted: false`·`reversion: false`인 것만 보고
+"`lidar_mirrored=True`는 오링카 기준이라 틀렸을 것"이라고 추론해 AI 파트 협의가 필요하다고 적었다.
+**실측이 이를 반증했다** — 협의 불필요, 현재 값이 정답이다. 스캔이 REP 103 대비 좌우 반전인 이유는
+라이다 장착 방향(뒤집힘)으로 추정되나 원인은 미확정이며, Phase 2 진행에는 무관하다.
+
+기하 자기일관성 교차검증: +26.2°·1.94 m → 측면 0.86 m·전방 1.74 m("1 m 이동"과 일치),
+화면 정규화 0.90 → `0.90×29° = +26.1°`.
+
+→ **Phase 2의 블로커 2건(조회창 차폐·각도 정합) 모두 해소.** Stage 1(AI 스택 단독 관측) 진행 가능.
+
+### ✅ choll_mqtt_bridge 실브로커 E2E (README 검증 절차 + 확장)
+
+노트북 항목(바로 아래)에 "엔드투엔드 스모크는 Jetson STEP에서 예정"으로 남아 있던 항목을 닫았다.
+
+| 경로 | MQTT 입력 | 결과 |
+|---|---|---|
+| 접속 | — | `MQTT 접속·구독 완료: cmd/move/cart (QoS1)` ✅ |
+| CANCEL | `{"requestId":"test-1","command":"CANCEL"}` | `/cart/cancel` → `data: test-1` ✅ |
+| MOVE(미터) | `{"requestId":"move-1","command":"MOVE","target":{"x":1.5,"y":-0.8}}` | `/cart/target_pose` frame=map, (1.5, −0.8, 0), w=1 ✅ |
+| MOVE(픽셀만) | `{"target":{"pixelX":120,"pixelY":88}}` | `명령 무시: target.x/y가 숫자가 아님` ✅ 의도된 거부 |
+| FOLLOW_START | `{"command":"FOLLOW_START"}` | `FOLLOW 명령 수신 — 계약 미확정이라 보류` ✅ |
+| SELECT_TARGET | `{"command":"SELECT_TARGET","trackId":7}` | `AI fe_bridge_node가 담당하므로 이 브릿지는 무시` ✅ 이중 처리 없음 |
+
+Nav2 미실행 상태라 `/cart/target_pose` 구독자 0 → 발행만 확인, 카트는 움직이지 않음.
+
+### 🔧 paho 2.x 호환 — 코드 1곳 수정
+
+Jetson에는 **PyPI paho-mqtt 2.1.0**이 이미 설치돼 있었다(apt 미설치). apt 후보는 1.5.1이며
+**추가 설치하지 않았다** — 두 버전 공존 시 import 우선순위 혼란.
+paho 2.1.0은 `callback_api_version` 기본값이 `VERSION1`이라 기존 코드도 동작하지만
+DeprecationWarning이 뜨고 향후 제거될 수 있어 `_make_mqtt_client`를 분기로 명시했다
+(`hasattr(mqtt, "CallbackAPIVersion")` → 2.x는 `VERSION1` 명시, 1.x는 기존 호출).
+콜백 시그니처(`rc`/`flags`)가 VERSION1 규약이므로 다른 코드는 무변경. README 의존성 절도 정정.
+
+### ✅ 머지·빌드·회귀
+
+- `git pull` 머지 `d8f2583` — `tests/TEST_LOG.md` 충돌 1건: **양쪽 항목 모두 보존 + 날짜 내림차순**.
+  항목 사이 `---`를 쓰지 않는 파일 관례에 맞춰 어제 내 항목이 넣었던 구분자도 제거.
+- `colcon build --symlink-install` → **6 packages finished [5.30s]**
+- `ruff check` 통과 / `pytest` **52 passed** (choll_nav 31 + choll_mqtt_bridge 21)
+- ⚠️ `bridge_logic.py`·`setup.py`·`test_bridge_logic.py` 3개가 `ruff format --check` 미통과
+  (동일 ruff 0.6.9). 노트북 커밋 원본 상태이므로 대량 재포맷하지 않고 남겨둠 — 노트북에서 처리 권장.
+- 사전 커밋 `00afd31`: `scripts/scan_analyze.py` ruff 23건(ANN/E501/F541/E741) 정리 후 추가.
+
+### 미검증 (다음 단계)
+
+AI 스택 8노드 기동 · 타겟 등록(FE/REST/CLI) · `/target_person`·`/cmd_vel` 실측 ·
+STM 브릿지 연결 · 바퀴 회전 · 바닥 추종 · AI Ctrl+C 정지 지연 · `camera_fov_deg=58.0` 진위.
+
+<details>
+<summary>원본 출력</summary>
+
+증거 파일: `ros2_ws/log/phase2_20260805/` — `S0_probe_baseline.log`,
+`S0_probe_person_center.log`, `S0_probe_person_side.log`, `S0_scan_hz.log`,
+`S1_mqtt_bridge.log`, `S1_cancel_echo.log`, `S1_target_pose_echo.log`,
+`env_lidar.sh`, `launch_lidar.sh`, `launch_mqtt_bridge.sh`
+(`.gitignore`의 `log/`로 커밋 제외 — Jetson 로컬에만 존재)
+
+```
+=== paho ===
+$ python3 -c "import paho.mqtt; print(paho.mqtt.__version__)"
+2.1.0
+$ apt-cache policy python3-paho-mqtt
+  Installed: (none)      Candidate: 1.5.1-1        ← 설치하지 않음
+
+=== colcon build ===
+Summary: 6 packages finished [5.30s]
+$ ros2 pkg executables choll_mqtt_bridge
+choll_mqtt_bridge mqtt_bridge
+
+=== pytest ===
+52 passed in 0.15s      (choll_nav/test_nav_logic.py 31 + choll_mqtt_bridge 21)
+
+=== MQTT 브릿지 (실브로커 your-server.example.com:1883) ===
+== paho: 2.1.0
+[INFO] [mqtt_bridge]: MQTT 브로커 접속 시도: your-server.example.com:1883
+[INFO] [mqtt_bridge]: MQTT 접속·구독 완료: cmd/move/cart (QoS1)
+[INFO] [mqtt_bridge]: CANCEL → /cart/cancel requestId='test-1'
+[INFO] [mqtt_bridge]: MOVE → /cart/target_pose (1.50, -0.80) requestId='move-1' zoneId=None
+[WARN] [mqtt_bridge]: 명령 무시: target.x/y가 숫자가 아님
+[WARN] [mqtt_bridge]: FOLLOW 명령 수신 — EM/AI 수신측 계약 미확정이라 보류: {'kind': 'follow', 'action': 'FOLLOW_START'}
+[INFO] [mqtt_bridge]: SELECT_TARGET 수신 — AI fe_bridge_node가 /select_target 변환을 담당하므로 이 브릿지는 무시
+
+$ ros2 topic echo /cart/cancel --once
+data: test-1
+---
+$ ros2 topic echo /cart/target_pose --once
+header:
+  frame_id: map
+pose:
+  position: {x: 1.5, y: -0.8, z: 0.0}
+  orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+---
+
+=== 라이다 /scan ===
+average rate: 11.364   min: 0.079s max: 0.097s std dev: 0.00357s window: 109
+440 빔, inc=0.8200deg, range=[0.12, 10.00], intensities 전부 0 (X4 Pro 싱글채널)
+※ 어제는 430빔/0.8392deg — 드라이버의 고정 포인트 리샘플링이 세션마다 약간 달라진다
+  ("Real points 434 > fixed points 430" 경고와 동일 원인). 각도 해석에는 영향 없음.
+
+=== [baseline] 사람 없음 — 원시값 분류 ===
+-- AI 조회창 +-29deg (70 빔 x 40 스캔 = 2800 샘플)
+     valid        1999   71.4%
+     zero          801   28.6%
+-- 전방 180deg (220 빔 x 40 스캔 = 8800 샘플)
+     valid        5410   61.5%
+     zero         3390   38.5%
+-- 전체 360deg (440 빔 x 40 스캔 = 17600 샘플)
+     valid       11531   65.5%
+     zero         6069   34.5%
+   (above_max / inf / NaN = 0건)
+
+조회창 정면부 빔별 (유효/40, 중앙값):
+       -5.33deg  4.029m  40/40      -0.41deg  5.366m  40/40
+       -4.51deg  4.047m  38/40      +0.41deg  5.368m  40/40
+       -3.69deg  5.065m   3/40      +1.23deg  5.354m  37/40
+       -2.87deg  5.054m  34/40      +2.05deg  5.073m  31/40
+       -2.05deg  5.357m  39/40      +2.87deg  4.978m  31/40
+       -1.23deg  5.365m  39/40
+
+근거리 클러스터 (기준):
+     -75.85.. -72.57deg  (5 빔)  최근 0.130m   ← 기둥
+     +75.03.. +75.85deg  (2 빔)  최근 0.150m   ← 기둥
+     -43.87.. -33.21deg  (14 빔) 최근 2.141m   ← 주변 물체
+     +38.95.. +44.69deg  (8 빔)  최근 2.735m
+     (그 외 |angle|>112deg 후방 다수)
+
+=== [person_center] 카메라 정면 1.5 m ===
+-- AI 조회창 +-29deg : valid 2146 (76.6%) / zero 654 (23.4%)
+근거리 클러스터에 신규 등장:
+      -7.79..  +2.87deg  (14 빔)  최근 1.562m  중앙 1.571m   ← 사람
+      (기준 상태에서 이 구간은 4.0~5.4 m)
+
+=== [person_camera_right] 본인 왼손 방향(=카메라 오른쪽) 1 m 이동 ===
+근거리 클러스터:
+     +20.91.. +31.57deg  (14 빔)  최근 1.937m  중앙 1.966m   ← 사람
+      -7.79..  +2.87deg  구간은 근거리에서 사라짐 (사람이 빠짐)
+
+±50deg 빔별 상세:
+   +20.91deg  1.946m  21/40        +26.65deg  1.956m  40/40
+   +21.73deg  1.927m  38/40        +27.47deg  1.951m  40/40
+   +22.55deg  1.925m  40/40        +28.29deg  1.952m  40/40
+   +23.37deg  1.935m  40/40        +29.11deg  1.950m  40/40
+   +24.19deg  1.939m  40/40        +29.93deg  1.959m  40/40
+   +25.01deg  1.942m  40/40        +30.75deg  1.980m  38/40
+   +25.83deg  1.948m  40/40        +31.57deg  2.051m  19/40
+
+=== 설정 교차확인 ===
+x4pro.yaml:41  reversion: false
+x4pro.yaml:42  inverted: false
+follow_robot_launch.py:147  lidar_yaw_offset_deg: 0.0    → 실측 -2.5deg, 유지 타당
+follow_robot_launch.py:148  lidar_mirrored: True         → 실측으로 확인, 유지 타당
+## 2026-08-05 — ✅ EM choll_mqtt_bridge 이관: ruff·pytest 21 통과 (Claude, 노트북)
+
+- **명령**: `~/.local/bin/ruff check --config pyproject.toml embedded/Lidar/src/choll_mqtt_bridge/` + `python3 -m pytest embedded/Lidar/src/choll_mqtt_bridge/test/test_bridge_logic.py -q`
+- **환경**: 노트북 Ubuntu 22.04, Python 3.10, ruff 0.6.9. colcon build는 노트북 ws(`~/choll/embeded`) 동일 소스로 통과.
+- **커밋**: 이관 커밋에 포함 (MQTT↔ROS2 브릿지 패키지 추가)
+- **맥락**: MQTT-04 `cmd/move/cart`(MOVE/CANCEL)→ROS 변환 + `/robot_pose`→MQTT-01 `status/position` 발행 브릿지.
+  페이로드는 BE 파서(`MqttPositionMessageHandler`) 실측 계약(x/y/timestamp ISO-8601 + yaw 추가 송신).
+  실브로커 접속 검증(CONNACK 0, `cmd/move/cart` QoS1 구독 승인)은 노트북에서 완료 — 엔드투엔드 스모크는 Jetson STEP에서 예정.
+### ⚠️ 이 기록의 한계
+
+- **방위 ground truth 는 여전히 없다.** 거리만 확인됐고 실제 횡방향 이탈·최종 기울기는
+  측정되지 않았다. 관측 2·3의 "실제로 휜다" 가설은 **아직 검증되지 않은 가설**이다.
+- **표본 5개**(세션1 3 + 세션2 2). 세션 간 조건 차이(속도 프로파일, 하중, 배터리, 바닥)가
+  기록되지 않아 관측 1의 원인을 좁힐 수 없다.
+- **회차 사이 카트 재정렬 여부가 기록되지 않았다.** 오도메트리 yaw 가 5회에 걸쳐
+  -0.096 → -0.863(누적 약 -44°)로 단조 누적되는데, 카트를 매번 물리적으로 다시 정렬했다면
+  이는 오도메트리 쪽 오차를 시사하고, 정렬하지 않았다면 카트가 실제로 44° 돌아 있어야 한다.
+- 관측 3의 PI 게인 0.0f 는 **코드·문서 확인 결과**이며, 그것이 실제로 좌우 속도차를 만드는지는
+  **측정하지 않았다.**
+
+## 2026-08-04 18:20 — ⏸ EM Phase 2(AI 카메라 추종) Stage 0 중단: AI 조회창 ±29° 라이다 유효율 8.6% 실측 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
+  브랜치 `em/feature/motor-Lidar-integrated` @ `04fd0be`(origin 푸시됨). 워킹트리 변경 없음.
+- **범위**: Phase 2(AI 카메라 추종) **Stage 0 사전점검만.**
+  **브릿지·teleop·AI 스택은 한 번도 기동하지 않았다** → `/cmd_vel` 구독자 0,
+  **모터 경로는 이번 세션에 열린 적이 없다**(전 구간 모터 위험 0).
+- **중단 사유**: 아래 섹터 측정치는 **무효**.
+- 🔴 **2026-08-05 정정 — 이 항목의 섹터 측정치는 폐기한다.** 중단 시점에는 "사용자가 라이다 장착 위치를
+  변경했다"고 적었으나, 실제로는 **라이다 장착 위치는 바뀌지 않았고 팀원들이 카트 자체를 다른 장소로
+  옮긴 상태**에서 측정한 것이었다. 실제 카트 위치에서 재측정한 결과는 정반대다
+  (조회창 ±29° valid 8.6% → **71.4%**, 정면 유효 빔 0개 → **전 빔 유효**).
+  아래의 "전진 없이 제자리 회전만" 블로커는 **실재하지 않는다.** 정본은 2026-08-05 09:10 항목.
+  기둥 위치(±75° 부근 0.13/0.15 m)만 재측정에서도 재현되었다.
+
+### ✅ 통과한 것
+
+| 항목 | 명령 | 결과 |
+|---|---|---|
+| 권한(재부팅 후 네이티브) | `id -nG` | `dialout` · `video` 포함 ✅ |
+| 장치 | `ls /dev/serial/by-id/`, `ls /dev/video*` | X4Pro(CP2102→ttyUSB0), STM32(ST-LINK→ttyACM0), Brio 100(video0/1) ✅ |
+| systemd 경합 | `systemctl is-enabled/is-active ydlidar.service` | `disabled` / `inactive` ✅ (이전 세션 무력화 유지) |
+| 패키지 shadow | `ros2 pkg prefix` ×4 | 드라이버·bringup = `embedded/Lidar/install`, 브릿지 = `ros2_ws/install`, **AI = `~/Choll/ai/install`** (stale `~/Choll/ros2_ws` 아님) ✅ |
+| 라이다 기동 | `ros2 launch choll_slam_bringup lidar.launch.py` | 노드 2개(`ydlidar_ros2_driver_node`, `base_link_to_laser_frame`) ✅ |
+| `/scan` 주기 | `ros2 topic hz /scan` | **11.445 / 11.462 / 11.449 Hz** (규격 6~12) ✅ |
+| `/scan` 헤더 | `ros2 topic echo /scan --once --no-arr` | `frame_id=laser_frame`, `angle_min/max=∓π`, 430빔, `inc=0.8392°`, `range_min=0.12`, `range_max=10.0` ✅ |
+| TF | `tf2_echo base_link laser_frame` | `[0, 0, 0.20]`, RPY 0 ✅ (z=0.20은 TODO-실측 placeholder — Phase 3-1 대상. control_node는 TF를 쓰지 않으므로 Phase 2에는 무영향) |
+| 정리 | `kill -INT` → `pgrep` | 라이다·static TF 종료, `ttyUSB0` 점유자 **0** ✅ |
+
+### 🔴 새로 실측한 것 — AI 조회창의 라이다 유효율 (구 라이다 위치 기준)
+
+`control_node`는 `camera_fov_deg=58.0` → 방위각 **±29° 창**에서만 거리를 조회한다
+(`min_valid_range_in_span`, `control_node.py:319`). 40스캔 · 빔별 유효율(유효=finite ∧ 0.12≤r≤10.0)로 실측:
+
+| 구간 | 유효율>0.6 빔 | 유효 거리 중앙값 (최소/중간/최대) |
+|---|---|---|
+| **AI 조회창 ±29°** | **6 / 70 = 8.6%** | 0.598 / 0.745 / 1.029 m |
+| 전방 180° | 47 / 214 = 22% | 0.300 / 0.932 / 6.606 m |
+| 후방 좌 (−180..−90°) | 39 / 107 = 36% | 0.333 / 6.316 / 7.083 m |
+| 후방 우 (+90..+180°) | 60 / 109 = 55% | 0.253 / 3.691 / 6.395 m |
+
+0.5 m 미만 **상시 빔**(자기 구조물 후보, std ≤ 0.003 m로 매우 안정):
+
+```
+전방:  -57.48°  0.300 m (유효율 0.70)      -53.29°  0.431 m (0.97)
+후방좌: -134.69° 0.334 / -133.85° 0.333 / -133.01° 0.340 m
+후방우: +93.57° 0.253 / +94.41° 0.254 / +95.24° 0.255 / +96.08° 0.256 / +96.92° 0.260 m
+```
+
+조회창 5° 빈 프로파일 — **정면 `−5..0°`와 `0..+5°`에 유효 빔 0개**:
+
+```
+ -30..-25° 없음   -25..-20° 없음   -20..-15° n=1 0.982
+ -15..-10° n=2 1.029~3.013        -10.. -5° n=1 1.742
+  -5.. +0° 없음  ← 정면            +0.. +5° 없음  ← 정면
+  +5..+10° n=2 0.598~0.669        +10..+15° n=1 0.681
+ +15..+20° 없음                   +20..+25° n=2 0.661~0.688
+ +25..+30° n=2 0.745~0.930
+```
+
+**의미**: 이 상태로 Phase 2를 돌리면 사람이 정면에 서도 거리 조회가 `None`을 반환하고
+`control_node.py:344`가 `linear_vel = 0.0`으로 고정한다 → **전진 없이 제자리 회전만 하는 상태.**
+Phase 2 실패 플레이북 1행과 정확히 일치하는 증상을, 모터를 켜기 전에 잡아냈다.
+
+**⚠️ 미판별 (중단 지점)**: 무효 빔이 ①카트 구조물 차폐(`range=0.0`) ②`>range_max`(그 방향이 빈 공간)
+③NaN 중 무엇인지 **원시값으로 구분하는 단계에서 중단**됐다. 판별 결과에 따라 대응이 갈린다.
+- `0.0` 다수 → 구조물 차폐 → **라이다 장착 위치·높이 변경**이 필요(파라미터로 해결 불가)
+- `>max` 다수 → 그 방향이 비어 있을 뿐 → 사람을 1.5 m 정면에 세워 재측정하면 정상일 수 있음
+
+또한 `x4pro.yaml:54 ignore_array: ""`가 비어 있어 위 상시 빔들이 그대로 통과한다
+(`range_min: 0.12`를 넘으므로). **매핑(Phase 3) 전에는 반드시 마스킹**해야 카트 구조물이
+지도·costmap에 영구 장애물로 박히지 않는다.
+
+### 미검증 (이번 세션에 손대지 않음)
+
+AI 스택 8노드 기동 · 타겟 등록(FE/REST/CLI 3경로) · `lidar_mirrored`·`lidar_yaw_offset_deg`
+캘리브레이션 · `/cmd_vel` 실측 · 브릿지 연결 · 바퀴 회전 · 바닥 추종 주행 · AI Ctrl+C 정지 지연.
+
+<details>
+<summary>원본 출력 (Stage 0 전체)</summary>
+
+증거 파일: `ros2_ws/log/phase2_20260804/` — `S0_env.log`, `S0_prefix.log`, `S0_scan_hz.log`,
+`S0_sector.log`, `S0_lidar.log`, `env_lidar.sh`, `launch_lidar.sh`
+(`.gitignore`의 `log/`로 커밋 제외 — Jetson 로컬에만 존재)
+
+```
+== date: 2026-08-04T18:06:58+09:00
+== branch: em/feature/motor-Lidar-integrated @ 04fd0be
+== id: ssafy adm dialout cdrom sudo audio dip video plugdev render i2c lpadmin gdm sambashare weston-launch gpio jtop
+== ROS_DOMAIN_ID: '<unset=0>'
+
+== ydlidar.service ==
+disabled
+inactive
+
+== devices ==
+crw-rw----+ 1 root video 81, 0 Jan  1  1970 /dev/video0
+crw-rw----+ 1 root video 81, 1 Jan  1  1970 /dev/video1
+lrwxrwxrwx 1 root root 13 Jan  1  1970 usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0 -> ../../ttyUSB0
+lrwxrwxrwx 1 root root 13 Jan  1  1970 usb-STMicroelectronics_STM32_STLink_066FFF525771555067235049-if02 -> ../../ttyACM0
+lrwxrwxrwx 1 root root 7 Jan  1  1970 /dev/ydlidar -> ttyUSB0
+
+== running ROS procs ==   (기동 전)
+(none)
+== free ==
+               total        used        free      shared  buff/cache   available
+Mem:           7.4Gi       2.0Gi       2.4Gi        37Mi       3.1Gi       5.2Gi
+== nvpmodel ==
+pmode:0002
+
+== pkg prefix ==
+ydlidar_ros2_driver : /home/ssafy/S15P11C101/embedded/Lidar/install/ydlidar_ros2_driver
+choll_slam_bringup  : /home/ssafy/S15P11C101/embedded/Lidar/install/choll_slam_bringup
+stm_serial_bridge   : /home/ssafy/S15P11C101/ros2_ws/install/stm_serial_bridge
+person_follow_robot : /home/ssafy/Choll/ai/install/person_follow_robot
+
+== ros2 node list ==
+/base_link_to_laser_frame
+/ydlidar_ros2_driver_node
+
+== /scan hz (10s) ==
+average rate: 11.445   min: 0.076s max: 0.101s std dev: 0.00595s window: 85
+average rate: 11.462   min: 0.076s max: 0.101s std dev: 0.00598s window: 97
+average rate: 11.449   min: 0.073s max: 0.101s std dev: 0.00619s window: 109
+
+== /scan 헤더 ==
+frame_id: laser_frame
+angle_min: -3.1415927410125732     angle_max: 3.1415927410125732
+angle_increment: 0.014646119438111782   scan_time: 0.09201499819755554
+range_min: 0.11999999731779099     range_max: 10.0
+ranges: length 430
+
+== TF base_link -> laser_frame ==
+- Translation: [0.000, 0.000, 0.200]
+- Rotation: in RPY (degree) [0.000, -0.000, 0.000]
+
+== 섹터 분석 (40 스캔, 430 빔, inc=0.8392°) ==
+=== AI 조회창 (camera_fov 58° → ±29°): -29° ~ 29°  (70 빔) ===
+  유효율>0.6 빔: 6/70
+  거리 중앙값 최소 0.598 m / 중간 0.745 m / 최대 1.029 m
+  ✅ 0.5 m 미만 상시 빔 없음
+=== 전방 180°: -90° ~ 90°  (214 빔) ===
+  유효율>0.6 빔: 47/214
+  거리 중앙값 최소 0.300 m / 중간 0.932 m / 최대 6.606 m
+  🔴 0.5 m 미만 상시 빔 2개:
+      -57.48°  중앙값 0.300 m  유효율 0.70  std 0.0017
+      -53.29°  중앙값 0.431 m  유효율 0.97  std 0.0025
+=== 후방 좌: -180° ~ -90°  (107 빔) ===
+  유효율>0.6 빔: 39/107
+  거리 중앙값 최소 0.333 m / 중간 6.316 m / 최대 7.083 m
+  🔴 0.5 m 미만 상시 빔 3개:
+     -134.69°  중앙값 0.334 m  유효율 0.85  std 0.0019
+     -133.85°  중앙값 0.333 m  유효율 0.82  std 0.0019
+     -133.01°  중앙값 0.340 m  유효율 0.68  std 0.0022
+=== 후방 우: 90° ~ 180°  (109 빔) ===
+  유효율>0.6 빔: 60/109
+  거리 중앙값 최소 0.253 m / 중간 3.691 m / 최대 6.395 m
+  🔴 0.5 m 미만 상시 빔 5개:
+      +93.57°  중앙값 0.253 m  유효율 0.93  std 0.0008
+      +94.41°  중앙값 0.254 m  유효율 1.00  std 0.0012
+      +95.24°  중앙값 0.255 m  유효율 1.00  std 0.0010
+      +96.08°  중앙값 0.256 m  유효율 1.00  std 0.0014
+      +96.92°  중앙값 0.260 m  유효율 0.78  std 0.0020
+
+=== 조회창 5° 빈 프로파일 ===
+   -30.. -25°  유효 빔 없음
+   -25.. -20°  유효 빔 없음
+   -20.. -15°  n= 1  최소 0.982  중앙 0.982  최대 0.982
+   -15.. -10°  n= 2  최소 1.029  중앙 3.013  최대 3.013
+   -10..  -5°  n= 1  최소 1.742  중앙 1.742  최대 1.742
+    -5..  +0°  유효 빔 없음
+    +0..  +5°  유효 빔 없음
+    +5.. +10°  n= 2  최소 0.598  중앙 0.669  최대 0.669
+   +10.. +15°  n= 1  최소 0.681  중앙 0.681  최대 0.681
+   +15.. +20°  유효 빔 없음
+   +20.. +25°  n= 2  최소 0.661  중앙 0.688  최대 0.688
+   +25.. +30°  n= 2  최소 0.745  중앙 0.930  최대 0.930
+
+== 종료 확인 ==
+--- 브릿지/teleop (있어선 안 됨) ---
+  (없음 — 모터 경로는 한 번도 열리지 않았음)
+✅ 9667(static_tf) 종료
+--- 남은 ROS 프로세스 ---
+  없음
+ttyUSB0 점유자 수: 0
+## 2026-08-04 09:55 — ✅ BE: TRACKS_UPDATED 중계를 영상 시청자 있을 때만으로 게이트 (Claude)
+
+- **배경**: AI가 status/target을 5Hz 상시 발행 → BE가 무조건 WS 중계 → FE 콘솔에
+  TRACKS_UPDATED 스팸 (선택 모달 밖에서도). FE는 선택 모달을 열 때만 영상 WS 시청자로
+  붙으므로(명세 그대로), **시청자 존재 여부를 게이트**로 사용 — FE 수정 불필요
+- **변경** (브랜치 `backend/feature/tracks-relay-gating`):
+  - `VideoRelayHandler.hasViewers(cartId)` 신규
+  - `MqttTracksMessageHandler`: 시청자 없으면 파싱 전에 조기 리턴 (중계·로그 없음)
+- **결과**: 23 suites, **82 tests, 0 failures** (신규 1: 시청자 없으면 미중계.
+  기존 4개는 시청자 있음 스텁으로 갱신)
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+
+## 2026-08-04 09:35 — 🐛→✅ 배포 후 실기 연동: 추종 시작 400 원인 분석 + 재시작 잔재 상태 버그 수정 (Claude)
+
+- **증상**: 배포 서버에서 FE 추종 시작 → 사서 선택 시 `POST /follow` 400.
+  젯슨 로그엔 영상 WS 502 Bad Gateway 1회.
+- **진단** (배포 서버 읽기 전용 프로브):
+  - 400 본문 = "목적지 이동 중에는 추종을 시작할 수 없습니다" — 카트 상태 MOVING(=NAVIGATING)
+  - `DELETE /navigation`이 204인데 상태가 안 풀림 → **배포 재시작으로 인메모리 이동 세션은
+    사라졌는데 DB operationStatus만 NAVIGATING으로 남은 고아 상태** (cancel이 세션 없으면
+    상태 청소 없이 무시하는 버그). `POST /navigation`(202, navigationId=1로 재시작 확인) 후
+    `DELETE`로 응급 복구 → IDLE 확인
+  - 영상 502는 배포 재시작 순간의 일시 현상 — 뷰어 접속 검증 결과 **3초에 33프레임(≈11fps)
+    정상 스트리밍**, fe_bridge 자동 재접속 성공. SELECT_TARGET → `/select_target` 변환도 정상
+- **수정** (브랜치 `backend/fix/stale-operation-status`):
+  - `NavigationService.cancel` / `FollowControlService.stop`: 세션이 없어도 DB 상태가
+    NAVIGATING/FOLLOWING이면 IDLE로 청소 (MQTT·WS 발행 없이)
+  - `CartOperationStatusReconciler` 신규 (ApplicationRunner): **기동 시** NAVIGATING/FOLLOWING
+    잔재를 일괄 IDLE 리셋 — 기동 직후엔 어떤 인메모리 세션도 존재할 수 없으므로 안전
+- **결과**: 24 suites, **84 tests, 0 failures** (신규 3: cancel 고아 정리, stop 고아 정리,
+  기동 리컨실러)
+
+<details>
+<summary>배포 서버 프로브 원본 + gradle 집계</summary>
+
+```
+GET /api/carts/1 -> {"status":"MOVING","online":true,...}
+POST /follow -> 400 "목적지 이동 중에는 추종을 시작할 수 없습니다..."
+DELETE /navigation -> 204 (상태 그대로 MOVING — 버그)
+POST /navigation {"zoneId":1} -> 202 {"navigationId":1,...}  # id=1 → 재시작 후 첫 세션
+DELETE /navigation -> 204
+GET /api/carts/1 -> {"status":"IDLE",...}  # 복구 확인
+ws://.../ws/carts/1/video -> frames received in ~3s: 33
+```
+
+```
+# build/test-results/test/*.xml 집계
+suites=24 tests=84 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-04 — ✅ EM 통합브랜치 실기: WASD 수동주행 재검증 + 펌웨어 통신 타임아웃 5초 실측 + 데드존 실측 (relu 실기 / Claude 실행·기록)
+
+- **환경**: Jetson Orin Nano, JetPack 6.2(L4T R36.4.7), Ubuntu 22.04 arm64, ROS2 Humble.
+  실제 STM32(NUCLEO-F446RE, ST-LINK `0483:374b` → `/dev/ttyACM0`) + 모터 + 쫄래쫄래 선반 카트.
+  브릿지 `mode:=hardware speed_profile:=slow`(`max_wheel_rad_s=2.0`), 전 구간 `ROS_DOMAIN_ID=42`로 격리
+- **브랜치**: `em/feature/motor-Lidar-integrated` (`355cb0d`). **코드 변경 0건** — 검증·문서만
+- **증거 파일**: `ros2_ws/log/phase1_20260804/` (브릿지 로그 667 KB, teleop 화면 캡처 3종, check_stm_topics)
+- **목적**: 이 브랜치의 실기 동작은 미검증이었고(머지 후 회귀는 `pytest 449` 순수 로직만),
+  기존 실기 기록은 전부 "사용자 보고값 / 원본 미확보" 한계를 달고 있었다 → **원본 증거 확보**가 목표
+
+### 확인된 것
+
+| 항목 | 결과 |
+|---|---|
+| `pytest` (teleop 69 + bridge 349) | **418 passed** |
+| `verify_bridge_mock.sh` | **3/3 통과** (exit 0, 잔존 프로세스 없음, 로그에 `ttyACM` 0건 = 실제 장치 미개방) |
+| 브릿지 파라미터 | `dry_run=False`, `max_wheel_rad_s=2.0`, `baud_rate=115200`, `wheel_radius_m=0.065`, `wheel_separation_m=0.38`, `tx_rate_hz=20.0`, `cmd_vel_timeout_sec=0.5`, `status_timeout_sec=0.5` |
+| `/stm/connected` · `/stm/fault` | `true` · `NONE`, `check_stm_topics` **✅ 합격**(6토픽) |
+| **RX/STATUS 경로** | **실기 확인** (STATUS #1~#6600+ 수신) — 노드 docstring의 "PTY-only, unverified"는 이제 stale |
+| watchdog | `active → timed_out` 전이 **0.501초** (설정 0.5s와 일치) |
+| Speed Profile 램프 | target이 **틱당 0.2 rad/s** 증가 = `MOTOR_ACCEL_LIMIT_RAD_S2 4.0` × 0.05s와 일치 |
+| 개루프 PWM | **PWM = 10 × target rad/s** = `MOTOR_OPEN_LOOP_PWM_PER_RAD_S 10.0`과 일치 |
+| 직진 (공중) | target `2.00/2.00`, actual `2.22/2.16` (편차 **2.7%**), PWM `20/20`, 엔코더 ΔL 62802 / ΔR 60608 (편차 3.5%) |
+| 후진 (공중) | target `-2.00/-2.00`, actual `-2.19/-2.17`, 엔코더 양쪽 **감소** |
+| 제자리 회전 (공중) | CCW target **`-1.75/+1.75`**, CW **`+1.75/-1.75`**, PWM `∓17/±17`, 엔코더 좌우 반대 |
+| **`wheel_separation_m=0.38` 반영 확인** | 회전 target `∓1.754`가 실측됨 (L=0.30이면 `1.385`였을 것) → 실측값이 실제 경로에 반영돼 있음 |
+| teleop 화면 ↔ 브릿지 수신 | 단계 1~5의 `linear.x 0.026/0.052/0.078/0.104/0.130` ↔ target `0.40/0.80/1.20/1.60/2.00` **1:1 일치** |
+| teleop 상태 전이 | `STOPPED → ARMED → TIMEOUT → QUIT`, lease 만료 자동정지 |
+| **`Space` 정지 — 실기 최초** | 공중 + **바닥 부하 상태** 양쪽 확인 (`#6416 target 2.00, actual L=1.84 R=1.95` → `#6422 target 0.00, actual ~0`) |
+| **DISARMED 충돌 차단 — 실기 최초** | 외부 zero Twist 발행자 투입 → `/cmd_vel` Pub 1→2, teleop `DISARMED`, **W를 눌러도 브릿지 수신 26/26 샘플 전부 `0.00/0.00`**. 발행자 제거 후 Pub 2→1, 새 키 입력으로만 복귀(자동 재개 없음) |
+| 바닥 주행 | **3.5 m × 3.5 m 구역 주행 완료**. 속도 단계 **5/5 유지**, target `2.00/2.00` 161샘플, CCW 61샘플, CW 20샘플, 후진 3샘플 |
+| 바닥 부하 시 실제 속도 | PWM 20에서 actual `L≈1.85 R≈1.97` (공중 `2.22/2.16`보다 낮음, 좌우 편차 약 6%) |
+| STALL / FAULT / 속도제한 / ERROR | **전 구간 0건** |
+| 엔코더 누적(바닥 세션 종료 시) | `L=2,231,388 R=2,758,456` |
+
+### 🔴 새로 실측한 값 — 펌웨어 통신 타임아웃 = **약 5.0초** (문서와 불일치 해소)
+
+주행 중(바퀴 공중, 바퀴 1.0 rad/s) 브릿지를 `SIGKILL` 하고 원시 시리얼을 인수해 STATUS를 캡처했다.
+
+```
+T_kill           = 1785827829.4306
+포트 인수         = 1785827829.4471   (kill 후 16.5 ms, stty 재시도 0회)
+캡처 STATUS       = 121줄 @ 10Hz
+첫 zero-PWM       = 51번째 줄  →  캡처시작 +5.0초
+```
+
+→ `motion_controller.c:14` 의 `MOTION_CONTROLLER_COMM_TIMEOUT_MS 5000u` 가 **실제 동작값**이고,
+`motion_controller.c:13` 과 `app_event.h:22` 의 **"300ms" 주석 두 곳이 stale**이다.
+전원 차단은 필요하지 않았고 모터는 스스로 멈췄다. 정지 시 `pwm 10,10 → 0,0` 으로 램프 없음.
+
+**안전 함의**: 브릿지가 죽으면 STM32는 최대 5초간 마지막 속도를 유지한다.
+slow 프로파일 0.13 m/s면 **약 0.65 m**를 더 간다 → 바닥 주행 시 진행 방향 여유 거리에 반영해야 한다.
+
+### 🔴 새로 실측한 값 — 개루프 데드존 (`PWM<20`)
+
+공중에서 측정. 문서의 "PWM<20은 비선형 데드존" 경고가 숫자로 확인됐다.
+
+```
+PWM  4 (단계 1) : actual L=0.00 R=0.00   ← 바퀴가 공중인데도 무회전
+PWM  8 (단계 2) : actual L=0.02 R=1.18   ← 한쪽만 회전 (심한 비대칭)
+PWM 20 (단계 5) : actual L=2.22 R=2.16   ← 대칭 (편차 2.7%)
+```
+
+공중에서도 이러므로 **바닥에서는 더 나쁘다.** 바닥 주행은 **속도 단계 5/5 고정**이 필수다
+(PWM 8에서 한쪽만 1.18 rad/s로 도는 상태는 바닥에서 카트를 급격히 틀어버린다).
+
+### ⚠️ 이 기록의 한계 — 원본 소실 구간 있음
+
+세션 중간에 **Jetson을 보조배터리 연결 때문에 재부팅**했고, 그때 `/tmp` 스크래치패드가 비워져
+**Stage 0~2(mock·펄스·페일세이프·공중 teleop) 구간의 브릿지 원본 로그가 소실**됐다.
+그 구간 수치는 **실행 중 실제 출력을 그대로 인용해 보고한 세션 기록에서 재구성**한 것이다.
+**바닥 주행분과 teleop 화면 캡처 3종은 파일로 보존**돼 있다(`ros2_ws/log/phase1_20260804/`).
+이후 검증은 재부팅에 견디는 `ros2_ws/log/`(gitignore 대상)에 기록하도록 바꿨다.
+
+`ros2 param dump /cart_keyboard_teleop` 은 `Node not found` 로 실패했다(원인 미확인).
+teleop 파라미터는 **명령줄에 명시한 값**(`input_timeout_sec:=1.0 max_linear_mps:=0.13
+max_angular_rps:=0.6 speed_step_count:=5`)과 화면 캡처의 `속도 단계 5 / 5`·`linear.x +0.130`
+으로 확인한다 — teleop 노드는 파라미터를 로그에 전혀 남기지 않는다(`get_logger` 0건).
+
+### ⚠️ 여전히 미검증 (유지)
+
+- **slow 프로파일의 실제 속도 정확도** — 램프(0.5초 가감속) + 엔코더 스케일 12% 미확정 +
+  lease 경계 오차가 겹쳐 **m/s로 환산하지 않는다.** 엔코더 누적으로 환산한 바퀴 경로
+  (L≈11.4 m / R≈13.6 m)는 3.5×3.5 m 구역 주행과 **자릿수가 맞다**는 정합성 확인일 뿐이고,
+  거리 측정으로 주장하지 않는다(제자리 회전은 이동 없이 바퀴 경로만 늘린다)
+- `/stm/wheel_actual_rad_s` 수치 정확도, 엔코더 count/rev 12.1% 원인 — 미확정
+- `bench`(1.0)·`nav2`(6.4) 프로파일의 바닥 주행 — 미검증 유지
+- **속도 단계 ≤4의 바닥 주행** — STALL 래치 위험(PI 적분이 PWM 80까지 상승) 때문에 **의도적으로 미실시**
+- LiDAR/slam_toolbox 동시 실행, 지도 작성 품질 — Phase 3
+- 장시간 SSH 세션에서의 입력 지연·안정성
+
+### 후속 조치 대상 (이번 검증에서 발견한 코드·문서 불일치)
+
+1. `motion_controller.c:13`, `app_event.h:22` 주석 `300ms` → 실제 `5000ms` (위 실측)
+2. `stm_serial_bridge_node.py` docstring "RX/STATUS 경로는 PTY-only" → 실기 확인됨
+3. **브릿지가 종료 시 정지 명령을 보내지 않는다** (`_shutdown()` → `close_serial()` 뿐).
+   주행 중 Ctrl+C 하면 STM이 최대 5초간 마지막 속도 유지 → 종료 순서 규칙(발행자 → 0 확인 → 브릿지)이
+   안전 속성이다. `close_serial()` 전에 `SET_WHEEL_VEL,0.000,0.000` 송신하는 소규모 수정 검토 가치 있음
+4. `nav2` 프로파일: launch 설명 `6.0` vs `speed_profile_nav2.yaml` 실제 `6.4`
+5. **NUCLEO B1 버튼은 Latched Safe Stop을 *걸고*, 해제는 RESET(NRST)/전원 재투입만 가능**
+   (`latched_stopped`는 `StopController_Init()`=부팅에서만 0). "B1으로 해제" 표현은 오류
+6. `ros2 param dump /cart_keyboard_teleop` 실패 원인 확인
+
+<details>
+<summary>원본 출력 (파일 보존분 + 세션 기록 재구성분)</summary>
+
+```
+$ python3 -m pytest src/cart_teleop/test src/stm_serial_bridge/test -q
+418 passed in 2.77s
+
+$ bash scripts/verify_bridge_mock.sh
+ 결과: ✅ 3개 시나리오 전부 통과 (잔존 프로세스 없음)
+   [1/3] connect  ---> ✅ 통과
+   [2/3] cmd_vel  encoder_total 1차: array('i', [17591, 17591]) / 2차: array('i', [66750, 66750])  ---> ✅ 통과
+   [3/3] disconnect  /stm/connected 2 False  ---> ✅ 통과
+ (로그에 'ttyACM' 0건 = 실제 장치 미개방)
+
+$ ros2 run stm_serial_bridge check_stm_topics --timeout-sec 10     # 하드웨어
+  OK  /stm/wheel_target_rad_s         1  [0.0, 0.0]
+  OK  /stm/wheel_actual_rad_s         1  [0.0, 0.0]
+  OK  /stm/pwm                        1  [0, 0]
+  OK  /stm/encoder_total              1  [0, 0]
+  OK  /stm/connected                  1  True
+  OK  /stm/fault                      1  NONE
+  결과: ✅ 합격
+
+# 브릿지 기동 로그 (파라미터)
+  serial_port  = /dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066FFF525771555067235049-if02
+  baud_rate = 115200 / wheel_radius_m = 0.065 / wheel_separation_m = 0.38
+  tx_rate_hz = 20.0 / cmd_vel_timeout_sec = 0.5 / dry_run = False
+  max_wheel_rad_s = 2.0 / rx_poll_hz = 50.0 / status_timeout_sec = 0.5
+  /stm/connected: true — 유효한 STATUS 수신 시작
+
+# 공중 단발 펄스 x=0.065  (watchdog 0.501초)
+watchdog state: waiting -> active     [1785827041.236165537]
+watchdog state: active -> timed_out   [1785827041.736701869]
+target 0.2/0.4/0.6/0.8/1.0 (틱당 +0.2)   pwm 2/4/6/8/10
+STATUS #4971: target L=0.60 R=0.60, actual L=0.84 R=0.58, pwm L=6 R=6, enc L=3739 R=2304
+
+# 공중 2초 펄스 x=0.13
+STATUS #5454: target L=2.00 R=2.00, actual L=2.20 R=2.14, pwm L=20 R=20, enc L=15380 R=13303
+STATUS #5466: target L=2.00 R=2.00, actual L=2.22 R=2.16, pwm L=20 R=20, enc L=48167 R=45301
+
+# 공중 후진 / 회전
+target L=-2.00 R=-2.00, actual L=-2.19 R=-2.17, pwm L=-20 R=-20   (엔코더 양쪽 감소)
+target L=-1.75 R=1.75,  actual L=-1.80 R=1.78,  pwm L=-17 R=17    (CCW: L 감소, R 증가)
+target L=1.75 R=-1.75,  actual L=1.83 R=-1.80,  pwm L=17 R=-17    (CW: 반대)
+
+# 페일세이프 실측
+T_kill=1785827829.430572869 / 포트인수=1785827829.447056289 / stty_retries=0
+캡처 STATUS 121줄, 첫 zero-PWM = 51번째 줄 → +5.0초
+STATUS,1.00,0.29,1.00,0.57,10,10,34174,31182     (kill 직후, 계속 주행)
+STATUS,0.00,0.00,0.00,0.64,0,0,35831,68972       (5.0초 후 PWM 0, 램프 없음)
+
+# DISARMED (외부 zero Twist 발행자 투입)
+/cmd_vel Publisher count: 1 → 2 → (제거) → 1
+DISARMED 구간 브릿지 수신: 26  target L=0.00 R=0.00, actual L=0.00 R=0.00, pwm L=0 R=0   (W 눌렀음에도)
+
+# 바닥 주행 (3.5m x 3.5m) — 브릿지 수신 분포
+    661 target L=0.00 R=0.00        661 pwm L=0 R=0
+    161 target L=2.00 R=2.00        161 pwm L=20 R=20
+     61 target L=-1.75 R=1.75        61 pwm L=-17 R=17
+     20 target L=1.75 R=-1.75        20 pwm L=17 R=-17
+      3 target L=-2.00 R=-2.00        3 pwm L=-20 R=-20
+STALL/FAULT/속도제한 0건, ERROR/MALFORMED 0건
+watchdog: waiting→active 1회, active→timed_out 1회 (teleop 20Hz 발행 중에는 watchdog 미발동)
+최종 enc L=2231388 R=2758456
+
+# Space 부하 정지
+STATUS #6416: target L=2.00 R=2.00, actual L=1.84 R=1.95, pwm L=20 R=20
+STATUS #6422: target L=0.00 R=0.00, actual L=-0.05 R=0.01, pwm L=0 R=0
+
+# teleop 화면 캡처 (script, 바닥 세션)
+속도 단계       : 5 / 5          ← 유일한 값 (끝까지 유지)
+상태            : STOPPED / ARMED / TIMEOUT / QUIT
+linear.x        : +0.130 / -0.130 / +0.000 m/s
+angular.z       : +0.600 / -0.600 / +0.000 rad/s
+마지막 입력 키  : W 전진 / S 후진 / A 제자리 좌회전 / D 제자리 우회전 / Space 정지 / q 종료
+/cmd_vel 충돌   : 없음 (teleop 단독)
+cart_teleop: 정지 명령 발행 후 종료했다.
+
+# 종료 순서 (안전 속성 — 브릿지는 종료 시 정지 명령을 보내지 않으므로)
+teleop q 종료 → 발행자 0 확인 → target/pwm 0 확인 → 브릿지 PGID SIGINT
+/cmd_vel Publisher count: 0 / target L=0.00 R=0.00, pwm L=0 R=0 / fault NONE
+ttyACM 점유자 수: 0
+<details>
+<summary>수정 후 전체 출력</summary>
+
+```text
+> Task :compileJava
+> Task :processResources
+> Task :classes
+> Task :compileTestJava
+> Task :testClasses
+> Task :test
+
+BUILD SUCCESSFUL in 46s
+4 actionable tasks: 4 executed
+
+$ awk 집계 (build/test-results/test/*.xml, 24 files)
+tests=92 skipped=0 failures=0 errors=0
+```
+
+</details>
+
+## 2026-08-04 — ✅ EM 브랜치 통합(Lidar + motor-control) 후 회귀: 449 tests 통과 (Claude)
+
+- **작업**: `em/feature/Lidar`(4fd5a44) + `origin/em/feature/motor-control`(1a1f7a5)
+  → **`em/feature/motor-Lidar-integrated`** 머지 커밋 `3f0b145`
+- **충돌**: `tests/TEST_LOG.md` 1건뿐(양쪽이 같은 위치에 항목 추가). 3-way 스테이지를
+  꺼내 날짜순으로 재조립 — **ours 대비 삭제 0줄**, theirs 대비 Lidar 항목 30줄만 추가로 검증
+- **환경**: Jetson Orin Nano, Ubuntu 22.04 arm64, ROS2 소싱 없이 순수 pytest
+- **결과**: **449 passed** (nav_logic 31 + stm_serial_bridge 349 + cart_teleop 69)
+
+### ⚠️ 이번에 검증하지 **않은** 것 (성공으로 단정하지 말 것)
+
+- `colcon build` — 두 워크스페이스(`embedded/Lidar`, `ros2_ws`) **미실행**
+- 실기 동작 — Nav2 `/cmd_vel` → `stm_serial_bridge` 연결은 **코드가 합쳐졌을 뿐 미검증**.
+  ⚠️ `/cmd_vel` 발행 주체 충돌(Nav2 vs teleop vs AI control_node) 정리 필요
+- ruff: `ros2_ws/src` 89건 / Lidar `test_nav_logic.py` I001 1건 — **머지 이전부터 있던 것**
+  (머지 전 원본 워크트리에서 91건 확인, `pyproject.toml`·Lidar 소스 무변경). 이번 작업 범위 밖이라 미수정
+
+<details>
+<summary>원본 출력</summary>
+
+```
+$ git log -1 --format='parents: %p'
+parents: 4fd5a44 1a1f7a5
+
+$ python3 -m pytest embedded/Lidar/src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.15s
+
+$ cd ros2_ws/src/stm_serial_bridge && python3 -m pytest test/ -q
+........................................................................ [ 20%]
+........................................................................ [ 41%]
+........................................................................ [ 61%]
+........................................................................ [ 82%]
+.............................................................            [100%]
+349 passed in 5.85s
+
+$ cd ros2_ws/src/cart_teleop && python3 -m pytest test/ -q
+.....................................................................    [100%]
+69 passed in 0.27s
+
+$ ruff check --config pyproject.toml ros2_ws/src            # 머지 후
+Found 89 errors.
+$ ruff check --config pyproject.toml <머지 전 원본 워크트리>/ros2_ws/src
+Found 91 errors.                                            # 머지가 만든 문제 아님
+## 2026-08-04 — ✅ EM+ROS2 실기: `cart_teleop` WASD 수동 주행 동작 확인 / ⚠️ 수치 정확도는 미검증 (relu 실기 / Claude 문서 반영)
+
+- **환경**: 실제 STM32 + 모터 연결. `cart_teleop → /cmd_vel → stm_serial_bridge`,
+  Bridge `mode:=hardware` + `speed_profile:=slow`
+- **커밋**: 브랜치 `em/feature/motor-control`. 이번 실기에서 **코드는 변경하지 않았다**
+- **대상**: 바로 아래 항목(`cart_teleop` 패키지 추가)의 실기 검증
+
+### 확인된 것
+
+| 항목 | 결과 |
+|---|---|
+| Linux 터미널 WASD 입력 → 실제 로봇 동작 | ✅ 동작함 |
+| 키를 **짧게 한 번** 입력 | ✅ 잠시 주행 후 **command lease 만료로 자동 정지** |
+| 위 자동 정지의 성격 | ✅ `input_timeout_sec` 기반의 **의도된 안전 동작** (결함 아님) |
+| teleop 키 조작 전반 | ✅ 정상 작동 |
+
+즉 `SSH 키보드 → cart_teleop → /cmd_vel → stm_serial_bridge → STM32 → 모터` 전 구간이
+실기에서 동작하고, **command lease 설계(키를 놓으면 timeout 후 정지)가 실제 하드웨어에서
+의도대로 작동**함을 확인했다.
+
+### ⚠️ 확인 필요 — 실기에서 쓴 `input_timeout_sec` 값
+
+**코드 기본값은 1.0초**(`teleop_keys.DEFAULT_INPUT_TIMEOUT_SEC`,
+`teleop_node.declare_parameter("input_timeout_sec", ...)`)다. 그러나 실행 시
+`-p input_timeout_sec:=...` 로 덮어썼는지는 **확인할 수 없어 1.0초로 단정하지 않는다.**
+
+역추적이 불가능한 이유: **teleop 노드는 파라미터를 로그에 남기지 않는다**
+(`teleop_node.py` 에 `get_logger().info` 0건). Bridge 는 `_log_parameters()` 로 시작 시
+전체 파라미터를 찍지만 teleop 에는 그 경로가 없다.
+→ **후속 개선 대상**: teleop 시작 시 파라미터 로그 추가(이번 범위 밖 — 코드 미변경 지시).
+
+### ⚠️ 이번 실기로 검증되지 **않은** 것
+
+- **낮은 속도 단계의 실제 바닥 데드밴드** — 단계 4 이하는 바퀴 ≤1.6 rad/s → 개루프
+  PWM ≤16. PWM<20 은 비선형(데드존) 구간으로 기록돼 있어 **바닥에서 안 움직일 가능성**이
+  남아 있다. 어떤 단계로 주행했는지도 기록되지 않았다
+- **실제 주행 속도·회전각 수치 정확도** — 측정하지 않았다. 주행거리·속도·회전각을
+  **수치 검증 완료로 표시하지 않는다**
+- **LiDAR/slam_toolbox 동시 실행**
+- **실제 지도 작성 품질**
+- **장시간 SSH 세션에서의 입력 지연·안정성** (자동반복 초기 지연이 실제 SSH 환경에서
+  `input_timeout_sec` 보다 짧은지도 미확인)
+- `Space` 정지·`DISARMED` 충돌 차단의 **실기** 동작 (mock 에서만 확인)
+
+### ⚠️ 안전 표현
+
+`Space` 는 **정지 명령(zero Twist)** 이며 **ESTOP 이 아니다.** 현재 Bridge 에는 STM
+`ESTOP`/`STOP` 명령 송신 인터페이스가 없다. **실제 비상정지는 물리 전원 차단이 필요하다.**
+
+### ⚠️ 이 기록의 한계
+
+결과는 **사용자 보고값**이며 teleop 화면·브리지 로그 **원본은 확보되지 않았다.**
+"짧게 한 번 입력 후 자동 정지"의 주행 시간·거리도 측정값이 아니다.
+
+## 2026-08-04 — ✅ ROS2: `cart_teleop` 수동 주행 패키지 추가 (WASD→/cmd_vel), 64 + 349 tests 통과 (Claude)
+
+- **환경**: Ubuntu 22.04, ROS2 Humble, Python 3.10. **하드웨어 미연결** — mock/PTY 만 사용
+- **커밋**: 브랜치 `em/feature/motor-control` (`5a3ca3c` 위에 미커밋)
+- **목적**: LiDAR + slam_toolbox 를 띄운 상태에서 SSH 터미널 WASD 로 주행하며 **수동 지도
+  작성**. 이후 teleop 을 끄고 Nav2 P2P 로 전환한다.
+- **경로**: `SSH 키보드 → cart_teleop → /cmd_vel → stm_serial_bridge → STM32`
+
+### 신규 패키지 `ros2_ws/src/cart_teleop/` (ament_python)
+
+| 파일 | 역할 |
+|---|---|
+`cart_teleop/teleop_keys.py` | **순수 로직** — 키→명령, 속도 단계, command lease 판정. `rclpy`·`termios`·`select`·`serial`·`stm_serial_bridge` 를 import 하지 않음(AST 테스트로 고정) |
+`cart_teleop/teleop_node.py` | `rclpy` + `termios`/`select` 입력, 20Hz Twist 발행, ANSI UI, Publisher 충돌 검사, 안전 종료 |
+`test/test_teleop_keys.py` | 순수 로직 단위 테스트 69개 |
+`package.xml`·`setup.py`·`setup.cfg`·`resource/cart_teleop` | 패키지 골격. 의존성은 `rclpy`·`geometry_msgs` 뿐 |
+
+**launch 파일은 만들지 않았다** — teleop 은 stdin(tty)을 점유해야 하므로
+`ros2 run cart_teleop keyboard_teleop` 이 표준 실행 방법이다.
+
+**Serial 포트를 열지 않는다.** 포트 소유자는 `stm_serial_bridge` 하나이며, 이 계약을
+두 파일 모두에 대해 AST import 검사 테스트로 고정했다.
+
+### 핵심 설계: command lease (latch 아님)
+
+터미널은 **키 릴리즈를 감지할 수 없다.** 그래서 W/S/A/D 입력마다 유효시간
+(`input_timeout_sec`, 기본 1.0초)을 갱신하고, 만료되면 zero Twist 로 전환하며 **동작을
+폐기**한다(다시 움직이려면 새 키 필요). 키를 누르고 있으면 OS 자동반복이 lease 를
+갱신한다. 1.0초는 자동반복 초기 지연(약 0.5초)보다 크게 잡아 끊김을 피한 값이다.
+
+### `=` 속도 증가 별칭 추가 (같은 날 후속)
+
+`+` 는 대부분의 배열에서 Shift 가 필요해 주행 중 조작이 번거롭다. 같은 물리 키의
+Shift 없는 문자 `=` 를 **`+` 의 별칭**으로 받아들이도록 추가했다. `+` 동작·기본 속도·
+`input_timeout_sec`·나머지 키 매핑은 **변경하지 않았다.**
+
+- `SPEED_UP_KEYS = {"+", "="}` 로 판정. `=` 는 자신의 라벨(`= 속도 단계 증가 (+ 별칭)`)을
+  표시해 사용자가 실제로 누른 키를 알 수 있다
+- UI 안내: `+ 속도↑` → **`+/= 속도↑`**
+- 신규 테스트 5개: `=` 가 단계를 올리는지 / `+` 만 쓴 상태와 **완전히 동일한 상태·발행값**
+  인지 / `=` 로도 최대 clamp / `=` 는 lease 를 갱신하지 않는지(속도 키이므로) / 라벨 표시
+
+**실제 노드 확인 (PTY)**: 시작 `5/5` → `-`×3 → `2/5` → **`=`** → `3/5` → `+` → `4/5` →
+`=`×4 → **`5/5`(clamp)**. `= 속도 단계 증가` 라벨과 `+/= 속도↑` 안내가 화면에 표시되고
+`q` 종료코드 0.
+
+경계값 `elapsed >= timeout` 을 TIMEOUT 으로 두는 것은 의도적이다 —
+`command_watchdog.select_wheel_command()` 와 같은 규칙(애매하면 정지).
+
+### 명령과 결과
+
+```bash
+cd ros2_ws
+colcon build --symlink-install                      # 2 packages, 경고 0
+python3 -m pytest src/cart_teleop/test/ -q          # 69 passed in 0.06s
+python3 -m pytest src/stm_serial_bridge/test/ -q    # 349 passed in 1.12s  (회귀 0)
+bash scripts/verify_bridge_mock.sh                  # 3/3 통과, 잔존 프로세스 없음
+git diff --check                                    # exit 0
+ros2 run cart_teleop keyboard_teleop < /dev/null    # 비-TTY -> 명확한 오류 + exit 1
+```
+
+### ★ mock 왕복 검증 (PTY 로 가짜 터미널을 붙여 키 주입)
+
+Bridge `mode:=mock speed_profile:=slow` + teleop 실행 후 실제 송신값:
+
+| 입력 | 기대 | 실제 `SET_WHEEL_VEL` | 결과 |
+|---|---|---|---|
+`W` (전진) | `2.000,2.000` | `2.000,2.000` | ✅ |
+`A` (좌회전) | `-1.754,1.754` | `-1.754,1.754` | ✅ |
+`D` (우회전) | `1.754,-1.754` | `1.754,-1.754` | ✅ |
+`Space` / lease timeout | `0.000,0.000` | `0.000,0.000` | ✅ |
+
+`W → 0.13 m/s → 바퀴 2.0 rad/s`, `A → 0.60 rad/s → 바퀴 ±1.754`(L=0.38 기준) —
+**둘 다 slow 상한(2.0) 이내라 Bridge 에서 축소되지 않았다.**
+
+### ★ 상태 전이 검증
+
+| 시나리오 | 관측 상태 | 결과 |
+|---|---|---|
+teleop 단독 + W | `ARMED` | ✅ |
+외부 `/cmd_vel` Publisher 기동 | `ARMED → DISARMED` (외부 1개 표시) | ✅ |
+DISARMED 중 W 입력 | 상태 변화 없음(DISARMED 유지, non-zero 미발행) | ✅ |
+외부 Publisher 종료 | **`STOPPED`** (`ARMED` 로 자동 복귀하지 **않음**) | ✅ |
+해제 후 키 없이 대기 | 상태 변화 없음 | ✅ **자동 재가동 금지 확인** |
+새 W 입력 | `ARMED` | ✅ |
+무입력 2.5초 | `TIMEOUT` 1회 → `STOPPED` | ✅ |
+`q` | `QUIT`, 종료 코드 0 | ✅ |
+
+### ★ 종료 경로 검증 (`q` / 실제 Ctrl+C)
+
+| 경로 | 방법 | 결과 |
+|---|---|---|
+`q` | PTY 로 `q` 주입 | ✅ 종료코드 0, 정지·복원 메시지 출력 |
+**실제 Ctrl+C** | `pty.fork()` 로 제어 터미널을 붙이고 **`0x03` 문자를 tty 에 주입** → 드라이버가 foreground 프로세스 그룹에 SIGINT | ✅ 종료코드 0, 0.0초 내 종료, 정지·복원 메시지 출력, 잔존 프로세스 없음 |
+비-TTY | `< /dev/null` | ✅ 명확한 오류 + 종료코드 1 |
+
+`tty.setcbreak()` 를 쓴 덕분에 ISIG 가 유지되어 Ctrl+C 가 SIGINT 로 동작한다
+(`tty.setraw()` 면 그냥 문자가 되어 종료되지 않는다).
+
+### ⚠️ 검증 과정에서 있었던 정정 (3건 — 전부 검증 하네스 문제였다)
+
+1. **`TIMEOUT`·`QUIT` 미관측** — 1차 PTY 검증에서 두 상태가 화면 로그에 없었다. 원인은
+   **하네스가 PTY master 를 2.5초간 읽지 않아 버퍼가 포화**된 것이고 **노드 결함이
+   아니었다.** 읽기 스레드로 계속 비우도록 고쳐 재실행하니 `TIMEOUT` 1회·`QUIT` 1회가
+   정상 관측됐다. (`TIMEOUT` 이 1회만 나오는 것은 설계대로다 — 만료 tick 에서만
+   `TIMEOUT` 이고 이후는 `STOPPED` 다.)
+2. **Bridge 잔존 프로세스** — 하네스가 **정리 전에 잔존 검사를 출력**하는 순서 문제였다.
+   수동 정리 후 재확인해 잔존 0 을 확인했다.
+3. **Ctrl+C 로 종료되지 않음(오판)** — 1차 시도에서 15초 내 종료되지 않고 터미널이
+   cbreak 로 남았다. 그러나 원인은 하네스가 **`ros2 run` 래퍼 PID 하나에만** SIGINT 를
+   보낸 것이었다. 실제 Ctrl+C 는 tty 드라이버가 **foreground 프로세스 그룹 전체**에
+   보내므로 상황이 다르다. `pty.fork()` + `0x03` 주입으로 다시 검증해 **정상 종료**를
+   확인했다.
+   → ⚠️ 다만 여기서 **운영상 주의점**이 하나 드러났다: 다른 셸에서 종료시킬 때
+   `kill -INT <ros2 run PID>` 는 노드에 닿지 않아 터미널이 cbreak 로 남을 수 있다.
+   프로세스 그룹으로 보내야 한다(`kill -INT -<PGID>`). 정상 종료 수단은 **터미널에서
+   `q`/`Esc`/`Ctrl+C`** 다.
+
+### ⚠️ 실기에서 검증하지 않은 것
+
+- **실제 모터로 teleop 주행** — mock 송신값까지만 확인했다
+- **속도 단계를 내렸을 때 실제로 움직이는지** — 단계 4 이하는 바퀴 1.6 rad/s 이하 →
+  개루프 PWM 16 이하다. PWM<20 은 비선형(데드존) 구간으로 기록돼 있어 **바닥에서 안
+  움직일 가능성**이 있다. 기본값을 최대 단계로 둔 이유다
+- **자동반복 초기 지연이 실제 SSH 환경에서 1.0초 이내인지** — 터미널·SSH 설정에 따라
+  다르다. 끊김이 있으면 `input_timeout_sec` 을 올려야 한다
+- LiDAR/slam_toolbox 와 동시 실행, 실제 지도 작성 품질
+- 실제 SSH 세션(네트워크 지연 포함)에서의 키 응답성
+
+## 2026-08-04 — ✅ EM+ROS2 실기: `L=0.38` 반영 확인 — `slow` 프로파일 **바닥 제자리 회전** 성공 / ⚠️ 회전각 수치는 미검증 (relu 실기 / Claude 문서 반영)
+
+- **환경**: 실제 STM32 + 모터. `stm_serial_bridge` hardware 모드, `speed_profile:=slow`
+  (`max_wheel_rad_s = 2.0`), **바닥 주행**
+- **명령**: `/cmd_vel` `linear.x=0.0, angular.z=0.6` → **약 1초 후 zero Twist**
+- **커밋**: 브랜치 `em/feature/motor-control`. **코드 변경 없음** — 문서만 갱신
+- **의의**: `wheel_separation_m` 0.30 → **0.38**(실측) 변경이 실제로 동작에 반영되는지를
+  확인하는 첫 테스트다. 직진은 `L` 과 무관해 앞선 전진 테스트로는 확인할 수 없었다.
+
+### 결과
+
+| 항목 | 결과 |
+|---|---|
+`/stm/wheel_target_rad_s` | ✅ **약 `[-1.754, 1.754]`** |
+| 좌우 바퀴 | ✅ 반대 방향으로 회전 |
+| 차체 | ✅ **왼쪽(반시계)으로 제자리 회전** |
+| 명령 종료 후 | ✅ 정상 정지 |
+| FAULT | ✅ 없음 |
+
+### 이 결과가 확인해 주는 것 3가지
+
+1. **`L=0.38` 이 실제로 STM 까지 반영된다.**
+   `0.6 × 0.38/2 / 0.065 = 1.753846` → 관측 `1.754` 와 일치. `L=0.30` 이었다면 1.385 가
+   나왔을 자리다. 즉 YAML·노드 기본값·기구학 변환이 한 줄로 이어져 있음이 실기로 확인됐다.
+2. **`slow`(2.0)가 제자리 회전 봉투를 비례 축소 없이 통과시킨다** (1.754 < 2.0).
+   2.0 을 최초 통합 프로파일로 고른 근거가 실기로 확인됐다 — 조향은 온전하고 직진 속도만
+   낮은 상태라는 설계 의도가 성립한다.
+3. **REP 103 부호 규약이 맞다.** `angular.z > 0` → 반시계(좌회전) → 왼쪽 바퀴 음수·오른쪽
+   양수. 코드 주석(`differential_drive.cmd_vel_to_wheel_rad_s`)의 규약과 일치한다.
+
+### ⚠️ 검증되지 않은 것
+
+- **회전각 수치** — 실제로 몇 도 돌았는지 **측정하지 않았다.** 따라서 `ω=0.6 rad/s` 와
+  일치하는지, 회전량 정확도가 어떤지는 **미검증**이다. 확인된 것은 방향·부호·목표값과
+  "제자리 회전이 일어난다"까지다.
+- **직진 속도 수치** — 앞선 항목대로 여전히 미검증 (약 5.8 cm 관측값은 속도로 환산 불가)
+- **`bench`(1.0)·`nav2`(6.4) 의 바닥 주행** — 미검증 유지
+- `wheel_actual_rad_s` 수치 정확도, 엔코더 count/rev 12.1% 원인 — 미확정 유지
+
+### ⚠️ 이 기록의 한계
+
+결과는 **사용자 보고값**이며 `ros2 topic echo /stm/wheel_target_rad_s` 출력과 브리지 로그
+**원본은 확보되지 않았다.** 회전각 측정 도구·기준도 없다(측정 자체를 하지 않음).
+
+## 2026-08-04 — ✅ EM+ROS2 실기: `speed_profile:=slow` **바닥 전진·정지** 확인 / ⚠️ 속도 정확도는 미검증 유지 (relu 실기 / Claude 문서 반영)
+
+- **환경**: 실제 STM32 + 모터. `stm_serial_bridge` hardware 모드, `speed_profile:=slow`
+  (`max_wheel_rad_s = 2.0`), **바닥 주행**
+- **명령**: `/cmd_vel` `linear.x=0.3, angular.z=0.0` → **1초 후 zero Twist 발행**
+- **커밋**: 브랜치 `em/feature/motor-control`. **코드 변경 없음** — 문서만 갱신
+
+### 결과
+
+| 항목 | 결과 |
+|---|---|
+| 차체 전진 | ✅ **실제로 전진함** (바닥 주행) |
+| 명령 종료 후 정지 | ✅ 정상 정지 |
+| 급가속·위험한 움직임 | ✅ 없음 |
+| FAULT | ✅ 없음 |
+| 이동량 (관측값) | **약 5.8 cm** |
+
+**판정: `slow` 프로파일의 바닥 전진 및 정지 동작 확인 완료.**
+이로써 `slow` 는 바퀴 공중(앞선 항목)과 **바닥** 양쪽에서 동작이 확인됐다.
+
+### ⚠️ 5.8 cm 를 속도로 환산하지 않는 이유 (판정 보류)
+
+- 발행 창 1초에 **ROS2 CLI 기동·discovery 시간이 포함될 수 있다.** 실제 모터가 명령을 받은
+  시간이 1초보다 짧을 수 있으므로, 5.8 cm 를 **1초 주행거리로 확정하지 않는다.**
+- 따라서 **0.058 m/s 로 환산하지 않는다.**
+- 계산상 값 0.13 m/s 와의 차이 원인은 **이번 테스트만으로 판정하지 않는다.**
+  (후보: 유효 구동 시간, 개루프 PWM↔속도 관계, 정지마찰·부하, 엔코더 스케일 12.1% 미확정 —
+  이 데이터로는 서로 구분되지 않는다.)
+- **속도 정확도는 미검증 상태를 유지한다.**
+
+정량 측정이 필요해지면 CLI 기동 시간이 섞이지 않는 방법으로 다시 해야 한다
+(예: 정상 상태로 충분히 오래 주행시킨 뒤 구간 거리/시간 측정, 또는 `/stm/encoder_total`
+변화량 기반 측정 — 다만 후자는 엔코더 스케일 12.1% 미확정 문제를 함께 안는다).
+
+### ⚠️ 여전히 미검증 (유지)
+
+- **`slow` 의 실제 주행 속도 정확도** — 위 사유로 미검증
+- **`bench`(1.0, 계산상 0.065 m/s) 의 바닥 주행** — 미검증. 모터 데드밴드 미만일 가능성이
+  남아 있어 바닥에서 안 움직일 수 있다
+- **`nav2`(6.4) 의 바닥 주행** — 미검증. 실기 검증된 최대는 여전히 2.0 rad/s 다
+- **`L=0.38` 기준 회전 주행** — 이번에도 직진만 했다
+- `wheel_actual_rad_s` 수치 정확도, 엔코더 count/rev 12.1% 원인 — 미확정
+
+### ⚠️ 이 기록의 한계
+
+결과는 **사용자 보고값**이며 브리지 로그·`ros2 topic echo` **원본은 확보되지 않았다.**
+이동량 5.8 cm 의 측정 방법(기준점·측정 도구)도 기록되지 않았다.
+
+## 2026-08-04 — ✅ ROS2: `wheel_separation_m` 실측 0.38 반영, 속도 봉투 재계산 + nav2 프로파일 6.0→6.4, 349 tests 통과 (relu 실측 / Claude 반영)
+
+- **환경**: Ubuntu 22.04, ROS2 Humble. 코드·문서 변경은 hardware 없이 mock/PTY 로만 검증
+- **커밋**: 브랜치 `em/feature/motor-control` (`18e3b5b` 위에 미커밋)
+
+### 실측 (relu)
+
+| 항목 | 값 |
+|---|---|
+| 측정 기준 | **왼쪽 구동 바퀴 트레드 중심선 ↔ 오른쪽 구동 바퀴 트레드 중심선 사이 거리** |
+| 실측 | **38 cm → `wheel_separation_m = 0.38`** |
+| 이전 값 | `0.30` (미실측 placeholder) |
+
+### 봉투 재계산 (`r=0.065`, Nav2 `max_vel_x=0.3` / `max_vel_theta=0.6`)
+
+| Nav2 명령 | L=0.30 (이전) | **L=0.38 (실측)** |
+|---|---|---|
+| 직진 `v=0.3` | 4.615 rad/s | **4.615 rad/s** (불변) |
+| 제자리 회전 `ω=0.6` | 1.385 rad/s | **1.754 rad/s** |
+| 직진+회전 (최악) | 6.000 rad/s | **6.369 rad/s** |
+
+`L` 은 **회전 성분에만** 들어가므로 직진 요구량은 바뀌지 않는다. 최악 조합이 6.369 로
+올라가 **기존 `nav2` 프로파일 6.0 은 부족**해졌고(약 5.8% 축소 발생), **6.4** 로 올렸다.
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+`config/stm_serial_bridge.yaml` | `wheel_separation_m` **0.30 → 0.38**, placeholder 문구 제거 + 2026-08-04 실측 명시. 봉투 계산표 갱신 |
+`config/speed_profile_slow.yaml` | **값 2.0 유지.** 회전 수용 근거를 1.385 → **1.754** 로 갱신 (2.0 이 여전히 덮는다. `L>0.433` 이면 깨진다는 조건도 기재) |
+`config/speed_profile_nav2.yaml` | **6.0 → 6.4**. 6.369 계산과 "계산상 상한, 실기 미검증" 유지 |
+`test_differential_drive.py` | `WHEEL_SEPARATION_M` 0.30→0.38, 회귀값 갱신(직진 4.615 / 회전 **1.754** / 최악 **6.369**), 기존 곡선 주행 회귀값 `1.923077/4.230769` → **`1.615385/4.538462`**, 프로파일 커버리지 테스트 2개 신규 |
+`ros2_ws/CLAUDE.md` | 계산표·프로파일 표 갱신, 실측 완료 반영, **좌우 매핑 실기 기록의 `angular.z=±0.433333` 이 이제 유효하지 않다는 경고 추가** |
+`tests/TEST_LOG.md` | 이 항목 |
+
+**코드 로직은 변경하지 않았다** — `required_max_wheel_rad_s()`·`limit_wheel_rad_s()` 는
+그대로이고 상수·설정·회귀값만 갱신했다. `stm_serial_bridge_node.py` 도 미수정.
+
+### 명령과 결과
+
+```bash
+cd ros2_ws
+colcon build --symlink-install                        # 경고 0
+python3 -m pytest src/stm_serial_bridge/test/ -q      # 349 passed in 1.41s
+bash scripts/verify_bridge_mock.sh                    # 3/3 통과, 잔존 프로세스 없음
+```
+
+**349 passed** (직전 347 + 신규 2: `slow` 가 회전 봉투를 덮는지, `nav2` 가 전체 봉투를
+덮는지). 기존 테스트 **회귀 없음** — 단 L 의존 회귀값 3개는 의도적으로 갱신했다.
+
+### ★ 프로파일 검증 (mock/PTY)
+
+**A. 직진 단독** `linear.x=0.3` (요구 4.615) — L 변경과 무관해야 한다
+
+| 실행 | 기대 | 실제 | 결과 |
+|---|---|---|---|
+`(기본 bench)` | `1.000,1.000` | `SET_WHEEL_VEL,1.000,1.000` | ✅ |
+`speed_profile:=slow` | `2.000,2.000` | `2.000,2.000` | ✅ |
+`speed_profile:=nav2` | `4.615,4.615` | `4.615,4.615` | ✅ |
+`max_wheel_rad_s:=3.5` | `3.500,3.500` | `3.500,3.500` | ✅ |
+
+**B. 최악 조합** `linear.x=0.3, angular.z=0.6` (요구 left 2.862 / right **6.369**)
+
+| 실행 | 기대 | 실제 | 결과 |
+|---|---|---|---|
+`speed_profile:=nav2` | `2.862,6.369` (**제한 없음**) | `2.862,6.369` | ✅ |
+`speed_profile:=slow` | `0.899,2.000` (비례 축소) | `0.899,2.000` | ✅ |
+
+- `nav2`(6.4)에서 요구 6.369 가 **무축소로 통과**함을 확인 — 6.4 로 올린 목적이 달성됐다.
+- `slow`(2.0)에서는 축소되지만 **좌우 비율이 `0.449275362` 로 원본과 정확히 동일** —
+  궤적 곡률이 보존됨을 수치로 확인했다.
+
+### ⚠️ 검증 과정에서 있었던 정정
+
+`slow` 최악 조합의 기대값을 처음 `0.898` 로 잡았는데 실제는 `0.899` 였다. 재계산 결과
+정확값이 `0.898550725` 로 **3자리 반올림 시 `0.899` 가 맞다** — **코드가 아니라 검증
+스크립트의 기대값이 틀렸다.** 기대값을 고쳐 재실행해 통과를 확인했다.
+
+### ⚠️ 실기에서 검증하지 않은 것
+
+- **`L=0.38` 로 실제 회전 주행** — 이번 변경은 회전 성분을 바꾸는데, 회전 실기는 하지
+  않았다. 직진(2026-08-04 `slow` 실기)만 확인된 상태다
+- **`nav2` 프로파일(6.4)** — 실기 미진행. 6.4 rad/s ≈ 바퀴 원주속도 0.42 m/s 로,
+  실기 검증된 최대(2.0 rad/s, 바퀴 공중)의 3배가 넘는다
+- `wheel_actual_rad_s` 수치 정확도, 실제 주행 속도, 바닥 주행 — 모두 여전히 미검증
+- 엔코더 count/rev 12.1% 차이 원인 미확정
+
+### 발견한 미해결 불일치 (수정하지 않음, 결정 필요)
+
+`stm_serial_bridge_node.py:147` 의 `declare_parameter("wheel_separation_m", 0.30)` 이
+**여전히 0.30** 이고, `:427` 의 시작 로그도 `"⚠️ 조립 후 실측 필요한 임시값"` 문구를
+유지하고 있다. launch 는 항상 YAML(0.38)을 넘기므로 정상 경로에는 영향이 없으나,
+`ros2 run` 으로 파라미터 없이 띄우면 **0.30 이 쓰인다.** 사용자가 지정한 변경 파일 목록에
+노드가 없어 수정하지 않았다.
+
+## 2026-08-04 — ✅ EM+ROS2 실기: `speed_profile:=slow`(2.0 rad/s) hardware 모드 주행 확인 (relu 실기 / Claude 문서 반영)
+
+- **환경**: 실제 STM32 + 모터 연결. `stm_serial_bridge` **hardware 모드**,
+  `speed_profile:=slow`, `serial_port` 는 STMicroelectronics STLink **by-id 경로**,
+  **바퀴 공중 상태**
+- **커밋**: 브랜치 `em/feature/motor-control` (`18e3b5b` + 미커밋 1단계 변경).
+  이번 실기에서 **코드는 변경하지 않았다** — 문서만 갱신
+- **대상**: 바로 아래 항목(속도 봉투 정합 + 프로파일)의 실기 검증
+
+### 절차와 결과
+
+| 단계 | 결과 |
+|---|---|
+`check_stm_topics` (6개 토픽) | ✅ 통과 — `/stm/connected=true`, `/stm/fault=NONE`, `wheel_target_rad_s`·`wheel_actual_rad_s`·`pwm`·`encoder_total` 모두 수신 |
+`/cmd_vel linear.x=0.3, angular.z=0.0` 3초 발행 | ✅ 발행됨 |
+slow 프로파일의 상한 적용 | ✅ 좌우 목표가 **2.0 rad/s 로 제한**됨 (요구 4.615 → 2.0) |
+모터 동작 | ✅ 좌우 바퀴 모두 **전진 방향**으로 회전 |
+`/cmd_vel` 종료 후 | ✅ **watchdog 으로 정지** |
+FAULT | ✅ 발생 없음 |
+
+즉 **`base YAML → speed_profile 오버레이 → 실제 STM 송신 → 모터 구동`** 경로가 실기에서
+동작한다. mock 에서 확인한 `SET_WHEEL_VEL,2.000,2.000` 이 실제 하드웨어에서도 성립했다.
+
+### 이번에 생략한 항목 (근거 있는 생략)
+
+후진·좌회전·우회전은 수행하지 않았다. 방향 매핑은 **2026-08-02**(`/cmd_vel` → 모터 구동)과
+**2026-08-03**(좌우 매핑·부호 실측 확정) 실기에서 이미 확인했고, 이번 변경 범위는 방향
+매핑이 아니라 **launch 구성과 속도 상한 프로파일**이기 때문이다.
+
+### ⚠️ 이번 실기로 검증되지 **않은** 것
+
+- **`wheel_actual_rad_s` 의 수치 정확도** — 측정하지 않았다. 엔코더 count/rev 12.1% 차이
+  원인이 **여전히 미확정**이므로 보고값은 실제보다 약 12% 작다는 전제로 해석해야 한다
+- **실제 주행 속도가 0.13 m/s 인지** — 측정하지 않았다. "모터가 전진 방향으로 돈다"까지만
+  확인했고 속도의 정량 확인은 없다
+- **`nav2` 프로파일(6.0 rad/s)** — 실기 테스트하지 않았다
+- **`bench` 프로파일(1.0 → 0.065 m/s)이 바닥에서 움직이는지** — 모터 데드밴드 미만일
+  가능성이 남아 있다
+- **바닥 주행** — 이번 실기는 바퀴 공중 상태였다
+- `wheel_separation_m=0.30` 실측, Stall/FAULT 실기, USB 강제 분리, STATUS 중단 시 연결
+  상태 전이 — 모두 여전히 미검증
+
+### ⚠️ 이 기록의 한계 / 확인 필요
+
+- 결과는 **사용자 구두 보고값**이며 `check_stm_topics` 출력·브리지 로그 **원본은 확보되지
+  않았다**. 다음 실기에서는 `2>&1 | tee` 로그를 함께 남기면 검증 가능성이 올라간다.
+- 사용자 보고에 "**바퀴를 공중에 띄운 상태**"와 "**로봇이 실제로 전진함**"이 함께 있었다.
+  두 서술은 양립하지 않으므로(공중이면 차체가 전진할 수 없다) **바닥 접지 여부를 이 기록으로
+  확정하지 않는다.** 위 표에는 모순 없이 확인되는 "좌우 바퀴가 전진 방향으로 회전"까지만
+  적었고, **바닥 주행은 미검증으로 유지**한다. 다음 실기에서 명확히 구분해 기록할 것.
+
+## 2026-08-04 — ✅ ROS2: 속도 봉투 정합 + 프로파일(bench/slow/nav2) 추가, 347 tests 통과 (Claude)
+
+- **환경**: Ubuntu 22.04, ROS2 Humble, Python 3.10. **하드웨어 미연결** — mock/PTY 만 사용
+- **커밋**: 브랜치 `em/feature/motor-control` (`18e3b5b` 위에 미커밋)
+- **배경**: Nav2 봉투(`max_vel_x=0.3`, `max_vel_theta=0.6`)가 요구하는 바퀴 각속도는 최대
+  **6.0 rad/s** 인데 브리지 상한은 벤치 잠정값 **1.0** 이었다. `limit_wheel_rad_s()` 가
+  좌우 비율을 유지한 채 **전체를 0.217배로 축소**하므로, 궤적은 맞지만 직진이 0.065 m/s 로
+  기어가 "Nav2 가 동작하지 않는다"처럼 보일 상태였다.
+
+### 변경 (기본 상한 1.0 은 유지)
+
+| 항목 | 내용 |
+|---|---|
+`differential_drive.required_max_wheel_rad_s()` | 신규 순수 함수. 봉투 두 꼭짓점 `(\|v\|, ±\|ω\|)`에서 기존 `cmd_vel_to_wheel_rad_s()` 를 호출해 절댓값 최대를 취한다 — 기구학식 중복 없음 |
+`config/speed_profile_slow.yaml` | 신규 오버레이, `max_wheel_rad_s: 2.0` |
+`config/speed_profile_nav2.yaml` | 신규 오버레이, `6.0` + 실기 미검증 경고 |
+`launch/stm_serial_bridge.launch.py` | `speed_profile:=bench\|slow\|nav2`(기본 `bench`), `max_wheel_rad_s:=<float>` |
+`config/stm_serial_bridge.yaml` | **주석만** 추가 (봉투 계산표·프로파일 사용법). 값 `1.0` 유지 |
+`stm_serial_bridge_node.py` | **수정하지 않음** — `_log_parameters()`(`:435-438`)가 이미 `max_wheel_rad_s` 를 경고 문구와 함께 출력하고 있었다 |
+
+**파라미터 우선순위**: `base YAML` → `speed_profile 오버레이` → `launch 인자`.
+
+### 명령과 결과
+
+```bash
+cd ros2_ws
+colcon build --symlink-install                        # 경고 0
+python3 -m pytest src/stm_serial_bridge/test/ -q      # 347 passed in 1.37s
+bash scripts/verify_bridge_mock.sh                    # 3/3 통과, 잔존 프로세스 없음
+```
+
+**단위 테스트: 347 passed** (기존 329 + 신규 18). 기존 329 **회귀 없음**.
+신규는 직진만/제자리회전만/최악조합, 각속도·선속도 부호 무관, 영(0) 봉투, 두 함수 정합
+교차검증, `wheel_radius`/`separation` 0 이하 `ValueError`, 비유한 전파(`nan > 0.0`이
+False 여서 NaN 이 0.0 으로 삼켜지는 함정 고정), 벤치 상한(1.0) < 요구(6.0) 회귀 고정.
+
+### ★ 프로파일 실효성 검증 (mock/PTY, `linear.x=0.3` → 요구 4.615 rad/s)
+
+| 실행 | 기대 송신 | 실제 송신 | 결과 |
+|---|---|---|---|
+`(기본)` | `SET_WHEEL_VEL,1.000,1.000` | `1.000,1.000` | ✅ |
+`speed_profile:=slow` | `2.000,2.000` | `2.000,2.000` | ✅ |
+`speed_profile:=nav2` | `4.615,4.615` | `4.615,4.615` | ✅ |
+`max_wheel_rad_s:=3.5` | `3.500,3.500` | `3.500,3.500` | ✅ |
+`slow` + `max_wheel_rad_s:=3.5` | `3.500,3.500` (인자 우선) | `3.500,3.500` | ✅ |
+`speed_profile:=turbo` | 명확히 실패 | exit 1, `provided value "turbo" is not valid. Valid options are: ['bench', 'nav2', 'slow']` | ✅ |
+
+- `nav2` 프로파일의 상한은 6.0 이지만 직진 요구량이 4.615 이므로 **4.615 가 송신되는 것이
+  정상**이다(6.000 이 나오면 오히려 잘못된 것). 즉 이 프로파일에서는 제한이 걸리지 않는다.
+
+### ⚠️ 실제 장비에서 검증하지 않은 것 (성공으로 단정하지 말 것)
+
+- **`slow`(2.0)·`nav2`(6.0) 프로파일의 실제 주행** — mock 에서 **송신 문자열만** 확인했다.
+  모터가 그 속도를 실제로 내는지, 부하·전류·바닥 마찰에서 어떻게 되는지는 **전부 미검증**
+- **`bench`(1.0 → 0.065 m/s)가 바닥에서 움직이는지** — 모터 데드밴드(PWM<20 비선형) 미만일
+  가능성이 있어 **아예 안 움직일 수 있다**
+- `wheel_separation_m=0.30` 은 여전히 **미실측 placeholder** — 회전 성분 환산이 틀어지면
+  6.0 이 의도한 것보다 큰 속도를 의미할 수 있다
+- Nav2 `velocity_smoother` 가 실제로 `/cmd_vel` 에 발행하는지 — 이 머신에 `nav2_bringup`
+  **미설치**로 확인 불가. 브랜치 문서(`ROS2_API.md:14`)의 주장에 근거한 값이다
+- Nav2 쪽 `max_vel_x`/`max_vel_theta` 자체도 `TODO-팀확인` 표기 — 봉투 정합의 최종 결정은
+  팀 합의 사항이다
+- 엔코더 count/rev 12.1% 차이 원인 **미확정** (PI 게인 0.0f 라 지금은 open-loop 로 무영향)
+
+### 보류
+
+`target_watchdog.py`(사서 유실 타임아웃 순수 로직)는 계획에 있으나 **이번 단계에서 착수하지
+않았다** — 실기 확인 뒤로 보류.
+
+## 2026-08-04 — ✅ ROS2: stm_serial_bridge launch/YAML/mock 검증 워크플로우 추가, mock 3시나리오 통과 + 329 tests (Claude)
+
+- **환경**: Ubuntu 22.04, ROS2 Humble, Python 3.10. **하드웨어 없음** — 실제 `/dev/ttyACM*`를
+  전혀 열지 않고 Linux PTY 만 사용
+- **커밋**: 브랜치 `em/feature/motor-control` (HEAD `76dee46`, 미커밋 상태)
+- **추가한 것**: launch 파일, 파라미터 YAML, STM 대역 mock, 토픽 자동 검증 도구, 회귀 스크립트
+  (기존 노드·파서·펌웨어는 **변경 없음**)
+
+### 명령과 결과
+
+```bash
+cd ros2_ws
+colcon build --symlink-install                          # 경고 0
+python3 -m pytest src/stm_serial_bridge/test/ -q        # 329 passed in 1.11s
+bash scripts/verify_bridge_mock.sh                      # 3/3 통과
+```
+
+| 시나리오 | 확인 내용 | 결과 |
+|---|---|---|
+| 1. connect | mock STATUS → `/stm/*` 6개 토픽 발행, 원소 수 2, `connected=true` | ✅ |
+| 2. cmd_vel | `/cmd_vel` → `SET_WHEEL_VEL` → mock → STATUS → `encoder_total` 변화 | ✅ |
+| 3. disconnect | STATUS 중단 → `status_timeout_sec`(0.5s) → `connected=false` | ✅ |
+
+- 시나리오 2 실측: `encoder_total` `[17579, 17579]` → `[41457, 41457]` (1초 간격).
+  즉 **송신·수신 왕복이 실제로 맞물려 돈다.**
+- 시나리오 3 실측: 브리지 로그에 `/stm/connected: true` → `/stm/connected: false`
+  (`마지막 유효 STATUS 이후 0.5s 이상 경과`) 전이가 남았다.
+
+### 단위 테스트
+
+**329 passed** (기존 298 + 신규 31). 기존 298개 **회귀 없음**.
+신규는 `test_mock_stm.py` — 핵심은 **왕복 테스트**로, mock 이 만든 STATUS 줄을 브리지의
+실제 파서(`parse_packet()`)가 읽어 값이 그대로 복원되는지 고정한다. 이게 깨지면 mock 이
+펌웨어 형식을 벗어난 것이다.
+
+<details>
+<summary>검증 스크립트 출력 (요약)</summary>
+
+```
+[1/3] connect — mock STATUS 가 /stm/* 6개 토픽으로 발행되는가
+  OK  /stm/wheel_target_rad_s         1  [0.0, 0.0]
+  OK  /stm/wheel_actual_rad_s         1  [0.0, 0.0]
+  OK  /stm/pwm                        1  [0, 0]
+  OK  /stm/encoder_total              1  [0, 0]
+  OK  /stm/connected                  1  True
+  OK  /stm/fault                      1  NONE
+  결과: ✅ 합격
+  ---> ✅ connect 통과
+
+[2/3] cmd_vel — /cmd_vel 이 mock 까지 갔다가 encoder_total 변화로 돌아오는가
+encoder_total 1차: array('i', [17579, 17579])
+encoder_total 2차: array('i', [41457, 41457])
+  누적 count 가 변화했다 (TX -> mock -> STATUS -> 토픽 왕복 성립)
+  ---> ✅ cmd_vel 통과
+
+[3/3] disconnect — STATUS 중단 후 status_timeout_sec 로 connected=false 가 되는가
+  OK  /stm/connected                  2  False
+  모드: STATUS 중단 → connected=false 확인
+  결과: ✅ 합격
+  ---> ✅ disconnect 통과
+
+ 결과: ✅ 3개 시나리오 전부 통과 (잔존 프로세스 없음)
+```
+
+</details>
+
+### ⚠️ 중간에 발견하고 고친 결함 (검증 신뢰도에 직접 영향)
+
+**첫 실행에서 시나리오 2·3의 결과가 오염됐다.** 스크립트의 `cleanup()`이 `ros2 launch`
+프로세스만 종료하고 그 자식(`mock_stm`, 브리지 노드)은 **고아로 남겼다.** 그래서 시나리오 3
+시점에 **브리지 노드 3개가 같은 토픽에 동시 발행**하고 있었다
+(증상: cmd_vel 을 주지 않은 시나리오 3에서 `encoder_total`이 `[70275, 70275]`로 나옴).
+
+- 원인: 백그라운드 launch 가 스크립트와 **같은 프로세스 그룹**이어서 그룹 단위 종료를 못 했다
+- 수정: `setsid` 로 별도 프로세스 그룹에 띄우고 **그룹 전체**에 SIGINT → 대기 → SIGKILL.
+  그룹 ID가 스크립트 자신의 것과 같으면 그룹 kill 을 하지 않는 안전장치도 넣었다
+  (자기 자신을 죽이는 사고 방지)
+- 재검증: 시나리오 3 의 `encoder_total`이 `[0, 0]`으로 정상 격리됨을 확인했고,
+  스크립트 마지막에 **잔존 프로세스 검사**를 추가해 같은 실수가 조용히 넘어가지 않게 했다
+- ⚠️ **위 표의 결과는 수정 후 재실행한 값이다.** 수정 전 첫 실행 결과는 신뢰할 수 없다.
+
+### 하드웨어 없이 검증하지 못한 것 (성공으로 단정하지 말 것)
+
+- `wheel_actual_rad_s` 의 **수치 정확도** — mock 은 `actual = target` 스텁이므로 스케일을
+  검증할 수 없다. 엔코더 count/rev 12.1% 차이 원인은 **여전히 미확정**
+- 실제 모터 구동·부하·전류, 실제 USB Serial 전기적 특성
+- 실제 Stall 발생 시 **펌웨어의** FAULT 판정 (mock 은 형식만 흉내)
+- USB 강제 분리 시 RX fatal error 처리
+- `wheel_separation_m=0.30` 실측, 실제 바닥 주행
+
+### 알려진 거친 부분 (미수정, 기능 영향 없음)
+
+launch 에 SIGINT 를 주면 브리지 노드가 `destroy_node()` 중 `KeyboardInterrupt` traceback 을
+찍고 exit code -2 로 죽는다(launch 가 ERROR 로 보고). 노드 종료 경로의 문제이고 이번 작업
+범위(launch/검증 워크플로우)를 벗어나므로 **고치지 않았다.**
+
+## 2026-08-04 — ✅ EM 실기: 기어비 51:1 펌웨어 빌드·플래시·전진/후진 동작 확인 / ⚠️ actual_rad_s 수치 정확도는 미검증 (relu 실기 / Claude 문서 반영)
+
+- **대상**: `embedded/motor/stm32_workspace/motor-control/Application/Config/motor_config.h`
+  (2026-08-03에 `MOTOR_GEAR_RATIO` 100.0f → **51.0f**로 정정한 그 변경의 실기 반영)
+- **실행자·환경**: relu. **Windows STM32CubeIDE**에서 빌드·플래시, 실기 동작 확인
+- **커밋**: 브랜치 `em/feature/motor-control` (HEAD `76dee46`). **이번 작업은 문서만 수정, 코드 변경 0줄**
+
+### 결과
+
+| 항목 | 결과 |
+|---|---|
+| STM32CubeIDE 펌웨어 빌드 | ✅ **성공** |
+| 보드 플래시 | ✅ **성공** |
+| 전진 동작 | ✅ **정상** |
+| 후진 동작 | ✅ **정상** |
+| `actual_rad_s` 수치 정확도 | ⚠️ **미검증** |
+| count/rev 12.1% 차이 원인 | ⚠️ **미확정 (그대로 남음)** |
+
+- 이번 변경은 상수 하나(`MOTOR_GEAR_RATIO`)뿐이며, 전진/후진 동작에 **회귀는 없었다.**
+
+### ⚠️ 이번에 검증되지 **않은** 것 (성공으로 단정하지 말 것)
+
+- **`actual_rad_s`의 수치 정확도**: "전진/후진이 동작한다"만 확인했다. 보고되는 rad/s가 실제 회전
+  속도와 얼마나 일치하는지는 **측정하지 않았다.** 정량 데이터가 없다.
+- **count/rev 12.1% 차이의 원인**: 이번 빌드로 해결된 것이 **아니다.** 감속비 기재만 정정했고
+  명목 **77520**(=380×51×4) vs 실측 **68162.5**의 차이는 그대로다.
+  → STATUS의 LA/RA와 `/stm/wheel_actual_rad_s`는 **여전히 실제보다 약 12% 작게 보고된다**는
+  전제로 해석해야 한다.
+- 원인 후보(미구분): CPR 380의 정의 / Quadrature 배율(TI12 = x4 가정) /
+  타이머 입력 필터(`IC1Filter`/`IC2Filter`=8) / 실제 하드웨어 감속비.
+- Stall/`FAULT` 계열 실기 검증, `RESET_STALL` 송신, STATUS 중단 시 연결 상태 전이, USB 강제 분리,
+  `wheel_separation_m=0.30` 실측, 실제 바닥 주행 — 모두 **여전히 미검증**.
+
+### 확인 사항: 엔코더 상태의 ROS2 연동은 **이미 구현되어 있다** (신규 구현 없음)
+
+"STM 엔코더 상태를 ROS2 토픽으로 발행" 요구사항을 코드베이스에서 재분석한 결과, 전 구간이
+이미 구현되어 있고 **2026-08-03 실기 검증까지 완료**된 상태였다. 따라서 **신규 구현을 하지 않았다.**
+
+```
+STM StatusReporter (10Hz)
+  → "STATUS,<LT>,<LA>,<RT>,<RA>,<LPWM>,<RPWM>,<LE>,<RE>\r\n"
+  → SerialLink.read_available() → LineDecoder.feed() → parse_packet()
+  → ROS2 Publish
+```
+
+| 요구 값 | 이미 발행되는 토픽 | 타입 | 단위 |
+|---|---|---|---|
+| 좌/우 누적 encoder count | `/stm/encoder_total` | `Int32MultiArray [left, right]` | count |
+| 좌/우 wheel speed | `/stm/wheel_actual_rad_s` | `Float32MultiArray [left, right]` | **rad/s** |
+
+- 속도 단위는 **rad/s로 통일**되어 있다. RPM은 `motor.c`의 중간 계산 변수로만 존재하고
+  패킷·토픽에는 나가지 않는다. `SET_WHEEL_VEL` 명령 단위와 같아 target/actual을 같은 축에서
+  비교할 수 있고 ROS2 관례에도 맞으므로 **변경하지 않았다.**
+- ⚠️ 와이어 필드 순서는 **좌우 교차**(`LT,LA,RT,RA`)다. `target_L,target_R,actual_L,actual_R`이 아니다.
+
+### count/rev 실측값 68162.5의 정확한 의미 (오해 방지)
+
+2026-08-03 원본 기록(이 로그 아래쪽 항목)을 재확인한 결과:
+
+| 대상 | 구간 | 변화량 | 회전 수 |
+|---|---|---|---|
+| Left | 136320 → 205017 | 68697 | 1회전 |
+| Left | 205071 → 408805 | 203734 | 3회전 |
+| Right | 138 → 68603 | 68465 | 1회전 |
+| Right | 68931 → 273335 | 204404 | 3회전 |
+
+- Left: (68697 + 203734) / **4회전** = **68107.75** count/**1회전**
+- Right: (68465 + 204404) / **4회전** = **68217.25** count/**1회전**
+- 좌우 전체 평균 = **68162.5 count / 바퀴 1회전** (좌우 각 4회전, 합계 8회전 측정의 평균)
+
+⚠️ **68162.5는 "바퀴 1회전당" count다. "출력축 8회전 누적 count"가 아니다.**
+(8회전은 평균을 낸 표본 수이지 68162.5가 대응하는 회전 수가 아니다.)
+
+### 다음 실기 검증 절차 (하드웨어 확보 시)
+
+정확도 검증은 **목표/보고 속도 비교가 아니라 1회전 전후 `encoder_total` 차이 측정**으로 한다.
+
+```bash
+export ROS_LOCALHOST_ONLY=1
+cd /home/relu/geonhee/jolae-git/ros2_ws
+source /opt/ros/humble/setup.bash && source install/setup.bash
+
+# 1) Bridge 실행 (바퀴 공중 상태)
+ros2 run stm_serial_bridge stm_serial_bridge_node --ros-args \
+  -p dry_run:=false -p serial_port:=/dev/ttyACM0 -p baud_rate:=115200 \
+  2>&1 | tee ~/stm_$(date +%Y%m%d_%H%M%S).log
+
+# 2) 기본 상태 확인
+ros2 topic echo /stm/connected --qos-durability transient_local   # true
+ros2 topic hz /stm/wheel_actual_rad_s                             # 약 10Hz
+
+# 3) ★ 스케일 검증 — 모터 미구동(target 0), 손으로 출력축을 정확히 1회전
+ros2 topic echo /stm/encoder_total
+#    회전 직전 값과 직후 값을 기록해 차이를 계산. 좌우 각각 4회 이상 반복해 평균.
+```
+
+**합격 기준**
+
+| 항목 | 기준 |
+|---|---|
+| 1회전당 count 변화량 | 좌우 각각 재현성 있게 측정되고, 좌우 편차가 **1% 이내** |
+| 판정 A | 평균이 **68162.5 근처** → 기존 실측 재확인 (명목 77520이 틀림) |
+| 판정 B | 평균이 **77520 근처** → 명목값이 맞고 2026-08-03 측정에 오차가 있었음 |
+| 판정 C | 둘 다 아님 → 추가 원인 조사 (IC Filter 등. `.ioc` 변경은 사용자 승인 필요) |
+| 좌우 매핑 | 물리 왼쪽만 돌릴 때 `encoder_total[0]`만 변화 (2026-08-03 확정분 재확인) |
+
+⚠️ **합격 기준에서 제외한 것**: "Target 2.0 rad/s를 주면 Actual이 약 1.76 rad/s가 된다" 같은
+목표-실제 속도 비교. Actual은 **모터 부하·마찰·제어 상태에 따라 달라지므로** 스케일 판정 근거로
+쓸 수 없다. (이전 문서에 이런 기대값이 합격 기준처럼 적혀 있었고, 이번에 제거했다.)
+
+### 이 기록의 한계
+
+- 빌드·플래시·전진/후진 결과는 **사용자 구두 보고값**이며, **CubeIDE 빌드 로그 원본은 확보되지
+  않았다.** 이 환경에는 `arm-none-eabi-gcc`가 없어 STM32 펌웨어 빌드를 재현할 수 없다.
+- 전진/후진은 **정성적 동작 확인**이며 속도·거리 정량 측정이 없다.
+- 하드웨어가 SSAFY에 있어 이번 세션에서는 실기 검증이 불가능했다 — 문서 정리만 수행했다.
+
+## 2026-08-03 22:00 — ✅ BE 로컬 E2E: 추종·이동 명령 전 시나리오 통과 (가짜 카트로 실브로커 검증) (Claude)
+
+- **목적**: main 배포 전에 FOLLOW-01/02/04 + MOVE 페이로드 개편을 실제 브로커·WS로 검증
+  (Jetson·RPi 부재 — 카트는 파이썬 가짜 카트로 대체)
+- **환경**: 로컬 BE(bootRun, localhost:8080) + 로컬 MySQL + **EC2 실브로커**(your-server:1883).
+  가짜 카트 = paho-mqtt(하트비트 5초 발행 + `cmd/move/cart` 구독), WS = websocket-client(`/ws/carts/1`)
+- **커밋**: develop `3756f6a` (MR 머지 후)
+- **결과**: 12 케이스 전부 기대값과 일치
+  | 케이스 | 결과 |
+  |---|---|
+  | 405 프로브 (GET /follow/pause) | ✅ 405 |
+  | 가짜 하트비트 → 카트 ONLINE 전환 | ✅ online:true (MQTT→BE→DB) |
+  | 추종 시작 | ✅ 202 FOLLOWING + MQTT FOLLOW_START + WS FOLLOWING |
+  | 중복 시작 | ✅ 400 "이미 추종 중" (발행 없음) |
+  | 일시정지 | ✅ 202 PAUSED + MQTT FOLLOW_PAUSE + WS PAUSED |
+  | 일시정지 멱등 | ✅ 202, MQTT 재발행 없음 |
+  | 재개 | ✅ 202, 같은 followId로 FOLLOW_START 재발행 |
+  | 종료 / 종료 멱등 | ✅ 204 + FOLLOW_STOP + WS STOPPED / 204 발행 없음 |
+  | 무세션 일시정지 | ✅ 400 |
+  | 이동 중 추종 시작 | ✅ 400 "목적지 이동 중" (취소 후 재시도 가능) |
+  | MOVE 페이로드 | ✅ 구역 중심 `pixel:{225,75}` / 클릭 픽셀 `{612.5,431}` 전달, `target:null`(pixels 모드 정상), CANCEL 좌표 null |
+  | 하트비트 중단 → 워치독 OFFLINE → 추종 시작 | ✅ ~18초 뒤 OFFLINE + WS CART_CONNECTION_UPDATED, 400 "오프라인" |
+- **미검증**: `target` 미터 변환 실값(지도 메타 입력 후), EM·AI의 FOLLOW_*/MOVE 수신(수신측 미구현),
+  FE 버튼 통합(BE 로컬 서버 살려둠 — FE dev 서버 붙여서 확인 가능)
+- **참고**: EC2 공용 브로커라 가짜 하트비트를 배포 BE도 수신 — 테스트 동안 배포 환경 카트가
+  잠시 ONLINE으로 표시됨 (중단 후 15초 뒤 OFFLINE 복귀, 실카트 전원 꺼짐 상태라 무해)
+
+<details>
+<summary>REST 응답 · MQTT 수신 · WS 수신 원본</summary>
+
+```
+GET  /api/carts/1/follow/pause -> 405 Method Not Allowed
+POST /api/carts/1/follow -> 202 {"followId":1,"status":"FOLLOWING"}
+POST /api/carts/1/follow -> 400 "이미 추종 중입니다."
+POST /api/carts/1/follow/pause -> 202 {"followId":1,"status":"PAUSED"}
+POST /api/carts/1/follow/pause -> 202 {"followId":1,"status":"PAUSED"}
+POST /api/carts/1/follow -> 202 {"followId":1,"status":"FOLLOWING"}
+DELETE /api/carts/1/follow -> 204
+DELETE /api/carts/1/follow -> 204
+POST /api/carts/1/follow/pause -> 400 "진행 중인 추종이 없어 일시정지할 수 없습니다."
+POST /api/carts/1/navigation {"zoneId":1} -> 202 {"navigationId":1,"status":"ACCEPTED",...}
+POST /api/carts/1/follow -> 400 "목적지 이동 중에는 추종을 시작할 수 없습니다..."
+DELETE /api/carts/1/navigation -> 204
+POST /api/carts/1/navigation {"zoneId":1,"x":612.5,"y":431.0} -> 202
+DELETE /api/carts/1/navigation -> 204
+(하트비트 중단, 워치독 전환 후)
+POST /api/carts/1/follow -> 400 "카트가 오프라인 상태라 추종을 시작할 수 없습니다."
+```
+
+```
+# cmd/move/cart 수신 (가짜 카트, EC2 브로커 경유)
+{"requestId":1,"command":"FOLLOW_START"}
+{"requestId":1,"command":"FOLLOW_PAUSE"}
+{"requestId":1,"command":"FOLLOW_START"}
+{"requestId":1,"command":"FOLLOW_STOP"}
+{"requestId":1,"command":"MOVE","zoneId":1,"target":null,"pixel":{"x":225.0,"y":75.0}}
+{"requestId":1,"command":"CANCEL","zoneId":1,"target":null,"pixel":null}
+{"requestId":2,"command":"MOVE","zoneId":1,"target":null,"pixel":{"x":612.5,"y":431.0}}
+{"requestId":2,"command":"CANCEL","zoneId":1,"target":null,"pixel":null}
+```
+
+```
+# /ws/carts/1 수신
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"FOLLOWING","failReason":null}}
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"PAUSED","failReason":null}}
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"FOLLOWING","failReason":null}}
+{"type":"FOLLOW_STATUS_UPDATED","payload":{"followId":1,"status":"STOPPED","failReason":null}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":1,"status":"ACCEPTED",...}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":1,"status":"CANCELLED",...}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":2,"status":"ACCEPTED",...}}
+{"type":"NAVIGATION_STATUS_UPDATED","payload":{"navigationId":2,"status":"CANCELLED",...}}
+{"type":"CART_CONNECTION_UPDATED","payload":{"online":false,"lastSeenAt":"2026-08-03T21:57:03.29962"}}
+```
+
+</details>
 
 ## 2026-08-10 — ✅ FE: 만적 팝업 임계값 5→4 (Claude)
 
@@ -810,6 +6054,83 @@ tests=66 failures=0 errors=0 suites=22
 
 </details>
 
+## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat -p backend test --console=plain`
+- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
+- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
+  (SLAM 미터→픽셀 변환이 먼저 develop에 머지돼 `application.properties`·`backend/CLAUDE.md`·
+  이 로그에서 충돌 → 양쪽 다 살려 해결. `mqtt.position-unit`·`mqtt.map-id`는 그대로 두고
+  토픽 값만 교체)
+- **변경**: MQTT 토픽 전면 개편 (`ai/`·`backend/` 양쪽 동시 적용).
+  네이밍 규칙 = **상행(카트·AI→BE) `status/*`, 하행(BE→카트) `cmd/*`** (선행 슬래시 없음)
+
+  | 구 토픽 | 신 토픽 | 방향 |
+  |---------|---------|------|
+  | `carts/{cartId}/telemetry/position` | `status/position` | 카트→BE |
+  | `carts/status` | `status/cart` | 카트→BE (하트비트) |
+  | `choll/cart/rfid` | `status/slot` | 카트→BE |
+  | `choll/cart/cmd` | `cmd/move/cart` | BE→카트 (MOVE/CANCEL/SELECT_TARGET) |
+  | `choll/cart/tracks` | `status/target` | AI→BE (추종 후보 트랙) |
+
+- **구조 변경(주의)**: 새 위치 토픽에 cartId가 없어, `MqttPositionMessageHandler`가
+  토픽 정규식(`^carts/(\d+)/telemetry/position$`)에서 cartId를 뽑던 방식을 폐기하고
+  하트비트·RFID·tracks와 동일하게 `mqtt.cart-id`(기본 1)로 귀속하도록 변경.
+  토픽 검증은 주입된 `mqtt.position-topic`과 정확 비교. **이제 수신 4종 모두 cartId가
+  토픽에 없으므로 다중 카트 도입 시 EM과 재협의 필요.**
+- **결과**: 21 suites, **59 tests, 0 failures, 0 errors**
+  (내 변경으로 늘어난 테스트는 없음 — 토픽 상수만 갱신. 59는 develop의 SLAM 변환 테스트 4개 포함)
+- **적용 범위**: `ai/`·`backend/`와 공용 E2E 도구(`tests/tools/fake_jetson.py`의 트랙 발행).
+  FE(`frontend/`)·`docs/`에는 MQTT 토픽 문자열이 없어 변경 없음.
+  **EM 파트(`embedded/`)는 이 MR에서 제외** — 실카트 코드는 EM 담당자가 별도 반영 예정.
+  TEST_LOG의 과거 기록은 실행 증거라 옛 토픽명 그대로 보존.
+- **미검증 / ⚠️ 배포 시 주의**: 브로커 실연동 E2E는 돌리지 않음 (단위 테스트만).
+  - **EM 반영 전까지 실카트↔BE 통신 단절** — `embedded/rfid/rfid_mqtt.py`가 아직 옛 토픽
+    (`choll/cart/rfid`, `carts/status`)으로 발행하므로, BE만 먼저 배포하면 슬롯·하트비트를 못 받는다.
+    **BE 배포와 EM 반영은 함께 나가야 한다.**
+  - EC2 브로커에 남은 옛 `carts/status` retained LWT도 새 `status/cart`로 자동 이관되지 않음.
+- **AI 파트 기록**: [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md) 2026-08-03 항목
+
+<details>
+<summary>gradle test 출력 (마지막 부분) + JUnit XML 집계</summary>
+
+```
+BUILD SUCCESSFUL in 19s
+```
+
+```
+# build/test-results/test/*.xml 집계
+tests=59 failures=0 errors=0 suites=21
+```
+
+</details>
+
+## 2026-08-03 — ✅ EM Lidar SLAM/NAV 패키지 이관: ruff 통과 + pytest 31 통과 (Claude)
+
+- **명령**: `ruff check --config pyproject.toml choll_slam_bringup choll_nav choll_nav2` (v0.6.9,
+  repo pre-commit 고정 버전), `python3 -m pytest src/choll_nav/test/test_nav_logic.py -q`
+- **환경**: 노트북 Ubuntu 22.04 + ROS2 Humble, 워크스페이스 `~/choll/embeded` → `embedded/Lidar`로 이관
+- **브랜치**: `em/feature/Lidar`
+- **결과**: ruff All checks passed (커밋 전 13건 수정: D403 8, ANN201 4, E501 1),
+  pytest 31 passed (nav_logic 순수 로직 — ROS 소싱 불필요), `colcon build` 6패키지 통과
+- **실기 검증(노트북 + X4 Pro 실물)**: `/scan` 11.4Hz · TF 트리(map→odom→base_link→laser_frame)
+  실측 확인 · SLAM 매핑 + 지도 저장(4파일) · Nav2 goal→NAVIGATING→리커버리(Spin/Wait,
+  **BackUp 없음 = 커스텀 BT 적용 확인**)→ABORTED · `/cart/cancel`·`NAV2_UNAVAILABLE` 경로 정상.
+  좁은 공간에서 0.64m footprint 플래닝 실패는 정상 동작 — 오링카+Jetson에서 재매핑 예정
+
+<details>
+<summary>원본 출력</summary>
+
+```
+$ ruff check --config /home/ssafy/choll/S15P11C101/pyproject.toml choll_slam_bringup choll_nav choll_nav2
+All checks passed!
+
+$ python3 -m pytest src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.04s
+
+$ colcon build --symlink-install (전체 6패키지)
+Summary: 6 packages finished [18.1s]
 ## 2026-08-03 — ⚠️ EM 실기: 엔코더 count/rev 실측 → 감속비 100:1 오기재 정정(51:1), 12.1% 차이 원인 미확정 (relu 실측 / Claude 반영)
 
 - **대상**: `embedded/motor/stm32_workspace/motor-control/Application/Config/motor_config.h`
@@ -888,57 +6209,6 @@ Stall 판정(`:508,513`)으로 흘러간다.
 - 회전 각도 정밀도(손으로 정확히 1회전을 맞췄는지)는 정량화되지 않았다 —
   좌우 0.16% 일관성은 이 오차가 크지 않다는 간접 근거일 뿐이다
 - 모터축(감속 전) 카운트는 측정하지 않았으므로 감속비 자체를 독립 검증하지 못했다
-
-## 2026-08-03 14:52 — ✅ MQTT 토픽 개편, develop 리베이스 후 BE 59 tests 통과 (Claude)
-
-- **명령**: `backend/gradlew.bat -p backend test --console=plain`
-- **환경**: Windows 11, OpenJDK 21, MySQL(EC2 Docker). 브로커 없이 단위 테스트만
-- **커밋**: `d6ab80c`(develop) 위로 리베이스 — 브랜치 `refactor/mqtt-topic-rename`
-  (SLAM 미터→픽셀 변환이 먼저 develop에 머지돼 `application.properties`·`backend/CLAUDE.md`·
-  이 로그에서 충돌 → 양쪽 다 살려 해결. `mqtt.position-unit`·`mqtt.map-id`는 그대로 두고
-  토픽 값만 교체)
-- **변경**: MQTT 토픽 전면 개편 (`ai/`·`backend/` 양쪽 동시 적용).
-  네이밍 규칙 = **상행(카트·AI→BE) `status/*`, 하행(BE→카트) `cmd/*`** (선행 슬래시 없음)
-
-  | 구 토픽 | 신 토픽 | 방향 |
-  |---------|---------|------|
-  | `carts/{cartId}/telemetry/position` | `status/position` | 카트→BE |
-  | `carts/status` | `status/cart` | 카트→BE (하트비트) |
-  | `choll/cart/rfid` | `status/slot` | 카트→BE |
-  | `choll/cart/cmd` | `cmd/move/cart` | BE→카트 (MOVE/CANCEL/SELECT_TARGET) |
-  | `choll/cart/tracks` | `status/target` | AI→BE (추종 후보 트랙) |
-
-- **구조 변경(주의)**: 새 위치 토픽에 cartId가 없어, `MqttPositionMessageHandler`가
-  토픽 정규식(`^carts/(\d+)/telemetry/position$`)에서 cartId를 뽑던 방식을 폐기하고
-  하트비트·RFID·tracks와 동일하게 `mqtt.cart-id`(기본 1)로 귀속하도록 변경.
-  토픽 검증은 주입된 `mqtt.position-topic`과 정확 비교. **이제 수신 4종 모두 cartId가
-  토픽에 없으므로 다중 카트 도입 시 EM과 재협의 필요.**
-- **결과**: 21 suites, **59 tests, 0 failures, 0 errors**
-  (내 변경으로 늘어난 테스트는 없음 — 토픽 상수만 갱신. 59는 develop의 SLAM 변환 테스트 4개 포함)
-- **적용 범위**: `ai/`·`backend/`와 공용 E2E 도구(`tests/tools/fake_jetson.py`의 트랙 발행).
-  FE(`frontend/`)·`docs/`에는 MQTT 토픽 문자열이 없어 변경 없음.
-  **EM 파트(`embedded/`)는 이 MR에서 제외** — 실카트 코드는 EM 담당자가 별도 반영 예정.
-  TEST_LOG의 과거 기록은 실행 증거라 옛 토픽명 그대로 보존.
-- **미검증 / ⚠️ 배포 시 주의**: 브로커 실연동 E2E는 돌리지 않음 (단위 테스트만).
-  - **EM 반영 전까지 실카트↔BE 통신 단절** — `embedded/rfid/rfid_mqtt.py`가 아직 옛 토픽
-    (`choll/cart/rfid`, `carts/status`)으로 발행하므로, BE만 먼저 배포하면 슬롯·하트비트를 못 받는다.
-    **BE 배포와 EM 반영은 함께 나가야 한다.**
-  - EC2 브로커에 남은 옛 `carts/status` retained LWT도 새 `status/cart`로 자동 이관되지 않음.
-- **AI 파트 기록**: [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md) 2026-08-03 항목
-
-<details>
-<summary>gradle test 출력 (마지막 부분) + JUnit XML 집계</summary>
-
-```
-BUILD SUCCESSFUL in 19s
-```
-
-```
-# build/test-results/test/*.xml 집계
-tests=59 failures=0 errors=0 suites=21
-```
-
-</details>
 
 ## 2026-08-03 — ✅ EM+ROS2 실기: STM32 STATUS → Serial Bridge → ROS2 수신 확인 + 좌우 매핑 실측 확정 (relu, 실기)
 
@@ -1053,6 +6323,53 @@ STATUS 주기(약 9.995~9.999Hz)뿐이며, 아래는 **관측되지 않았으므
 - **활성화 전제**: `library_maps` id=2 행에 EM의 실제 map.yaml 값(resolution·origin)과
   FE가 쓰는 지도 이미지 크기가 정확히 들어가야 함
 
+## 2026-08-02 13:45 — ✅ BE 55 tests + FE 타겟 선택 릴레이 3종 E2E 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081, **MQTT_BROKER_URL=tcp://localhost:1883 강제**)
+  + 가짜 Jetson(Python: mp4→JPEG WS 발행) + 가짜 FE(Node WS 리스너) + mosquitto_pub/sub + curl
+- **환경**: Windows 11, OpenJDK 21.0.12, MySQL(AWS RDS), Mosquitto 로컬 브로커
+- **브랜치**: `backend/feature/video-select-relay`
+- **결과**: 18→**19 suites, 55 tests**, 0 failures (신규 7: MqttTracksMessageHandlerTest 4, FollowTargetServiceTest 3)
+- **신규 기능 E2E**:
+  - 영상 릴레이: `/ws/carts/1/video/publish`(발행) → `/ws/carts/1/video`(시청).
+    98프레임/10초(9.7fps, ~40KB JPEG) 손실 0, 시청측 저장 JPEG 디코딩 정상(640×480)
+  - 트랙 릴레이: MQTT `choll/cart/tracks` → WS `TRACKS_UPDATED` 페이로드 원형 그대로 수신
+  - 타겟 선택: `POST /api/carts/1/follow/target {trackId:16}` → 202 `{SENT}` →
+    MQTT `choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}` 수신 확인
+- **추가(14:00) 브라우저 시각 검증**: BE 정적 테스트 페이지
+  `http://localhost:8081/target-select-test.html` (FE 참조 구현으로 커밋) +
+  `tests/tools/fake_jetson.py`(result01.mp4→JPEG WS + 가짜 이동 트랙 MQTT 5Hz)로
+  영상 렌더링(271프레임)·박스 실시간 갱신·**박스 클릭→202 SENT→MQTT SELECT_TARGET** 확인
+- **트러블슈팅 2건** (재발 방지 기록):
+  - `ServletServerContainerFactoryBean`이 테스트 mock 서블릿 컨텍스트에서 기동 실패
+    → 세션별 `setBinaryMessageSizeLimit(1MB)`로 대체
+  - **backend/.env의 MQTT_BROKER_URL이 EC2 브로커**라 로컬 pub/sub과 분리돼 침묵
+    → E2E는 반드시 `MQTT_BROKER_URL=tcp://localhost:1883` 오버라이드로 실행할 것.
+    EC2 브로커에는 실카트 LWT(retained carts/status)가 살아 있음 — 테스트 트래픽 금지
+
+<details>
+<summary>E2E 원본 출력 (가짜 FE 수신 로그·cmd 구독)</summary>
+
+```text
+# fake_jetson.py
+connected: ws://localhost:8081/ws/carts/1/video/publish
+sent 98 frames in 10.1s (~9.7 fps)
+
+# fake_fe.mjs (발췌)
+[video] frame #1 (38560 bytes) saved
+[video] frame #80 (40644 bytes) saved
+[events] {"type":"TRACKS_UPDATED","payload":{"image_width":640,"image_height":480,"tracks":[{"id":16,"x":220,"y":30,"w":180,"h":420},{"id":23,"x":20,"y":180,"w":60,"h":120}]}}
+[video] total frames=98, last=39245 bytes
+
+# mosquitto_sub -t choll/cart/cmd -v
+choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}
+
+# REST 응답
+{"trackId":16,"status":"SENT"}
+```
+
+</details>
+
 ## 2026-08-02 — ✅ EM+ROS2 실기: `/cmd_vel` → Serial Bridge → STM32 → 모터 구동 확인 (relu, 실기)
 
 - **대상 커밋**: `b4293b0` "[feat] ROS2 <-> STM serial Bridge 추가." (`em/feature/motor-control`)
@@ -1114,72 +6431,6 @@ STATUS 주기(약 9.995~9.999Hz)뿐이며, 아래는 **관측되지 않았으므
 - `max_wheel_rad_s=2.0`에서 원본 `1.923/4.231` → `0.909/2.000` 비례 축소, 제한 전 프레임 PTY 송신 0건
 - write 실패(PTY master close → `[Errno 5]`) 시 `Serial TX failed` 1회 + 0.22초 내 자동 종료, 종료 코드 1
 
-## 2026-08-02 13:45 — ✅ BE 55 tests + FE 타겟 선택 릴레이 3종 E2E 통과 (Claude)
-
-- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081, **MQTT_BROKER_URL=tcp://localhost:1883 강제**)
-  + 가짜 Jetson(Python: mp4→JPEG WS 발행) + 가짜 FE(Node WS 리스너) + mosquitto_pub/sub + curl
-- **환경**: Windows 11, OpenJDK 21.0.12, MySQL(AWS RDS), Mosquitto 로컬 브로커
-- **브랜치**: `backend/feature/video-select-relay`
-- **결과**: 18→**19 suites, 55 tests**, 0 failures (신규 7: MqttTracksMessageHandlerTest 4, FollowTargetServiceTest 3)
-- **신규 기능 E2E**:
-  - 영상 릴레이: `/ws/carts/1/video/publish`(발행) → `/ws/carts/1/video`(시청).
-    98프레임/10초(9.7fps, ~40KB JPEG) 손실 0, 시청측 저장 JPEG 디코딩 정상(640×480)
-  - 트랙 릴레이: MQTT `choll/cart/tracks` → WS `TRACKS_UPDATED` 페이로드 원형 그대로 수신
-  - 타겟 선택: `POST /api/carts/1/follow/target {trackId:16}` → 202 `{SENT}` →
-    MQTT `choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}` 수신 확인
-- **추가(14:00) 브라우저 시각 검증**: BE 정적 테스트 페이지
-  `http://localhost:8081/target-select-test.html` (FE 참조 구현으로 커밋) +
-  `tests/tools/fake_jetson.py`(result01.mp4→JPEG WS + 가짜 이동 트랙 MQTT 5Hz)로
-  영상 렌더링(271프레임)·박스 실시간 갱신·**박스 클릭→202 SENT→MQTT SELECT_TARGET** 확인
-- **트러블슈팅 2건** (재발 방지 기록):
-  - `ServletServerContainerFactoryBean`이 테스트 mock 서블릿 컨텍스트에서 기동 실패
-    → 세션별 `setBinaryMessageSizeLimit(1MB)`로 대체
-  - **backend/.env의 MQTT_BROKER_URL이 EC2 브로커**라 로컬 pub/sub과 분리돼 침묵
-    → E2E는 반드시 `MQTT_BROKER_URL=tcp://localhost:1883` 오버라이드로 실행할 것.
-    EC2 브로커에는 실카트 LWT(retained carts/status)가 살아 있음 — 테스트 트래픽 금지
-
-<details>
-<summary>E2E 원본 출력 (가짜 FE 수신 로그·cmd 구독)</summary>
-
-```text
-# fake_jetson.py
-connected: ws://localhost:8081/ws/carts/1/video/publish
-sent 98 frames in 10.1s (~9.7 fps)
-
-# fake_fe.mjs (발췌)
-[video] frame #1 (38560 bytes) saved
-[video] frame #80 (40644 bytes) saved
-[events] {"type":"TRACKS_UPDATED","payload":{"image_width":640,"image_height":480,"tracks":[{"id":16,"x":220,"y":30,"w":180,"h":420},{"id":23,"x":20,"y":180,"w":60,"h":120}]}}
-[video] total frames=98, last=39245 bytes
-
-# mosquitto_sub -t choll/cart/cmd -v
-choll/cart/cmd {"command":"SELECT_TARGET","trackId":16}
-
-# REST 응답
-{"trackId":16,"status":"SENT"}
-```
-
-</details>
-
-
-## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
-
-- **명령**: `backend/gradlew.bat test`
-- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
-- **결과**: BUILD SUCCESSFUL (18 suites, 48 tests, 0 failures)
-- **변경**: EC2 Mosquitto가 인증 필수가 되어 `mqtt.username`/`mqtt.password` 설정 추가
-  (빈 값이면 기존처럼 익명 접속 — 로컬 개발 영향 없음). CI/CD 파일 신규:
-  `Jenkinsfile`, `backend/Dockerfile`, `frontend/Dockerfile`+`nginx.conf`, `infra/docker-compose.app.yml`
-
-## 2026-07-31 — ✅ BE 48 tests + TaskProgress에 totalSlots 추가 검증 (Claude)
-
-- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081) + `GET /api/carts/1/tasks/progress`
-- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
-- **결과**: 18 suites, 48 tests, 0 failures, 0 errors
-- **변경**: 진행률 분모를 슬롯 개수로 쓰기로 한 팀 결정에 따라 `TaskProgress`에 `totalSlots`(카트 슬롯 수, DB 카운트) 추가.
-  FE 계산식: `percent = (totalSlots - remainingBooks) / totalSlots` (빈 카트 100%, 6권 50%)
-- **E2E**: `{"totalSlots":12,"totalBooks":27,"shelvedBooks":27,"remainingBooks":0,...}` — DB 슬롯 12개 반영 확인
-
 ## 2026-07-31 11:37 — ✅ BE 48 tests, 슬롯 30→12 축소 반영 후 전체 통과 (Claude)
 
 - **명령**: `backend/gradlew.bat test`
@@ -1211,6 +6462,24 @@ suites=18 tests=48 failures=0 errors=0
 ```
 
 </details>
+
+## 2026-07-31 — ✅ BE 48 tests, MQTT 브로커 인증 설정 추가 후 통과 (Claude)
+
+- **명령**: `backend/gradlew.bat test`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
+- **결과**: BUILD SUCCESSFUL (18 suites, 48 tests, 0 failures)
+- **변경**: EC2 Mosquitto가 인증 필수가 되어 `mqtt.username`/`mqtt.password` 설정 추가
+  (빈 값이면 기존처럼 익명 접속 — 로컬 개발 영향 없음). CI/CD 파일 신규:
+  `Jenkinsfile`, `backend/Dockerfile`, `frontend/Dockerfile`+`nginx.conf`, `infra/docker-compose.app.yml`
+
+## 2026-07-31 — ✅ BE 48 tests + TaskProgress에 totalSlots 추가 검증 (Claude)
+
+- **명령**: `backend/gradlew.bat test`, 이후 `bootRun`(8081) + `GET /api/carts/1/tasks/progress`
+- **환경**: Windows 11, Microsoft OpenJDK 21.0.12, MySQL(AWS RDS)
+- **결과**: 18 suites, 48 tests, 0 failures, 0 errors
+- **변경**: 진행률 분모를 슬롯 개수로 쓰기로 한 팀 결정에 따라 `TaskProgress`에 `totalSlots`(카트 슬롯 수, DB 카운트) 추가.
+  FE 계산식: `percent = (totalSlots - remainingBooks) / totalSlots` (빈 카트 100%, 6권 50%)
+- **E2E**: `{"totalSlots":12,"totalBooks":27,"shelvedBooks":27,"remainingBooks":0,...}` — DB 슬롯 12개 반영 확인
 
 ## 2026-07-30 17:40 — ✅ BE 48 tests + NAV 명령 하행·Task 진행률 E2E 통과 (Claude)
 
@@ -1565,3 +6834,12 @@ BUILD FAILED in 3s
 ```
 
 </details>
+## 기록 규칙
+
+- **최신 항목이 맨 위** (이 문단 바로 아래에 추가).
+- 항목 형식: `## 날짜 시각 — 결과 요약 (실행자)` + 환경·명령·커밋 + 접힌 전체 출력(`<details>`).
+- **실패도 기록한다.** 실패 → 수정 → 재실행이면 두 번 다 남겨서 이력이 보이게 한다.
+- 원본 출력은 `<details>` 블록에 그대로 붙인다 (요약만 믿지 말고 검증 가능하게).
+
+---
+

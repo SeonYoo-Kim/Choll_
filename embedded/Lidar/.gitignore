@@ -1,0 +1,7 @@
+# upstream 외부 패키지는 커밋하지 않음 — setup_jetson.sh가 클론 (자체 .git 보유)
+/src/ydlidar_ros2_driver/
+/src/rf2o_laser_odometry/
+# colcon 산출물 (루트 .gitignore에도 있지만 명시)
+/build/
+/install/
+/log/

@@ -1,0 +1,31 @@
+# 속도 프로파일 오버레이 — slow (저속 안전 프로파일)
+#
+# `stm_serial_bridge.yaml` **위에 덮어쓰는** 파일이다. 여기 없는 파라미터는 base YAML
+# 값을 그대로 쓴다. launch 가 두 파일을 순서대로 넘긴다:
+#
+#   ros2 launch stm_serial_bridge stm_serial_bridge.launch.py speed_profile:=slow
+#
+# ── 왜 2.0 인가 ─────────────────────────────────────────────────────────────
+#
+# Nav2 봉투(`max_vel_x=0.3`, `max_vel_theta=0.6`)를 r=0.065,
+# L=0.38(2026-08-04 실측) 으로 환산하면:
+#
+#   직진만 v=0.3        -> 4.615 rad/s 필요
+#   제자리 회전 ω=0.6   -> 1.754 rad/s 필요
+#   직진+회전 (최악)    -> 6.369 rad/s 필요
+#
+# 2.0 은 **제자리 회전 봉투 전체(1.754)를 비례 축소 없이 수용**하면서 직진만 약 43%로
+# 제한한다. 즉 제자리 회전은 온전하고 직진 속도만 낮다 — 최초 통합 테스트에 적합하다.
+# (L=0.30 가정에서는 여유가 1.385 였고, 실측 0.38 로 1.754 가 되어 여유가 줄었지만
+#  2.0 은 여전히 이를 덮는다. L 이 0.433 를 넘으면 이 근거가 깨지므로 재검토 필요.)
+# 계산 근거는 `differential_drive.required_max_wheel_rad_s()`와 그 테스트에 있다.
+#
+# 2.0 은 2026-08-04 실기에서 hardware 모드 + 이 프로파일로 `SET_WHEEL_VEL,2.000,2.000`
+# 이 실제 STM 에 전달되어 좌우 바퀴가 전진 방향으로 회전함을 확인한 값이다
+# (바퀴 공중). 다만 **속도 수치와 바닥 주행은 미검증**이다.
+#
+# ⚠️ Nav2 progress checker(`required_movement_radius=0.3` / `movement_time_allowance=30.0`)
+#    기준으로는 이 프로파일도 통과한다(0.13 m/s -> 30초에 3.9 m).
+stm_serial_bridge:
+  ros__parameters:
+    max_wheel_rad_s: 2.0
