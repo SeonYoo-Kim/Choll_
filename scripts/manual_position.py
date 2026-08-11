@@ -9,6 +9,13 @@
 
 사용법:
     python scripts/manual_position.py [--broker localhost]
+    # 배포 브로커(EC2 mosquitto)에 직접 발행 — 서버에 띄울 필요 없이 내 PC에서 실행.
+    # EC2 BE는 pixels 모드(MQTT_POSITION_UNIT 미설정)이므로 --unit pixels 필수!
+    python scripts/manual_position.py --broker your-server.example.com --username choll --password CHANGE_ME --unit pixels
+
+좌표 단위 (--unit, BE의 MQTT_POSITION_UNIT과 반드시 일치):
+    meters (기본)  BE가 아핀으로 픽셀 변환 — 실카트와 같은 계약 (로컬 시연 구성)
+    pixels         평면도 픽셀을 그대로 발행 — BE 무변환 (EC2 배포 서버 구성)
 
 프롬프트 명령:
     z1 / z2 / z3      각 통로 중앙으로 이동
@@ -46,9 +53,9 @@ PUBLISH_HZ = 2.0
 CORRIDOR_Y_PX = 117.0
 HEARTBEAT_INTERVAL_S = 5.0
 
-# world(SLAM m) -> 평면도 픽셀 아핀 (library-map-affine-initial.sql과 동일해야 함)
-AFFINE_A = ((-127.740647802, -61.889825701), (47.371462021, -97.774734011))
-AFFINE_T = (834.804938333, 357.108555490)
+# world(SLAM m) -> 평면도 픽셀 아핀 (library-map-affine-v2.sql과 동일해야 함 — v2 지도 기준)
+AFFINE_A = ((-20.317241, 144.564682), (108.029244, 15.182520))
+AFFINE_T = (917.881, 175.555)
 
 # 평면도 픽셀 웨이포인트 (frontend zones.ts 실측값 기준)
 WAYPOINTS: dict[str, tuple[float, float]] = {
@@ -124,10 +131,32 @@ def main() -> None:
     parser.add_argument("--broker", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--speed", type=float, default=0.5)
+    parser.add_argument("--username", default=None, help="브로커 인증 계정 (배포 브로커는 필수)")
+    parser.add_argument("--password", default=None)
+    parser.add_argument(
+        "--unit",
+        choices=("meters", "pixels"),
+        default="meters",
+        help="발행 좌표 단위 — 대상 BE의 MQTT_POSITION_UNIT과 일치시킬 것 "
+        "(로컬=meters, EC2 배포=pixels)",
+    )
     args = parser.parse_args()
 
-    cart = PuppetCart(pixel_to_world(*WAYPOINTS["start"]), args.speed)
+    # pixels 모드: 평면도 픽셀을 그대로 발행 (BE 무변환) — 내부 시뮬레이션도 픽셀 공간에서 돈다.
+    # 속도는 그대로 m/s로 받되 픽셀/초로 환산한다 (평면도 1px = 약 0.0079m)
+    if args.unit == "pixels":
+        to_world = lambda px, py: (float(px), float(py))  # noqa: E731
+        to_pixel = lambda wx, wy: (wx, wy)  # noqa: E731
+        speed_scale = 1.0 / 0.0079
+    else:
+        to_world = pixel_to_world
+        to_pixel = world_to_pixel
+        speed_scale = 1.0
+
+    cart = PuppetCart(to_world(*WAYPOINTS["start"]), args.speed * speed_scale)
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="manual-position")
+    if args.username is not None:
+        client.username_pw_set(args.username, args.password)
     client.connect(args.broker, args.port)
     client.loop_start()
 
@@ -168,8 +197,8 @@ def main() -> None:
             if jump:
                 raw = raw[5:].strip()
             if raw.startswith("speed "):
-                cart.speed = float(raw.split()[1])
-                print(f"  속도 {cart.speed} m/s")
+                cart.speed = float(raw.split()[1]) * speed_scale
+                print(f"  속도 {float(raw.split()[1])} m/s")
                 continue
             if raw in WAYPOINTS:
                 px, py = WAYPOINTS[raw]
@@ -180,9 +209,9 @@ def main() -> None:
                 continue
             # 직선 활주는 구역을 관통해 엉뚱한 진입 팝업을 만든다 —
             # 실제 카트 동선처럼 상단 통로(y=117px)를 경유한다
-            cx, cy = world_to_pixel(cart.x, cart.y)
+            cx, cy = to_pixel(cart.x, cart.y)
             route_px = [(cx, CORRIDOR_Y_PX), (px, CORRIDOR_Y_PX), (px, py)]
-            waypoints = [pixel_to_world(*p) for p in route_px]
+            waypoints = [to_world(*p) for p in route_px]
             cart.go(waypoints, jump=jump)
             print(f"  -> plan({px:.0f}, {py:.0f}) {'즉시' if jump else '통로 경유 활주'}")
     except (KeyboardInterrupt, EOFError):
