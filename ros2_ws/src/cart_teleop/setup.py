@@ -1,4 +1,4 @@
-from setuptools import find_packages, setup
+﻿from setuptools import find_packages, setup
 
 package_name = "cart_teleop"
 
@@ -12,7 +12,7 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="relu",
+    maintainer="choll-em-dev",
     maintainer_email="em-dev@anonymized.invalid",
     description=(
         "SSH terminal WASD keyboard teleop publishing /cmd_vel "
@@ -21,9 +21,10 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            # launch 파일은 두지 않는다 — teleop 은 stdin(tty)을 점유해야 하므로
-            # `ros2 run` 으로 실행한다.
+            # launch ?뚯씪? ?먯? ?딅뒗????teleop ? stdin(tty)???먯쑀?댁빞 ?섎?濡?
+            # `ros2 run` ?쇰줈 ?ㅽ뻾?쒕떎.
             "keyboard_teleop = cart_teleop.teleop_node:main",
         ],
     },
 )
+

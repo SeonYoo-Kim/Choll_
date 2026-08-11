@@ -1,22 +1,23 @@
-<?xml version="1.0"?>
+﻿<?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>cart_teleop</name>
   <version>0.1.0</version>
   <description>SSH terminal WASD keyboard teleop publishing /cmd_vel for manual SLAM mapping.</description>
-  <maintainer email="em-dev@anonymized.invalid">relu</maintainer>
+  <maintainer email="em-dev@anonymized.invalid">choll-em-dev</maintainer>
   <license>MIT</license>
 
   <exec_depend>rclpy</exec_depend>
-  <!-- /cmd_vel (Twist) 발행용. -->
+  <!-- /cmd_vel (Twist) 諛쒗뻾?? -->
   <exec_depend>geometry_msgs</exec_depend>
 
-  <!-- ⚠️ Serial 의존성을 두지 않는다. 이 패키지는 포트를 열지 않으며,
-       stm_serial_bridge 의 내부 모듈도 import 하지 않는다.
-       키 입력은 표준 라이브러리(termios/tty/select)로 처리하므로 추가 의존성이 없다.
-       launch 파일도 없다 — teleop 은 tty 를 점유해야 하므로 ros2 run 으로 실행한다. -->
+  <!-- ?좑툘 Serial ?섏〈?깆쓣 ?먯? ?딅뒗?? ???⑦궎吏???ы듃瑜??댁? ?딆쑝硫?
+       stm_serial_bridge ???대? 紐⑤뱢??import ?섏? ?딅뒗??
+       ???낅젰? ?쒖? ?쇱씠釉뚮윭由?termios/tty/select)濡?泥섎━?섎?濡?異붽? ?섏〈?깆씠 ?녿떎.
+       launch ?뚯씪???녿떎 ??teleop ? tty 瑜??먯쑀?댁빞 ?섎?濡?ros2 run ?쇰줈 ?ㅽ뻾?쒕떎. -->
 
   <export>
     <build_type>ament_python</build_type>
   </export>
 </package>
+

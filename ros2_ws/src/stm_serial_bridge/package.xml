@@ -1,21 +1,21 @@
-<?xml version="1.0"?>
+﻿<?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>stm_serial_bridge</name>
   <version>0.1.0</version>
   <description>Bridge ROS2 /cmd_vel to the STM32 motor controller over USB serial.</description>
-  <maintainer email="em-dev@anonymized.invalid">relu</maintainer>
+  <maintainer email="em-dev@anonymized.invalid">choll-em-dev</maintainer>
   <license>MIT</license>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
-  <!-- STM 상태 토픽(/stm/*) 발행용. custom message는 만들지 않는다. -->
+  <!-- STM ?곹깭 ?좏뵿(/stm/*) 諛쒗뻾?? custom message??留뚮뱾吏 ?딅뒗?? -->
   <exec_depend>std_msgs</exec_depend>
-  <!-- /wheel/odom 발행용 (stm_serial_bridge/wheel_odometry_node.py). -->
+  <!-- /wheel/odom 諛쒗뻾??(stm_serial_bridge/wheel_odometry_node.py). -->
   <exec_depend>nav_msgs</exec_depend>
-  <!-- pyserial. Ubuntu 패키지명은 python3-serial (stm_serial_bridge/serial_link.py에서만 import) -->
+  <!-- pyserial. Ubuntu ?⑦궎吏紐낆? python3-serial (stm_serial_bridge/serial_link.py?먯꽌留?import) -->
   <exec_depend>python3-serial</exec_depend>
-  <!-- launch/stm_serial_bridge.launch.py 실행용 -->
+  <!-- launch/stm_serial_bridge.launch.py ?ㅽ뻾??-->
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
 
@@ -23,3 +23,4 @@
     <build_type>ament_python</build_type>
   </export>
 </package>
+
