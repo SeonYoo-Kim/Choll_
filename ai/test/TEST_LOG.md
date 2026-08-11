@@ -13,6 +13,41 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-11 낮 — ✅ 공개 저장소 준비: system-fusion 머지 + 문서 전면 정리 후 114 passed, ruff 회귀 없음 (Claude)
+
+- **명령**: `pytest ai/test/ -q` + `ruff check ai scripts` + `ruff check .`
+- **환경**: Windows 11 개발 PC, Python 3.12 (miniforge), 별도 클론 Choll-work (main + em/feature/system-fusion 머지본)
+- **커밋**: main `e9d15d6` (머지 `d944e6f` 포함)
+- **맥락**: GitHub 공개용 정리 — system-fusion 히스토리 보존 머지, 문서 현행화, 민감정보 제거.
+  AI 코드는 무변경(문서·EM 코드만 변화)이므로 회귀 없음 확인이 목적.
+- **결과**:
+  - `pytest ai/test/`: **114 passed** (0.18s)
+  - `ruff check ai scripts`: 55 errors — **원본 저장소(develop)와 동일 건수** (기존 미해결 스타일, 이번 작업으로 증감 없음)
+  - `ruff check .` 전체: 573 errors (원본 510) — 증가분은 머지로 들어온 EM 워크스페이스(embedded/Lidar, ros2_ws cart_teleop)의 기존 스타일
+- **부속 검증**: frontend `pnpm test` 145 passed / backend `gradlew test` 97 passed (contextLoads는 .env 필요 — 주입 후 통과)
+
+<details>
+<summary>pytest / ruff 원본 출력</summary>
+
+```
+$ ~/miniforge3/python.exe -m pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.18s
+
+$ ~/miniforge3/python.exe -m ruff check ai scripts
+Found 55 errors.
+[*] 4 fixable with the `--fix` option (9 hidden fixes can be enabled with the `--unsafe-fixes` option).
+
+$ ~/miniforge3/python.exe -m ruff check .        # Choll-work (머지본)
+Found 573 errors.
+
+$ ~/miniforge3/python.exe -m ruff check ai scripts   # 원본 Choll (develop) — 동일 55건
+Found 55 errors.
+```
+
+</details>
+
 ## 2026-08-08 밤 — ✅ legacy_control launch 인자 추가, 114 passed·ruff 0건 (Claude)
 
 - **명령**: `ruff check follow_robot_launch.py` + ast 구문 검증 + `pytest ai/test/ -q`
