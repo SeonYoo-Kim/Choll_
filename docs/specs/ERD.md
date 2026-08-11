@@ -1,7 +1,9 @@
 # ERD
 
-> JPA 엔티티 코드에서 재생성한 다이어그램 (2026-08-11, `backend/src/main/java/**/domain/*.java` 실측).
-> 개발 당시 ERDCloud로 관리하던 다이어그램은 비공개라 코드 기준으로 다시 그렸다.
+> 실제 MySQL 스키마를 리버스 엔지니어링한 Workbench 모델([backend/erd.mwb](../../backend/erd.mwb))과
+> JPA 엔티티 코드(`backend/src/main/java/**/domain/*.java`)를 교차 검증해 작성 (2026-08-11).
+> 테이블 10개·FK 관계는 양쪽이 완전히 일치. 컬럼 타입(enum, datetime(6))은 DB 실측 기준.
+> 아핀 6계수 컬럼은 mwb 스냅숏(08-06) 이후인 08-07에 추가돼 mwb에는 없지만 실 DB·코드·시드 SQL에 존재한다.
 
 ```mermaid
 erDiagram
@@ -91,36 +93,36 @@ erDiagram
         varchar library_name "not null"
         varchar room_name "not null"
         bigint bookshelf_id FK "nullable"
-        varchar status "AVAILABLE LOANED LOST PROCESSING"
+        enum status "AVAILABLE LOANED LOST PROCESSING"
     }
 
     carts {
         bigint id PK
         varchar name UK "not null"
-        varchar connection_status "ONLINE OFFLINE"
-        varchar operation_status "IDLE FOLLOWING NAVIGATING ERROR"
+        enum connection_status "ONLINE OFFLINE"
+        enum operation_status "IDLE FOLLOWING NAVIGATING ERROR"
         decimal position_x "nullable"
         decimal position_y "nullable"
         bigint current_zone_id FK "nullable"
-        datetime last_communication_at "nullable"
+        datetime last_communication_at "nullable, datetime(6)"
     }
 
     slots {
         bigint id PK
         bigint cart_id FK "not null, slot_number와 복합 유니크"
         int slot_number "not null, 1~12 체크 제약"
-        varchar status "EMPTY OCCUPIED RFID_READING RFID_ERROR"
+        enum status "EMPTY OCCUPIED RFID_READING RFID_ERROR"
         bigint book_copy_id FK "nullable, 전역 유니크"
-        datetime last_scanned_at "nullable"
+        datetime last_scanned_at "nullable, datetime(6)"
     }
 
     sorting_tasks {
         bigint id PK
         bigint cart_id FK "not null"
         bigint book_copy_id FK "not null"
-        varchar status "ACTIVE COMPLETED"
-        datetime created_at "not null"
-        datetime completed_at "nullable"
+        enum status "ACTIVE COMPLETED"
+        datetime created_at "not null, datetime(6)"
+        datetime completed_at "nullable, datetime(6)"
     }
 ```
 
