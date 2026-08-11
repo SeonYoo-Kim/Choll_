@@ -310,6 +310,11 @@ python scripts/fake_jetson.py --broker localhost
 
 # (시연 비상용이었던 수동 위치 발행기 — 사람이 좌표를 찍어 카트 위치를 대행)
 python scripts/manual_position.py --broker localhost
+
+# 배포 서버(원격 브로커)에 직접 fake 좌표 발행 — 서버에 띄울 필요 없이 내 PC에서 실행.
+# --unit은 대상 BE의 MQTT_POSITION_UNIT과 반드시 일치시킬 것:
+#   meters(기본) = BE가 아핀으로 픽셀 변환 (로컬 구성) / pixels = 평면도 픽셀 그대로 (배포 서버 구성)
+python scripts/manual_position.py --broker <서버주소> --username <계정> --password <비밀번호> --unit pixels
 ```
 
 지도 탭에서 목적지를 클릭하면 가짜 카트가 이동하고, 구역 진입 팝업·슬롯 LED 명령·정리 진행률까지
