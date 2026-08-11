@@ -19,7 +19,9 @@
 
 - **Re-ID 사람 추종은 실동작했다.** 최종 동결 시점 로그에서 `/target_person` 863건,
   `/cmd_vel` 500건 발행과 카트 실이동 관통이 확인됐다. 오클루전·유사 착장 방해 후
-  원 대상 재식별(Memory Bank)도 시연에서 재현됐다.
+  원 대상 재식별(Memory Bank)도 시연에서 재현됐다. 실기에서 잡은 오인식·거리 오측정
+  문제와 해결(연속 10프레임 게이팅, bbox 최근접 거리)은
+  [AI_SPECIFICATIONS.md의 실전 트러블슈팅](AI_SPECIFICATIONS.md#실전-트러블슈팅-실기-검증-사례) 참조.
 - **SLAM 매핑·지도 정합은 성공했다.** scan endpoint의 최근접 벽거리 median 0.031 m,
   2셀 이내 정합률 98.6% (AMCL 정합 검증).
 - **Nav2 P2P 주행 자체는 도달했다.** 단일 goal SUCCEEDED, 최종 오차 0.184 m.

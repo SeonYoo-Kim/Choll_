@@ -69,6 +69,28 @@ When ByteTrack loses the target, candidates pass three gates in order:
 
 
 
+## 실전 트러블슈팅 (실기 검증 사례)
+
+### 1. 동일 의상 인물 오인식 → 연속 10프레임 이동거리 게이팅
+
+같은 (팀 단체복) 의상을 입은 두 사람이 화면에 있으면 OSNet 외형 특징만으로는
+구분이 안 돼, 타겟을 놓쳤다 되찾을 때 엉뚱한 사람에게 붙는 문제가 실기에서 발생했다.
+위 Re-acquisition Gate의 **①시공간 타당성(마지막 목격 지점에서 도달 가능한 이동거리 제한)과
+③연속 10프레임 동일 후보 확인**을 조합해 극복 — 외형 점수가 높아도 물리적으로
+불가능한 위치의 후보는 기각되고, 한 순간의 오매칭이 즉시 타겟을 바꾸지 못한다.
+
+![동일 의상 상황에서의 Re-ID 복구 — RECOVERED ID/SIM 배너](assets/reid-recovery-10frame-gate.jpg)
+
+### 2. bbox 중앙 거리 오측정 → 가로 범위 내 최근접 LiDAR 거리
+
+타겟 거리를 bbox **중앙 픽셀의 방위각 하나**로 LiDAR에서 읽으면, 사람 몸 중앙이
+공교롭게 팔·몸통 사이 틈이거나 반사가 약한 옷일 때 **뒷배경(벽)의 거리**가 잡혀
+카트가 갑자기 가속하는 문제가 있었다. bbox **가로축이 커버하는 각도 범위 전체**를
+조회해 그중 **최근접 유효 거리**를 타겟 거리로 채택하도록 변경
+(`control_node.py`의 `min_valid_range_in_span` — bbox 폭→각도 반폭 환산 포함).
+
+![bbox 가로 범위 최근접 거리 측정 — TARGET DIST 오버레이](assets/lidar-bbox-min-dist.jpg)
+
 ## Robot Controller (레거시 경로 — 실제 시연에 사용)
 
 > 2026-07-31 아키텍처 변경으로 AI의 공식 책임은 `/target_position` 발행까지로 축소됐고
