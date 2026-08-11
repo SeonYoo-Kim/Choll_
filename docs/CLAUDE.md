@@ -8,16 +8,21 @@
 | 문서 | 무엇을 볼 때 | 성격 |
 |------|--------------|------|
 | [PROJECT_CHARTER.md](PROJECT_CHARTER.md) | 목표·범위·제약·성공 기준 | 불변에 가까움 (WHY) |
-| [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) | 파이프라인·ROS2 토픽·노드 그래프 | 구조 (WHAT) |
-| [AI_SPECIFICATIONS.md](AI_SPECIFICATIONS.md) | 모델·트래커·Re-ID·PID 파라미터와 선택 이유 | 명세 (WHAT/WHY) |
-| [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) | 코딩 규칙·아키텍처 원칙·단계별 TODO | 규칙 (HOW) |
-| [JETSON_TO_STM.md](JETSON_TO_STM.md) | Jetson↔STM32 UART / micro-ROS 인터페이스 규격 | 인터페이스 계약 |
+| [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) | 전체 시스템·AI 파이프라인·ROS2 토픽 | 구조 (WHAT) |
+| [RETROSPECTIVE.md](RETROSPECTIVE.md) | 계획 vs 실제 시연 구성, 실패 원인 분석 | 회고 (WHY NOT) |
+| [AI_SPECIFICATIONS.md](AI_SPECIFICATIONS.md) | 모델·트래커·Re-ID 파라미터와 선택 이유 | 명세 (WHAT/WHY) |
+| [API_CONTRACT.md](API_CONTRACT.md) | FE-BE REST 경로·DTO | 인터페이스 계약 |
+| [specs/](specs/) | 기능·API·ERD·기술스택·시나리오 명세 모음 | 명세 (WHAT) |
+| [SETUP.md](SETUP.md) | 빌드·배포·로컬 재현 가이드 | 운영 (HOW) |
+| [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) | 코딩 규칙·아키텍처 원칙 | 규칙 (HOW) |
+| [JETSON_TO_STM.md](JETSON_TO_STM.md) | Jetson↔STM32 USB Serial 인터페이스 규격 | 인터페이스 계약 |
 | [MAINTENANCE.md](MAINTENANCE.md) | 가비지 컬렉션·정리 정책·저장소 위생 | 운영 (HOW) |
 | [GIT_CONVENTION.md](GIT_CONVENTION.md) | 브랜치 전략·커밋 메시지·MR/이슈 템플릿 | 협업 규칙 (HOW) |
+| [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) | 시연 당일 절차 (시나리오 A/B/C 분기) | 운영 기록 |
 
 ## 편집 규칙
 
 - **PROJECT_CHARTER.md는 함부로 넓히지 않는다.** 범위(Out of Scope)를 늘리는 변경은 사용자 승인이 필요.
 - 성능 목표(10 FPS, <100 ms, <6 GB)나 AI 스택(YOLOv10s/ByteTrack/OSNet)을 바꾸려면 CHARTER·SPEC·DEVELOPMENT_GUIDE를 함께 갱신한다.
 - 토픽 이름/타입을 바꾸면 SYSTEM_ARCHITECTURE.md와 노드 CLAUDE.md를 동시에 갱신한다.
-- 단계별 진행 상태는 DEVELOPMENT_GUIDE.md의 TODO와 ai/README.md의 Current Progress 두 곳에 있다 — 한쪽만 고치지 말 것.
+- 단계별 진행 이력은 DEVELOPMENT_GUIDE.md와 ai/README.md의 Current Progress 두 곳에 있다 — 한쪽만 고치지 말 것.

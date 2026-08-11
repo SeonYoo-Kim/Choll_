@@ -1,21 +1,21 @@
 # Git Convention
 
 팀에서 합의한 브랜치 전략·커밋 메시지·MR/이슈 작성 규칙입니다.
-**사람과 AI 에이전트 모두 이 규칙을 따릅니다.** (MR/이슈 템플릿은 GitLab의 `.gitlab/` 템플릿으로도 등록되어 있습니다.)
+**사람과 AI 에이전트 모두 이 규칙을 따랐습니다.**
+(개발 당시 원본 저장소는 GitLab이었고 MR/이슈 템플릿이 `.gitlab/` 템플릿으로 등록돼 있었습니다.
+이 공개 저장소는 개발 종료 후의 정리본이라 `main` 단일 브랜치입니다.)
 
-## 1. Branch 전략 (Git Flow)
+## 1. Branch 전략 (Git Flow 변형)
 
 | 구분 | 브랜치 | 역할 |
 |------|--------|------|
-| main | `master` | 제품으로 출시되는 브랜치 |
+| main | `main` | 제품으로 출시되는 브랜치 |
 | main | `develop` | 다음 출시 버전을 개발하는 브랜치 |
-| sub | `feature/*` | 기능을 개발하는 브랜치 |
-| sub | `release/*` | 이번 출시 버전을 준비하는 브랜치 |
-| sub | `hotfix/*` | 출시 버전 버그를 수정하는 브랜치 |
+| sub | `<파트>/feature/*` | 기능 개발 (예: `backend/feature/…`, `em/feature/…`) |
+| sub | `<파트>/fix/*` | 버그 수정 |
+| sub | `docs/*` | 문서 작업 |
 
-흐름: `feature/*` → `develop` → `release/*` → `master` (긴급 수정은 `master` → `hotfix/*` → `master`+`develop`)
-
-> ⚠️ 현재 이 저장소의 기본 브랜치는 `main`입니다. 전략 적용 시 `master`/`develop` 브랜치 정리가 필요합니다.
+흐름: `<파트>/feature/*` → MR → `develop` → (안정화 후) → `main`
 
 ## 2. Commit Message — `[type] subject`
 
@@ -51,7 +51,7 @@
 ### 머지는 사람이 한다 (AI 에이전트 규칙)
 
 - AI 에이전트는 **피처 브랜치 커밋·푸시, MR 생성까지만** 수행한다.
-- `develop`·`master`(main)에 대한 **직접 푸시 및 로컬 머지 금지** — 머지 버튼은 담당자가 GitLab에서 직접 누른다. (2026-07-31 합의)
+- `develop`·`main`에 대한 **직접 푸시 및 로컬 머지 금지** — 머지 버튼은 담당자가 직접 누른다. (2026-07-31 합의)
 
 ### MR 템플릿
 

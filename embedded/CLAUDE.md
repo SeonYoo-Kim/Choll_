@@ -18,16 +18,16 @@ Jetson ↔ STM32 인터페이스는 [docs/JETSON_TO_STM.md](../docs/JETSON_TO_ST
 ## 디렉토리
 | 경로 | 내용 |
 |------|------|
-| `motor/` | STM32 기반 모터 제어 |
-| `rfid/` | RFID 인식 |
-| `led/` | LED 제어 |
+| `motor/` | STM32 기반 모터 제어 (LED 제어는 `rfid/led_controller.py`가 담당 — 별도 `led/` 디렉토리 없음) |
+| `rfid/` | RFID 인식 + 슬롯 LED 제어 (Raspberry Pi) |
 | `Lidar/` | SLAM/NAV colcon 워크스페이스 (X4Pro + slam_toolbox + Nav2, `/robot_pose`·`/target_position` 계약 구현) |
 
 ## 인터페이스 계약
 
 **Jetson → STM32** ([JETSON_TO_STM.md](../docs/JETSON_TO_STM.md)):
-- UART Serial 115200 bps, micro-ROS (ROS 2 Humble)
-- 구독: `/wheel_speed_cmd` (`std_msgs/msg/Int32MultiArray`) — `data[0]` 좌측 RPM, `data[1]` 우측 RPM, 10~12 Hz
+- USB Serial (USART2, ST-LINK VCP) 115200 8N1, 텍스트 라인 프로토콜 (UART Protocol v1)
+- `ros2_ws/src/stm_serial_bridge`가 `/cmd_vel`(Twist)을 `SET_WHEEL_VEL,<L>,<R>`(rad/s)로 변환해 하행
+- (초기 후보였던 micro-ROS·`/wheel_speed_cmd` RPM 계약은 폐기 — 정본은 serial_protocol.md)
 
 **카트 → Backend (MQTT)** — 2026-08-09 BE 소스 + 브로커 `#` 구독 실측으로 확정:
 
@@ -59,13 +59,12 @@ Jetson ↔ STM32 인터페이스는 [docs/JETSON_TO_STM.md](../docs/JETSON_TO_ST
 > ⚠️ 위 계약(토픽명·타입·매핑)을 바꾸려면 AI 파트(`motor_node`)·BE 파트와 동시에 바꿔야 합니다.
 > 단독 변경 금지 — 이슈로 논의 후 정본 문서(JETSON_TO_STM.md / API 명세서)를 먼저 갱신하세요.
 
-## 확정 필요
+## 확정 사항 (프로젝트 종료 시점 기준)
 
-- [ ] STM32 보드 모델, CubeIDE/CubeMX 버전
-- [ ] 커밋 범위: CubeMX 생성 프로젝트 전체 커밋 여부 (Drivers/, Middlewares/ 포함?)
-- [ ] SLAM·Nav2 실행 위치: Jetson Orin? 별도 컴퓨트? (`ai/` 워크스페이스와의 코드 경계)
-- [ ] CAN 버스 용도 (모터 드라이버? 센서?)
+- STM32 보드: **NUCLEO-F446RE** (STM32F446RET6), CubeMX 프로젝트 `motor/stm32_workspace/motor-control/`
+- 커밋 범위: CubeMX 생성 프로젝트 전체 커밋 (Drivers/ 포함 — ST/CMSIS 벤더 라이선스 동봉)
+- SLAM·Nav2 실행 위치: **Jetson Orin Nano** (`embedded/Lidar/` colcon 워크스페이스, `ai/`와는 별도 워크스페이스 — [ros2_ws/CLAUDE.md](../ros2_ws/CLAUDE.md)의 경계 설명 참조)
+- CAN 버스: 최종 구성에서 미사용 (Jetson↔STM32는 USB Serial로 확정)
 
 ## 참고 문서
-- 기능 명세서 > Embedded: https://app.notion.com/p/3a6135971f3c80c0a360d88ddfcf4e67
-- 임베디드 워크플로우 (Excalidraw): https://excalidraw.com/#room=REDACTED 
+- 기능 명세서 > Embedded: [docs/specs/FUNCTIONAL_SPEC.md](../docs/specs/FUNCTIONAL_SPEC.md)

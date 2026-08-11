@@ -101,9 +101,9 @@ FE ←REST/WebSocket/WebRTC시그널링→ BE ←MQTT→ 카트(EM/AI)
 
 ## 참고 문서
 
-- API 명세서: https://app.notion.com/p/API-3a3135971f3c804c8c56e68e492e3990
-- 기능 명세서 > BE: https://app.notion.com/p/3a3135971f3c806ea787f252ce76e8d1
-- ERD: https://www.erdcloud.com/d/vW3GTJQcayrfsLsDy (비공개 — 접근 권한 필요)
+- API 명세서: [docs/specs/API_SPEC.md](../docs/specs/API_SPEC.md)
+- 기능 명세서 > BE: [docs/specs/FUNCTIONAL_SPEC.md](../docs/specs/FUNCTIONAL_SPEC.md)
+- ERD: [docs/specs/ERD.md](../docs/specs/ERD.md)
 
 ## 이 디렉토리에서 지켜야 할 것
 

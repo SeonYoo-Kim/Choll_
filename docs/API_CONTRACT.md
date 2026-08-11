@@ -1,31 +1,33 @@
 # FE-BE API 계약
 
-Notion `API 명세서`를 기준으로 FE와 BE가 함께 사용하는 REST 경로와 응답 필드를
-고정합니다. 실제 구현에서 사용하는 JSON 필드명은 이 문서를 따릅니다.
+FE와 BE가 함께 사용하는 REST 경로와 응답 필드를 고정합니다.
+실제 구현에서 사용하는 JSON 필드명은 이 문서를 따릅니다.
+WebSocket 이벤트·MQTT·ROS2 토픽 계약은 [specs/API_SPEC.md](specs/API_SPEC.md)를 참조하세요.
 
-## 1. 경로
+## 1. 경로 (상태 열은 최종 코드 실측 — 2026-08-11)
 
 | ID | Method | Path | 상태 |
 |---|---|---|---|
-| CART-01 | GET | `/api/carts/{cartId}` | 구현 |
-| SLOT-01 | GET | `/api/carts/{cartId}/slots` | 구현 |
-| SLOT-02 | GET | `/api/carts/{cartId}/slots/{slotNumber}` | 구현 |
-| SLOT-03 | POST | `/api/carts/{cartId}/slots/{slotNumber}/rescan` | MQTT 연동 예정 |
-| MAP-01 | GET | `/api/maps/{mapId}` | 구현 |
-| MAP-02 | GET | `/api/maps/{mapId}/zones` | 구현 |
-| TASK-01 | GET | `/api/carts/{cartId}/tasks` | 작업 도메인 구현 예정 |
-| TASK-02 | GET | `/api/carts/{cartId}/tasks/progress` | 슬롯 기준 임시 집계 구현 |
-| TASK-03 | GET | `/api/carts/{cartId}/current-zone/tasks` | 작업 도메인 구현 예정 |
-| NAV-01 | POST | `/api/carts/{cartId}/navigation` | MQTT 연동 예정 |
-| NAV-02 | DELETE | `/api/carts/{cartId}/navigation` | MQTT 연동 예정 |
-| NAV-03 | GET | `/api/carts/{cartId}/navigation` | 이동 상태 도메인 구현 예정 |
-| FOLLOW-01 | POST | `/api/carts/{cartId}/follow/prepare` | MQTT 연동 예정 |
-| FOLLOW-02 | DELETE | `/api/carts/{cartId}/follow` | MQTT 연동 예정 |
-| FOLLOW-03 | POST | `/api/carts/{cartId}/follow/target` | MQTT 연동 예정 |
-| FOLLOW-04 | POST | `/api/carts/{cartId}/follow` | MQTT 연동 예정 |
-| FOLLOW-05 | GET | `/api/carts/{cartId}/follow/status` | 추종 상태 도메인 구현 예정 |
+| CART-01 | GET | `/api/carts/{cartId}` | ✅ 구현 |
+| SLOT-01 | GET | `/api/carts/{cartId}/slots` | ✅ 구현 |
+| SLOT-02 | GET | `/api/carts/{cartId}/slots/{slotNumber}` | ✅ 구현 |
+| SLOT-03 | POST | `/api/carts/{cartId}/slots/{slotNumber}/rescan` | ❌ 미구현 (재인식은 RPi가 자체 재시도) |
+| MAP-01 | GET | `/api/maps/{mapId}` | ✅ 구현 |
+| MAP-02 | GET | `/api/maps/{mapId}/zones` | ✅ 구현 |
+| TASK-01 | GET | `/api/carts/{cartId}/tasks` | △ 슬롯 기준 집계로 대체 |
+| TASK-02 | GET | `/api/carts/{cartId}/tasks/progress` | ✅ 구현 (슬롯 기준 집계) |
+| TASK-03 | GET | `/api/carts/{cartId}/current-zone/tasks` | △ WS `CURRENT_ZONE_TASKS_UPDATED` 이벤트로 대체 |
+| NAV-01 | POST | `/api/carts/{cartId}/navigation` | ✅ 구현 (MQTT `cmd/move/cart` MOVE 하행) |
+| NAV-02 | DELETE | `/api/carts/{cartId}/navigation` | ✅ 구현 (MQTT CANCEL 하행) |
+| NAV-03 | GET | `/api/carts/{cartId}/navigation` | ❌ 미구현 (상태는 WS `NAVIGATION_STATUS_UPDATED`로 수신) |
+| FOLLOW-01 | POST | `/api/carts/{cartId}/follow/pause` | ✅ 구현 (일시정지) |
+| FOLLOW-02 | DELETE | `/api/carts/{cartId}/follow` | ✅ 구현 (종료) |
+| FOLLOW-03 | POST | `/api/carts/{cartId}/follow/target` | ✅ 구현 (MQTT SELECT_TARGET 하행) |
+| FOLLOW-04 | POST | `/api/carts/{cartId}/follow` | ✅ 구현 (시작) |
+| FOLLOW-05 | GET | `/api/carts/{cartId}/follow/status` | ❌ 미구현 (상태는 WS `FOLLOW_STATUS_UPDATED`로 수신) |
 
 카트가 한 대이므로 별도 카트 목록 API는 제공하지 않습니다.
+`/api/books`, `/api/book-copies`, `/api/bookshelves` 등 도서 마스터 CRUD는 관리용으로 별도 존재합니다 (Swagger 참조).
 
 ## 2. 공통 규칙
 

@@ -21,7 +21,7 @@ ROS2 기반 **Jetson Orin Nano 8GB**에서 구동
 ### 0. Jetson에 SSH 접속
 
 ```bash
-ssh <사용자名>@<Jetson_IP>       # 예: ssh jetson@192.168.0.42
+ssh <사용자명>@<Jetson_IP>       # 예: ssh jetson@192.168.0.42
 ```
 
 ### 1. (최초 1회 또는 코드 변경 후) 빌드

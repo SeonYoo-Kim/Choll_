@@ -69,14 +69,18 @@ When ByteTrack loses the target, candidates pass three gates in order:
 
 
 
-## Robot Controller
+## Robot Controller (레거시 경로 — 실제 시연에 사용)
+
+> 2026-07-31 아키텍처 변경으로 AI의 공식 책임은 `/target_position` 발행까지로 축소됐고
+> 주행은 EM Nav2로 이관됐다. 다만 이 PID 경로는 `legacy_control:=true`(launch 기본값)로
+> 보존됐고, **최종 시연은 이 경로로 진행됐다** — 경위는 [RETROSPECTIVE.md](RETROSPECTIVE.md) 참조.
 
 * Input
-  * Bounding Box Center
-  * LiDAR Distance
+  * Bounding Box Center (화면 중심 오차 → 각속도)
+  * LiDAR Distance (전방 거리 → 선속도)
 
 * Output
-  * geometry_msgs/Twist
+  * geometry_msgs/Twist (`/cmd_vel`)
 
 * Target Distance
   * 1.0 meter

@@ -1,7 +1,7 @@
 // 쫄래쫄래 CI/CD 파이프라인 (Jenkins, EC2 단일 호스트 배포)
 // 흐름: 백엔드 테스트 → 이미지 빌드(BE/FE) → docker compose 배포
 // 필요한 Jenkins 자격증명:
-//   - choll-app-env (Secret file): 배포용 .env (DB_*, MQTT_* 등 — 노션 참조)
+//   - choll-app-env (Secret file): 배포용 .env (DB_*, MQTT_* 등 — docs/SETUP.md의 환경변수 표 참조)
 pipeline {
 	agent any
 

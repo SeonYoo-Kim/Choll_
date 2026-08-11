@@ -1,10 +1,21 @@
 # CLAUDE.md — ros2_ws/
 
-이 워크스페이스는 **Jetson에서 도는 ROS2 노드**를 개발하는 공간입니다.
-현재 유일한 패키지는 `/cmd_vel`을 STM32 모터 제어 보드로 중계하는
-[stm_serial_bridge](src/stm_serial_bridge/)입니다.
+이 워크스페이스는 **Jetson에서 도는 ROS2 노드** 중 모터 구동 계층을 담당합니다.
+패키지: `/cmd_vel`을 STM32 모터 제어 보드로 중계하는 [stm_serial_bridge](src/stm_serial_bridge/),
+키보드 원격 조종·휠 오도메트리 도구 모음 [cart_teleop](src/cart_teleop/).
 
 프로젝트 전체 개요는 [루트 CLAUDE.md](../CLAUDE.md)를 참고하세요.
+
+## 이 저장소의 ROS2 워크스페이스 3개 — 경계
+
+| 워크스페이스 | 담당 | 빌드 위치 |
+|---|---|---|
+| `ai/` | 인지 파이프라인 (카메라→YOLO→ByteTrack→Re-ID→`/target_position`, 레거시 PID `/cmd_vel`) | `cd ai && colcon build` |
+| `embedded/Lidar/` | SLAM·Nav2·MQTT 브릿지 (LiDAR→slam_toolbox→AMCL→Nav2→`/cmd_vel`) | `cd embedded/Lidar && colcon build` |
+| `ros2_ws/` | 모터 구동 (`/cmd_vel`→USB Serial→STM32) + teleop·오도메트리 | `cd ros2_ws && colcon build` |
+
+`/cmd_vel` 발행자는 **동시에 하나만** 존재해야 합니다 — AI 레거시 경로(`legacy_control:=true`)와
+Nav2(velocity_smoother)를 함께 켜면 충돌합니다 (실제로 매핑 중 발견된 문제 — [docs/RETROSPECTIVE.md](../docs/RETROSPECTIVE.md) 참조).
 
 ## 현재 목표
 
@@ -24,8 +35,8 @@ STM32 (NUCLEO-F446RE)
 모터 제어
 ```
 
-현재는 비전·LiDAR·Nav2와 통합하지 않습니다. `/cmd_vel`은 `ros2 topic pub` 또는
-`teleop_twist_keyboard`로 직접 발행해 테스트합니다.
+단독 테스트 시 `/cmd_vel`은 `ros2 topic pub` 또는 `cart_teleop`으로 직접 발행합니다.
+통합 구동 시에는 상위 발행자(AI 레거시 PID 또는 Nav2 velocity_smoother) 중 하나가 `/cmd_vel`을 소유합니다.
 
 ## 작업 범위
 

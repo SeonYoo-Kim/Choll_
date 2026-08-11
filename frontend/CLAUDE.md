@@ -43,10 +43,9 @@
 
 ## 참고 문서
 
-- API 명세서: https://app.notion.com/p/API-3a3135971f3c804c8c56e68e492e3990
-- 기능 명세서 > 프론트: https://app.notion.com/p/3a3135971f3c80468d7ccd220a2a35e0
-- Figma 웹 목업: https://www.figma.com/make/emuvioahRJ0y7fL1ssnWMn/웹-페이지-목업-ver.2
-- Figma 유저 플로우: https://www.figma.com/board/9oo8WXRlcKIb90MP3qH9r9/유저-플로우
+- API 명세서: [docs/specs/API_SPEC.md](../docs/specs/API_SPEC.md)
+- 기능 명세서 > 프론트: [docs/specs/FUNCTIONAL_SPEC.md](../docs/specs/FUNCTIONAL_SPEC.md)
+- (개발 당시 Figma 목업·유저 플로우 보드는 비공개라 링크를 제거함 — 화면 구성은 README의 데모 GIF 참조)
 
 ## 디렉토리 구조 (feature 기반)
 
@@ -64,7 +63,7 @@ src/
     api/http.ts    # axios 인스턴스 + orval mutator (인증 헤더는 여기)
     styles/        # globals.scss, _variables.scss (디자인 토큰)
   test/       # vitest setup
-openapi/openapi.yaml  # API 스펙 초안 — 정본은 노션, BE Swagger 나오면 교체
+openapi/openapi.yaml  # API 스펙 초안 — 정본은 docs/specs/API_SPEC.md
 e2e/          # Playwright 테스트 (MSW로 BE 없이 동작)
 ```
 
