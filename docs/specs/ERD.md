@@ -1,9 +1,9 @@
 # ERD
 
-> 실제 MySQL 스키마를 리버스 엔지니어링한 Workbench 모델([backend/erd.mwb](../../backend/erd.mwb))과
-> JPA 엔티티 코드(`backend/src/main/java/**/domain/*.java`)를 교차 검증해 작성 (2026-08-11).
-> 테이블 10개·FK 관계는 양쪽이 완전히 일치. 컬럼 타입(enum, datetime(6))은 DB 실측 기준.
-> 아핀 6계수 컬럼은 mwb 스냅숏(08-06) 이후인 08-07에 추가돼 mwb에는 없지만 실 DB·코드·시드 SQL에 존재한다.
+> 실제 MySQL 스키마를 리버스 엔지니어링한 Workbench 모델([backend/erd.mwb](../../backend/erd.mwb),
+> 2026-08-11 저장본)과 JPA 엔티티 코드(`backend/src/main/java/**/domain/*.java`)를 교차 검증해 작성.
+> **테이블 10개·컬럼·FK 관계 12개가 양쪽 완전 일치**하며, 지도 아핀 6계수 컬럼까지 실 DB에 반영된 최종 스키마다.
+> 컬럼 타입(enum, datetime(6))은 DB 실측 기준.
 
 ```mermaid
 erDiagram
