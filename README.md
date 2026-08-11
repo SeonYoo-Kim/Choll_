@@ -160,7 +160,7 @@ SSAFY 15기 5인 팀. 공개 저장소에서는 역할로만 표기합니다.
 
 | 역할 | 담당 |
 |------|------|
-| AI (추종·인식) · BE · 인프라 | 팀원 A ([@tjdn9](https://github.com/tjdn9)) |
+| AI (추종·인식) · BE · 인프라 | 팀원 A ([@SeonYoo-Kim](https://github.com/SeonYoo-Kim)) |
 | FE · 디자인 | 팀원 B |
 | SLAM · 자율주행 | 팀원 C |
 | 모터 제어 (STM32) | 팀원 D |
