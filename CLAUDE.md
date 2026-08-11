@@ -20,9 +20,12 @@ Face Recognition이 아닌 **Person Re-Identification(Re-ID)** 으로 동일 인
 | [tests/](tests/) | 파트 공통 테스트 규칙·공용 테스트 로그 | [tests/CLAUDE.md](tests/CLAUDE.md) |
 | [frontend/](frontend/) | FE: 사서용 카트 관리 웹 (React 18+TS+Vite) | [frontend/CLAUDE.md](frontend/CLAUDE.md) |
 | [backend/](backend/) | BE: 허브 서버 (Java 21+Spring Boot, MySQL, MQTT) | [backend/CLAUDE.md](backend/CLAUDE.md) |
-| [embedded/](embedded/) | EM: 카트 제어 (STM32·ROS2·SLAM·RFID·MQTT) | [embedded/CLAUDE.md](embedded/CLAUDE.md) |
+| [embedded/](embedded/) | EM: 카트 제어 (STM32·RFID·MQTT) | [embedded/CLAUDE.md](embedded/CLAUDE.md) |
+| [embedded/Lidar/](embedded/Lidar/) | EM: SLAM·Nav2 colcon 워크스페이스 | [embedded/Lidar/CLAUDE.md](embedded/Lidar/CLAUDE.md) |
+| [ros2_ws/](ros2_ws/) | EM: 모터 구동 colcon 워크스페이스 (stm_serial_bridge) | [ros2_ws/CLAUDE.md](ros2_ws/CLAUDE.md) |
 | `ai/.../test/` | ament lint + colcon 테스트 | (패키지 CLAUDE.md 참조) |
-| [scripts/](scripts/) | 유지보수 스크립트 (가비지 컬렉션 등) | — |
+| [infra/](infra/) | 배포 compose (EC2) | — |
+| [scripts/](scripts/) | 유지보수·시연 보조 스크립트 | — |
 
 ## 파이프라인 (데이터 흐름)
 
@@ -33,9 +36,10 @@ RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [최근접(최대 bbox) 자�
     → (EM) SLAM 내비게이션 경로 계획 → STM32 모터 구동
 ```
 
-**AI의 책임은 `/target_position` 발행까지** (2026-07-31 아키텍처 변경). 속도 명령 생성은 EM(SLAM Nav)으로 이관.
-노드 단위 매핑: `camera_node → detector_node → tracker_node → reid_node → target_position_node` (+ `debug_visualization_node`).
-`control_node·motor_node`(PID→cmd_vel→RPM)는 EM이 STM 쪽에서 재활용 예정이라 보존 (launch에서는 데모용으로 유지).
+**AI의 공식 책임은 `/target_position` 발행까지** (2026-07-31 아키텍처 변경). 속도 명령 생성은 EM(SLAM Nav)으로 이관.
+노드 단위 매핑: `camera_node → detector_node → tracker_node → reid_node → target_position_node` (+ `debug_visualization_node`, `fe_bridge_node`).
+단, `control_node·motor_node`(PID→cmd_vel) 레거시 경로는 `legacy_control:=true`(launch 기본값)로 보존됐고
+**최종 시연은 이 레거시 경로로 진행됐다** — 경위는 [docs/RETROSPECTIVE.md](docs/RETROSPECTIVE.md) 참조.
 자세한 토픽 계약은 [SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md)와 노드 CLAUDE.md를 참조.
 
 ## 절대 규칙 (docs/DEVELOPMENT_GUIDE.md의 코딩 규칙 요약)

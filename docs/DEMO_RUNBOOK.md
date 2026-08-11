@@ -20,13 +20,13 @@
 Get-Service MySQL80, mosquitto
 
 # 1) BE (터미널 1) — .env가 원격 브로커를 보므로 반드시 이 오버라이드로 기동
-cd C:\SSAFY\workspace\Choll\backend
+cd <저장소>\backend
 $env:MQTT_BROKER_URL='tcp://localhost:1883'; $env:MQTT_USERNAME=''; $env:MQTT_PASSWORD=''
 $env:MQTT_POSITION_TOPIC='status/position'; $env:MQTT_POSITION_UNIT='meters'
 .\gradlew.bat bootRun
 
 # 2) FE (터미널 2)
-cd C:\SSAFY\workspace\Choll\frontend
+cd <저장소>\frontend
 pnpm dev --port 8081        # 다른 기기에서 볼 거면: pnpm dev --port 8081 --host
 ```
 
