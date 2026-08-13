@@ -13,6 +13,37 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-13 — ✅ Jetson 엔진 변환 스크립트 추가, 114 passed·ruff 통과 (Claude)
+
+- **명령**: `ruff check` + `ruff format --check` (신규 스크립트) + `pytest ai/test/ -q`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), ruff 0.16.0
+- **커밋**: `ai/chore/jetson-model-scripts` 브랜치 `b1fd10d` + 스타일 정리 (커밋 전)
+- **맥락**: Jetson 백업 폴더(`Downloads/jetson_yolo_benchmark`)에서 모델 구동에 필요한 파일 선별 반영 —
+  `scripts/jetson/export_tensorrt_jetson_single.py`(yolov10s.pt→engine 변환, 최초 커밋본이
+  ruff D212·D415·E501·I001 위반이라 의미 불변으로 스타일 정리), `requirements-jetson.txt`
+  (실기 pip freeze), `install_ros2_humble.sh` 실기 최신본(YDLiDAR 소스 빌드 추가).
+  ai/ 노드 코드는 무변경 — pytest는 회귀 확인용.
+- **참고**: 저장소 전체 `ruff check .`는 기존 이슈 510건(embedded/backend 등 이번 변경과 무관).
+  신규/변경 파이썬 파일은 0건.
+
+<details>
+<summary>ruff / pytest 원본 출력</summary>
+
+```
+$ ruff check scripts/jetson/export_tensorrt_jetson_single.py
+All checks passed!
+
+$ ruff format --check scripts/jetson/export_tensorrt_jetson_single.py
+1 file already formatted
+
+$ pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.13s
+```
+
+</details>
+
 ## 2026-08-11 낮 — ✅ 공개 저장소 준비: system-fusion 머지 + 문서 전면 정리 후 114 passed, ruff 회귀 없음 (Claude)
 
 - **명령**: `pytest ai/test/ -q` + `ruff check ai scripts` + `ruff check .`
