@@ -1,5 +1,23 @@
 # Jetson 운영 스크립트
 
+## YOLO TensorRT 엔진 변환 (`models/yolov10s.engine` 생성)
+
+detector_node가 로드하는 `models/yolov10s.engine`은 **디바이스 종속**(TensorRT 버전·GPU에 묶임)이라
+git에 없고, 새 Jetson 포팅 시 본체에서 직접 변환해야 한다.
+
+```bash
+# Jetson에서 (JetPack의 TensorRT 사용, pip install ultralytics 선행)
+cd ~/Choll/scripts/jetson
+python export_tensorrt_jetson_single.py yolov10s.pt   # .pt는 ultralytics가 자동 다운로드
+mkdir -p ~/Choll/models && mv yolov10s.engine ~/Choll/models/
+```
+
+- **모델 하나당 프로세스 하나**로 실행할 것 — 한 프로세스에서 여러 모델을 연속 export하면
+  NvMapMemAlloc error 12(메모리 파편화)로 크래시한 이력이 있다 (스크립트 docstring 참조).
+- 기본 FP16. INT8은 calibration 데이터셋이 필요해 쓰지 않는다.
+- [requirements-jetson.txt](requirements-jetson.txt)는 실제 카트 Jetson의 pip freeze
+  (버전 참고용 — torchreid 등 파이프라인 전체 의존성이 다 들어있지는 않다).
+
 ## LiDAR 드라이버 부팅 자동 실행
 
 `ydlidar.service`를 systemd에 등록하면 부팅 시 `ros2 launch ydlidar_ros2_driver

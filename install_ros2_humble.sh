@@ -41,4 +41,42 @@ echo "  printenv ROS_DISTRO   # humble 출력되어야 정상"
 
 # 참고: 카메라/라이다용 자주 쓰는 추가 패키지 (필요시 주석 해제)
 # sudo apt install -y ros-humble-cv-bridge ros-humble-image-transport
-# sudo apt install -y ros-humble-rplidar-ros   # RPLiDAR 쓰는 경우
+
+echo "===== 7. YDLiDAR SDK + ROS2 드라이버 빌드 (apt 바이너리 없음, 소스 빌드 필요) ====="
+# YDLiDAR는 apt로 배포되지 않아서 소스에서 직접 빌드해야 함
+
+# 7-1. 빌드 의존 패키지
+sudo apt install -y cmake pkg-config git swig python3-pip
+
+# 7-2. YDLidar-SDK (C++ 코어 라이브러리) 빌드/설치
+cd ~
+git clone https://github.com/YDLIDAR/YDLidar-SDK.git
+cd YDLidar-SDK/build
+cmake ..
+make
+sudo make install
+
+# 7-3. ydlidar_ros2_driver 클론 (반드시 humble 브랜치로!)
+mkdir -p ~/ydlidar_ros2_ws/src
+cd ~/ydlidar_ros2_ws/src
+git clone -b humble https://github.com/YDLIDAR/ydlidar_ros2_driver.git
+
+# 7-4. 빌드
+cd ~/ydlidar_ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+
+# 7-5. USB 권한 스크립트 실행 (라이다 연결 후 재부팅 또는 재연결 필요할 수 있음)
+chmod 0777 src/ydlidar_ros2_driver/startup/*
+sudo sh src/ydlidar_ros2_driver/startup/initenv.sh
+
+# 7-6. 환경변수 자동 로드
+echo "source ~/ydlidar_ros2_ws/install/setup.bash" >> ~/.bashrc
+
+echo "===== YDLiDAR 설치 완료 ====="
+echo "라이다 모델에 맞는 파라미터 파일을 확인하세요:"
+echo "  ~/ydlidar_ros2_ws/src/ydlidar_ros2_driver/params/"
+echo "  (예: X4 모델이면 X4.yaml을 ydlidar.yaml로 복사해서 사용)"
+echo ""
+echo "실행:"
+echo "  ros2 launch ydlidar_ros2_driver ydlidar_launch.py"
