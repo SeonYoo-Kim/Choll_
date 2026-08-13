@@ -13,6 +13,40 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-13 오후 — ✅ 엔진 준비 파이프라인 신규 + 벤치마크 이관, 114 passed·ruff 0건 (Claude)
+
+- **명령**: `ruff check` + `ruff format --check` (신규/이동 7파일) + `pytest ai/test/ -q`
+- **환경**: Windows 11 개발 PC, Python 3.12.12 (miniforge base), ruff 0.16.0
+- **커밋**: `ai/chore/jetson-model-scripts` 브랜치 `038bd9e` 이후 (커밋 전)
+- **변경**:
+  - `scripts/jetson/setup_yolo_engine.py` **신규** — .pt 자동 다운로드 → TensorRT FP16
+    export → `models/` 배치 → 더미 프레임 구동 확인까지 한 명령 파이프라인.
+  - `scripts/jetson/benchmark/` — 모델 선정 벤치마크 스크립트 5종 이관 (스타일만 정리:
+    docstring D212/D415·import 정렬·E501 개행, `yolo_benchmark.py`의 미사용 `import time`
+    제거, `run_export.py`는 위치 이동에 맞춰 단일 변환 스크립트를 `../` 상대 경로 +
+    `sys.executable`로 호출하게 조정 — 변환 로직 자체는 불변).
+  - 실측 결과 CSV 4종 커밋 (`*.csv` gitignore라 `git add -f`) + 선정 근거 README.
+- **미검증**: Jetson 실기 실행 — ultralytics/torch가 Windows 개발 PC에 없어 정적 검증만.
+  `setup_yolo_engine.py`는 실기 1회 스모크 후 결과를 이 로그에 추가할 것.
+
+<details>
+<summary>ruff / pytest 원본 출력</summary>
+
+```
+$ ruff check scripts/jetson/setup_yolo_engine.py scripts/jetson/benchmark/
+All checks passed!
+
+$ ruff format --check scripts/jetson/setup_yolo_engine.py scripts/jetson/benchmark/
+7 files already formatted
+
+$ pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.10s
+```
+
+</details>
+
 ## 2026-08-13 — ✅ Jetson 엔진 변환 스크립트 추가, 114 passed·ruff 통과 (Claude)
 
 - **명령**: `ruff check` + `ruff format --check` (신규 스크립트) + `pytest ai/test/ -q`
