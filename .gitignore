@@ -278,3 +278,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 choll-deploy.env
+
+# 얼굴 모자이크 도구 부산물 (scripts/mosaic_faces.py)
+scripts/yunet.onnx
+scripts/.detcache/
