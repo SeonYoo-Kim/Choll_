@@ -226,6 +226,33 @@ def render(video_path, out_path, boxes_per_frame, margin, protect_overlay=False)
     os.remove(tmp)
 
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def process_image(in_path, out_path, model_path, conf, margin,
+                  protect_overlay=False):
+    """단일 이미지 처리. 트랙 필터링이 불가능하므로 검출 결과를 그대로 사용
+    (오탐이 생기면 --conf를 0.7~0.8로 올려서 조절)."""
+    img = cv2.imread(in_path)
+    if img is None:
+        sys.exit(f"이미지 열기 실패: {in_path}")
+    h, w = img.shape[:2]
+    det = cv2.FaceDetectorYN.create(model_path, "", (w, h), conf, 0.3, 5000)
+    det.setInputSize((w, h))
+    _, faces = det.detect(img)
+    protect = overlay_mask(img) if protect_overlay else None
+    n = 0
+    if faces is not None:
+        for f in faces:
+            bx, by, bw, bh = f[0], f[1], f[2], f[3]
+            mx, my = bw * margin, bh * margin
+            mosaic_region(img, bx - mx, by - my,
+                          bw + 2 * mx, bh + 2 * my, protect=protect)
+            n += 1
+    cv2.imwrite(out_path, img)
+    print(f"완료: {out_path} (얼굴 {n}개 모자이크)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
@@ -241,6 +268,12 @@ def main():
                     help="영상에 이미 그려진 원색 라벨/박스 오버레이를 "
                          "모자이크에서 제외")
     args = ap.parse_args()
+
+    # 이미지 입력이면 단일 이미지 모드로 처리
+    if os.path.splitext(args.input)[1].lower() in IMAGE_EXTS:
+        process_image(args.input, args.output, args.model,
+                      args.conf, args.margin, args.protect_overlay)
+        return
 
     print("1/3 전 프레임 얼굴 검출 중...")
     per_frame, (w, h, fps) = detect_all_frames(args.input, args.model, args.conf)

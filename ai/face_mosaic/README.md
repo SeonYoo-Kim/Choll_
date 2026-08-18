@@ -1,5 +1,11 @@
 # 영상 얼굴 모자이크 파이프라인 (face_mosaic)
 
+| 파일 | 용도 |
+|---|---|
+| `face_mosaic.py` | 영상/이미지 얼굴 자동 모자이크 |
+| `vid2gif.py` | 영상의 시간 범위를 지정해 GIF로 변환 (README·문서 삽입용) |
+| `yunet.onnx` | YuNet 얼굴 검출 모델 (face_mosaic.py와 같은 폴더에 필요) |
+
 시연 영상 공개 시 개인정보 보호를 위해 **사람 얼굴만** 자동으로 모자이크 처리하는 도구입니다.
 Haar Cascade 등 구형 검출기의 고질적인 문제(얼굴 아닌 곳 오탐, 정작 얼굴은 미검출)를
 얼굴 전용 검출기 + 트랙 단위 필터링으로 해결했습니다.
@@ -27,7 +33,13 @@ python face_mosaic.py input.mp4 output.mp4
 
 # Re-ID 디버그 오버레이(바운딩박스·라벨)가 그려진 영상은 라벨을 보호
 python face_mosaic.py reID_before.mp4 output.mp4 --protect-overlay
+
+# 이미지(jpg/png/bmp/webp)도 동일하게 처리
+python face_mosaic.py screenshot.jpg output.jpg --protect-overlay
 ```
+
+> 이미지 모드에서는 트랙 단위 오탐 필터링(영상 전용)이 불가능하므로
+> 검출 결과를 그대로 사용합니다. 오탐이 생기면 `--conf 0.7~0.8`로 올리세요.
 
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
@@ -55,6 +67,29 @@ python face_mosaic.py reID_before.mp4 output.mp4 --protect-overlay
 5. **렌더링** — 박스를 `margin`만큼 확장 후 다운스케일-업스케일 픽셀화.
    ffmpeg(H.264 재인코딩 + 원본 오디오 복사)는 PATH → `imageio-ffmpeg` 내장
    바이너리 순으로 자동 탐색, 없으면 무음으로 저장
+
+## GIF 변환 (vid2gif.py)
+
+영상의 원하는 구간만 잘라 GIF로 만듭니다. ffmpeg 2-pass 팔레트 방식이라
+일반 변환보다 색 품질이 좋습니다.
+
+```bash
+# 24초~31초 구간을 GIF로
+python vid2gif.py release/reID_mosaic_v2.mp4 demo.gif --start 24 --end 31
+
+# 시간은 mm:ss 형식도 지원, 크기/프레임레이트 조절 가능
+python vid2gif.py input.mp4 out.gif --start 1:24 --end 1:31 --fps 15 --width 640
+```
+
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--start` / `--end` | 0 / 끝까지 | 초(`24`, `24.5`) 또는 `mm:ss`, `hh:mm:ss` |
+| `--fps` | 12 | GIF 프레임레이트. 높일수록 부드럽지만 용량 증가 |
+| `--width` | 480 | 가로 px (세로는 비율 유지). 원본 크기는 `-1` |
+
+용량이 클 때는 `--width 360`이나 `--fps 10`으로 줄이면 됩니다
+(README 삽입용은 3~4MB 이하 권장). 예: 기본 설정으로 7초에 약 5.6MB →
+`--width 360 --fps 10`이면 절반 이하로 줄어듭니다.
 
 ## 팁
 
