@@ -1,0 +1,5 @@
+# face_mosaic.py 의존성
+# 설치: pip install -r requirements.txt
+opencv-python>=4.8   # cv2.FaceDetectorYN (YuNet) 포함
+numpy>=1.24
+imageio-ffmpeg>=0.4  # ffmpeg 바이너리 동봉 (오디오 유지 + H.264 인코딩용)

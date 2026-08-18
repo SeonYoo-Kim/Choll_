@@ -1,0 +1,10 @@
+# 생성: conda env create -f environment.yml
+# (requirements.txt와 같은 폴더에서 실행)
+name: mosaic
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -r requirements.txt
