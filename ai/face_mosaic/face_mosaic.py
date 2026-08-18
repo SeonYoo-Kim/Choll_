@@ -227,6 +227,7 @@ def render(video_path, out_path, boxes_per_frame, margin, protect_overlay=False)
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv"}
 
 
 def process_image(in_path, out_path, model_path, conf, margin,
@@ -253,10 +254,64 @@ def process_image(in_path, out_path, model_path, conf, margin,
     print(f"완료: {out_path} (얼굴 {n}개 모자이크)")
 
 
+def process_video(in_path, out_path, args):
+    print("1/3 전 프레임 얼굴 검출 중...")
+    per_frame, (w, h, fps) = detect_all_frames(in_path, args.model, args.conf)
+    raw = sum(len(b) for b in per_frame)
+    print(f"    {len(per_frame)}프레임, 원시 검출 {raw}건")
+
+    print("2/3 트랙 구성 + 끊김 보간...")
+    final = build_tracks(per_frame, max_gap=args.max_gap)
+    covered = sum(1 for b in final if b)
+    print(f"    모자이크 적용 프레임: {covered}/{len(final)}, "
+          f"박스 총 {sum(len(b) for b in final)}건")
+
+    print("3/3 모자이크 렌더링...")
+    render(in_path, out_path, final, args.margin,
+           protect_overlay=args.protect_overlay)
+    print(f"완료: {out_path}")
+
+
+def process_folder(in_dir, out_dir, args):
+    """폴더 안의 모든 이미지/영상을 일괄 모자이크 처리."""
+    os.makedirs(out_dir, exist_ok=True)
+    same_dir = os.path.abspath(in_dir) == os.path.abspath(out_dir)
+    targets = []
+    for name in sorted(os.listdir(in_dir)):
+        ext = os.path.splitext(name)[1].lower()
+        if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
+            targets.append(name)
+    if not targets:
+        sys.exit(f"처리할 이미지/영상이 없습니다: {in_dir}")
+
+    print(f"대상 {len(targets)}개 파일 (입력 폴더: {in_dir})")
+    done, failed = 0, []
+    for i, name in enumerate(targets, 1):
+        stem, ext = os.path.splitext(name)
+        # 입력 폴더 == 출력 폴더면 원본 보호를 위해 _mosaic 접미사
+        out_name = f"{stem}_mosaic{ext}" if same_dir else name
+        in_path = os.path.join(in_dir, name)
+        out_path = os.path.join(out_dir, out_name)
+        print(f"\n[{i}/{len(targets)}] {name}")
+        try:
+            if ext.lower() in IMAGE_EXTS:
+                process_image(in_path, out_path, args.model,
+                              args.conf, args.margin, args.protect_overlay)
+            else:
+                process_video(in_path, out_path, args)
+            done += 1
+        except SystemExit as e:
+            print(f"    실패: {e}")
+            failed.append(name)
+    print(f"\n일괄 처리 완료: 성공 {done} / 실패 {len(failed)}")
+    if failed:
+        print("실패 목록: " + ", ".join(failed))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("input")
-    ap.add_argument("output")
+    ap.add_argument("input", help="입력 영상/이미지 파일 또는 폴더")
+    ap.add_argument("output", help="출력 파일 또는 폴더(입력이 폴더인 경우)")
     ap.add_argument("--model", default="yunet.onnx")
     ap.add_argument("--conf", type=float, default=0.6,
                     help="검출 confidence threshold")
@@ -269,27 +324,17 @@ def main():
                          "모자이크에서 제외")
     args = ap.parse_args()
 
-    # 이미지 입력이면 단일 이미지 모드로 처리
+    # 폴더 입력 → 일괄 처리
+    if os.path.isdir(args.input):
+        process_folder(args.input, args.output, args)
+        return
+    # 이미지 입력 → 단일 이미지 모드
     if os.path.splitext(args.input)[1].lower() in IMAGE_EXTS:
         process_image(args.input, args.output, args.model,
                       args.conf, args.margin, args.protect_overlay)
         return
-
-    print("1/3 전 프레임 얼굴 검출 중...")
-    per_frame, (w, h, fps) = detect_all_frames(args.input, args.model, args.conf)
-    raw = sum(len(b) for b in per_frame)
-    print(f"    {len(per_frame)}프레임, 원시 검출 {raw}건")
-
-    print("2/3 트랙 구성 + 끊김 보간...")
-    final = build_tracks(per_frame, max_gap=args.max_gap)
-    covered = sum(1 for b in final if b)
-    print(f"    모자이크 적용 프레임: {covered}/{len(final)}, "
-          f"박스 총 {sum(len(b) for b in final)}건")
-
-    print("3/3 모자이크 렌더링...")
-    render(args.input, args.output, final, args.margin,
-           protect_overlay=args.protect_overlay)
-    print(f"완료: {args.output}")
+    # 그 외 → 영상 모드
+    process_video(args.input, args.output, args)
 
 
 if __name__ == "__main__":

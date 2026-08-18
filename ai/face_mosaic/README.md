@@ -36,7 +36,14 @@ python face_mosaic.py reID_before.mp4 output.mp4 --protect-overlay
 
 # 이미지(jpg/png/bmp/webp)도 동일하게 처리
 python face_mosaic.py screenshot.jpg output.jpg --protect-overlay
+
+# 폴더를 지정하면 안의 모든 이미지/영상을 일괄 처리 (출력도 폴더)
+python face_mosaic.py input_folder/ output_folder/ --protect-overlay
 ```
+
+일괄 처리 시 지원 확장자(jpg/jpeg/png/bmp/webp, mp4/avi/mov/mkv/webm/wmv)만
+골라 처리하고 나머지는 건너뜁니다. 입력 폴더와 출력 폴더가 같으면 원본을
+덮어쓰지 않도록 `이름_mosaic.확장자`로 저장합니다.
 
 > 이미지 모드에서는 트랙 단위 오탐 필터링(영상 전용)이 불가능하므로
 > 검출 결과를 그대로 사용합니다. 오탐이 생기면 `--conf 0.7~0.8`로 올리세요.
