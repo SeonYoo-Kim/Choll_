@@ -83,7 +83,7 @@ def detect_all_frames(video_path, model_path, conf, use_cuda=True):
             pbar.update(1)
 
     cap.release()
-    return per_frame, (target_w, target_h, fps)
+    return per_frame, (target_w, target_h)
 
 
 # ---------------- 트래킹 + 보간 ----------------
