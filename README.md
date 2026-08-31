@@ -169,9 +169,9 @@ SSAFY 15기 5인 팀. 공개 저장소에서는 역할로만 표기합니다.
 | 역할 | 담당 |
 |------|------|
 | AI (추종·인식) · BE · 인프라 | 팀원 A ([@SeonYoo-Kim](https://github.com/SeonYoo-Kim)) |
-| FE · 디자인 | 팀원 B |
-| SLAM · 자율주행 | 팀원 C |
-| 모터 제어 (STM32) | 팀원 D |
+| FE · 디자인 | 팀원 B ([@ghk2612](https://github.com/ghk2612)) |
+| SLAM · 자율주행 | 팀원 C ([@BaekJae19](https://github.com/BaekJae19)) |
+| 모터 제어 (STM32) | 팀원 D ([@relu00123](https://github.com/relu00123)) |
 | LED · RFID (RPi) | 팀원 E |
 
 개발은 AI 에이전트(Claude Code)와의 협업으로 진행됐으며, 검증 기록은
