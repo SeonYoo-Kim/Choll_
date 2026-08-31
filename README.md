@@ -1,20 +1,20 @@
 # 쫄래쫄래 (Choll)
 
 > **사서를 따라다니며 구역별 도서 정리를 돕는 자율주행 북카트**
-> SSAFY 15기 공통 프로젝트 · 5인 팀 · 2026.07.16 ~ 2026.08.11
+> SSAFY 15기 공통 프로젝트 · 5인 팀 · 2026.07.16 ~ 2026.08.11 (발표) · 이후 자율주행 스택 완성
 
 사서가 북카트에 책을 실으면 카트가 **RFID로 어떤 책인지 인식**하고, 얼굴 인식이 아닌
 **Person Re-Identification(Re-ID)** 으로 사서를 졸졸 따라다니며, 웹 화면에서
 **정리 진행률과 카트 위치를 실시간으로** 보여줍니다.
 
-![데모](docs/assets/demo.gif)
+![웹에서 사서를 선택하면 카트가 따라간다](docs/assets/demo_follow.gif)
 
 ---
 
 ## 목차
 
 1. [주요 기능](#주요-기능)
-2. [시연에서 검증된 범위](#시연에서-검증된-범위)
+2. [검증 범위](#검증-범위)
 3. [시스템 아키텍처](#시스템-아키텍처)
 4. [AI 파이프라인](#ai-파이프라인)
 5. [기술 스택](#기술-스택)
@@ -31,8 +31,10 @@
 
 - **타겟 등록**: 카트에 가장 가까운 사람(최대 bbox)을 자동 선택해 2초간 등록 — 또는 웹 화면의 카메라 영상에서 사서를 직접 클릭해 선택
 - **동일 인물 추적**: YOLOv10s(TensorRT) 탐지 → ByteTrack 추적 → OSNet Re-ID 특징(512-D)을 Memory Bank에 저장
-- **가림 복구**: 사람에 가려지거나 잠시 시야에서 사라져도 Re-ID 매칭으로 같은 사서를 다시 찾아 추적 재개
+- **가림 복구**: 장애물·사람에 가려 사서가 시야에서 사라지면 일단 정지하고, 다시 나타나면 Re-ID 매칭으로 같은 사서를 재식별해 추종 재개
 - Jetson Orin Nano 8GB에서 **실시간(10 FPS+) 구동**
+
+![시야에서 벗어났다 돌아와도 같은 사서를 재추적](docs/assets/demo_reid.gif)
 
 ### 📚 도서 인식·정리 작업 (EM + BE)
 
@@ -47,25 +49,31 @@
 - **카트 제어**: 추종 시작/일시정지/종료, 카트 연결 상태(하트비트) 표시
 - **실시간 영상**: 카트 카메라 영상 스트리밍(WebSocket 바이너리 JPEG) + AI 탐지 박스 오버레이
 
-### 🤖 자율주행 (EM — 부분 검증)
+### 🤖 자율주행 (EM)
 
-- SLAM 매핑(slam_toolbox)·지도 정합, Nav2 P2P 주행, MQTT↔ROS2 브릿지까지 구현
-- 장애물 회피 미성립과 localization 불안정으로 **최종 시연에서는 제외** — 아래 참조
+- SLAM 매핑(slam_toolbox)·지도 정합·localization, Nav2 P2P 주행, MQTT↔ROS2 브릿지
+- **쫄래쫄래 호출**: 웹 지도에서 위치를 찍으면 카트가 해당 지점까지 자율주행
+- 발표일(2026-08-11)까지는 미완이라 시연에서 제외됐으나 **발표 이후 완성** — 아래 참조
 
-## 시연에서 검증된 범위
+![SLAM 지도(RViz)와 웹 도서관 지도가 동기화된 상태에서 지정 위치로 P2P 주행](docs/assets/demo_slam.gif)
 
-이 프로젝트의 최종 시연은 **계획했던 Nav2 자율주행이 아니라, 사전에 설계해 둔 폴백 구성**
-(AI PID 단순 추종 + 카트 위치 수동 발행)으로 진행됐습니다. 무엇이 실기에서 증명됐고
+## 검증 범위
+
+공식 발표 시연(2026-08-11)은 **계획했던 Nav2 자율주행이 아니라, 사전에 설계해 둔 폴백 구성**
+(AI PID 단순 추종 + 카트 위치 수동 발행)으로 진행됐습니다. 발표 시점에 무엇이 증명됐고
 무엇이 안 됐는지, 왜 그랬는지는 **[docs/RETROSPECTIVE.md](docs/RETROSPECTIVE.md)** 에
 커밋·테스트 로그 근거와 함께 정직하게 기록했습니다.
 
-| 영역 | 상태 |
-|---|---|
-| Re-ID 사람 추종 (가림 복구 포함) | ✅ 실기 시연 |
-| RFID 인식 → 웹 실시간 반영 → 구역 LED 안내 → 진행률 | ✅ 실기 시연 |
-| SLAM 매핑·지도 정합 (벽거리 median 0.031 m) | ✅ 실측 검증 |
-| Nav2 P2P 목적지 도달 | ✅ 실측 (오차 0.184 m) — 시연 미포함 |
-| 장애물 회피 · 지도 클릭 이동 · SLAM localization 상시 운용 | ❌ 미완 |
+**발표 이후 남은 이슈를 해결해 계획했던 아키텍처대로 프로젝트를 완성했으며**,
+이 README의 데모 GIF들은 완성본 시연 영상에서 잘라낸 것입니다.
+
+| 영역 | 발표 시연 (2026-08-11) | 최종 (발표 이후) |
+|---|---|---|
+| Re-ID 사람 추종 (가림 복구 포함) | ✅ 실기 시연 (PID 폴백 경로) | ✅ |
+| RFID 인식 → 웹 실시간 반영 → 구역 LED 안내 → 진행률 | ✅ 실기 시연 | ✅ |
+| SLAM 매핑·지도 정합 (벽거리 median 0.031 m) | ✅ 실측 검증 | ✅ |
+| Nav2 P2P 목적지 도달 | ✅ 실측 (오차 0.184 m) — 시연 미포함 | ✅ 완성 |
+| 지도 클릭(호출) 이동 · SLAM localization 상시 운용 | ❌ 미완 | ✅ 완성 |
 
 ## 시스템 아키텍처
 
@@ -86,8 +94,8 @@
 ```
 RGB Camera → YOLOv10s(TensorRT) → ByteTrack → [최근접 자동 선택 → 2초 등록 | FE 클릭 선택] → OSNet Re-ID
     → Memory Bank → (추적 성공 | 추적 실패 → Re-ID 재탐색) → Target Track ID
-    → (계획) 방위각+거리+카트 포즈 융합 → /target_position → EM Nav2
-    → (시연) 화면 중심 오차 + LiDAR 거리 → PID → /cmd_vel → STM32
+    → (최종) 방위각+거리+카트 포즈 융합 → /target_position → EM Nav2 경로계획·주행
+    → (발표 시연 폴백) 화면 중심 오차 + LiDAR 거리 → PID → /cmd_vel → STM32
 ```
 
 - **스택 고정**: YOLOv10s TensorRT · ByteTrack · OSNet · Online Memory Bank — Fine-tuning 없이, 추가 데이터셋 수집 없이, TensorRT 추론만으로 동작
@@ -144,7 +152,7 @@ python scripts/fake_jetson.py --broker localhost
 | 문서 | 내용 |
 |------|------|
 | [docs/PROJECT_CHARTER.md](docs/PROJECT_CHARTER.md) | 목표, 범위, 제약, 성공 기준 최종 판정 |
-| [docs/RETROSPECTIVE.md](docs/RETROSPECTIVE.md) | **회고 — 계획 vs 실제 시연 구성, 실패 원인 분석** |
+| [docs/RETROSPECTIVE.md](docs/RETROSPECTIVE.md) | **회고 — 발표 시연 시점의 계획 vs 실제, 원인 분석** (발표 이후 완성 전 기록) |
 | [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md) | 전체 시스템 · 파이프라인 · ROS2 토픽 |
 | [docs/SETUP.md](docs/SETUP.md) | 빌드 · 배포 · 실행 · 로컬 E2E 재현 |
 | [docs/specs/](docs/specs/) | 기능·API·ERD·기술스택·시나리오 명세 |
