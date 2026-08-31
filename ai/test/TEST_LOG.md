@@ -13,6 +13,48 @@ FE/BE 등 다른 파트의 기록은 [루트 tests/TEST_LOG.md](../../tests/TEST
 
 ---
 
+## 2026-08-31 — ✅ 깃랩 발표 후 완성분 포팅, 114 passed + nav_logic 31 passed (Claude)
+
+- **명령**: `pytest ai/test/ -q` + `pytest embedded/Lidar/src/choll_nav/test/test_nav_logic.py -q` + `ruff check` (포팅 파일)
+- **환경**: Windows 11 개발 PC, Python 3.12.10, ruff 0.16.5, pytest 9.1.1
+- **커밋**: `feat/post-demo-sync` 브랜치 (커밋 전)
+- **맥락**: 사내 깃랩 develop의 발표(08-11) 이후 완성 작업을 공개 레포로 포팅.
+  - `control_node.py` + `follow_robot_launch.py` — 후진 금지(`allow_reverse=False` 이중 클램프)·
+    전방 장애물 정지(±30°, 0.8 m)·`map_target`/`debug_viz` launch 인자 (깃랩 `3eaef27`)
+  - `goal_forwarder.py` — `approach_distance`를 추종 스트림에만 적용, 구역 이동 goal 제외 (깃랩 `6949e1d`)
+  - `nav.launch.py` + `nav2_params.yaml` — Nav2 속도 상한 launch 인자화 (깃랩 `d7b9262`, `b6e9d08`)
+  - `embedded/Lidar/scripts/` 운영 스크립트 11종 + `demo.launch.py` — 브로커 주소·비밀번호는
+    공개 레포 관례대로 익명화(`your-server.example.com` / `CHANGE_ME`)
+  - `tests/TEST_LOG.md` — 깃랩에만 있던 08-13·08-14 실기록 3건 이식 (원본 유지, 호스트명만 익명화)
+- **미검증**: 실기 없음 — 로봇은 해체됨. 완성 상태의 실동작 근거는 데모 영상(README GIF 원본)뿐이며,
+  이 로그는 포팅 후 단위 테스트·린트 회귀 확인만 기록한다.
+- **참고**: `ruff check`는 미변경 파일 `test_flake8.py`의 기존 UP031 1건만 보고.
+  `ruff format --check`는 로컬 ruff 0.16.5에서 HEAD의 기존 파일도 걸리는 상태(팀 기록은 0.16.0)라
+  버전 차이로 판단, 포팅 파일은 깃랩 원본 그대로 유지했다.
+
+<details>
+<summary>pytest / ruff 원본 출력</summary>
+
+```
+$ python -m pytest ai/test/ -q
+........................................................................ [ 63%]
+..........................................                               [100%]
+114 passed in 0.22s
+
+$ python -m pytest embedded/Lidar/src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.07s
+
+$ python -m ruff check ai/src/.../control_node.py ai/src/.../follow_robot_launch.py \
+    embedded/Lidar/src/choll_nav/ embedded/Lidar/src/choll_nav2/ \
+    embedded/Lidar/src/choll_slam_bringup/ embedded/Lidar/scripts/
+UP031 Use format specifiers instead of percent format
+  --> embedded\Lidar\src\choll_nav\test\test_flake8.py:12:21   (기존 이슈, 이번 변경과 무관)
+Found 1 error.
+```
+
+</details>
+
 ## 2026-08-13 오후 — ✅ 엔진 준비 파이프라인 신규 + 벤치마크 이관, 114 passed·ruff 0건 (Claude)
 
 - **명령**: `ruff check` + `ruff format --check` (신규/이동 7파일) + `pytest ai/test/ -q`

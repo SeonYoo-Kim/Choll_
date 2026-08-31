@@ -6,6 +6,396 @@
 > **AI 파트 기록은 [ai/test/TEST_LOG.md](../ai/test/TEST_LOG.md)로 이동했습니다.** 여기에는 FE/BE/EM 및
 > 여러 파트에 걸친 검증 기록을 남깁니다.
 
+## 2026-08-14 — ✅ develop 머지 (충돌 18건 해소) — 회귀 0건 / **실기 검증 없음** (relu 지시 / Claude 실행·기록)
+
+`em/feature/system-fusion` 이 08-04 이후 develop 을 한 번도 안 받아 62 vs 87 커밋으로
+갈라져 있었다. 실행 중인 소스를 건드리지 않으려고 **임시 워크트리에서 시험 머지** 후
+검증하고, 검증이 끝난 머지 커밋만 실브랜치에 반영했다.
+
+### ① 충돌 18건 — 성격별 해소
+
+| 대상 | 건수 | 해소 | 근거 |
+|---|---|---|---|
+| `frontend/` `backend/` `scripts/fake_jetson.py` `.claude/launch.json` | 15 | develop 채택 (`--theirs`) | 우리 브랜치의 해당 파일 커밋이 `1376c37 [chore] merge reflected` **하나뿐** — FE/BE 실작업 0건. `git log origin/develop..HEAD -- frontend` 로 확인 |
+| `ai/.../follow_robot_launch.py` | 1 | 우리 블록 유지 (마커만 제거) | `map_target`·`debug_viz` 인자 추가 vs develop 쪽 해당 위치 없음. `--ours` 로 통째 덮으면 develop 의 다른 자동머지분이 날아가므로 **수동 편집** |
+| `tests/TEST_LOG.md`, `ai/test/TEST_LOG.md` | 2 | union 병합 (양쪽 보존) | `git merge-file --union` |
+
+**`embedded/` `ros2_ws/` 충돌 0건** — Nav2·LiDAR·SLAM·MQTT/STM 브릿지는 전부 자동 머지.
+
+### ② 회귀 검증 — 머지 전후 동일
+
+```
+[머지 후]  $ python3 -m pytest src/choll_nav/test/ src/choll_mqtt_bridge/test/ -q
+2 failed, 58 passed, 2 warnings in 2.05s
+
+[머지 전]  $ python3 -m pytest src/choll_nav/test/ src/choll_mqtt_bridge/test/ -q
+2 failed, 58 passed, 2 warnings in 2.10s
+
+[머지 후]  $ ruff check embedded/Lidar/src/ ai/     -> Found 24 errors.
+[머지 전]  $ ruff check embedded/Lidar/src/ ai/     -> Found 24 errors.
+
+$ colcon build --symlink-install --packages-select choll_slam_bringup choll_nav choll_nav2 choll_mqtt_bridge
+Summary: 4 packages finished [4.50s]
+```
+
+계약 58개 통과. 실패 2건(`test_flake8`·`test_pep257`)과 ruff 24건은 **머지 전 HEAD 에서
+같은 수로 재현**되는 기존 항목이다 — 이번 머지로 생긴 회귀는 없다.
+
+`goal_forwarder.py:313` 의 08-13 수정(`if throttle else 0.0`)이 머지 후에도 유지됨을 확인.
+
+### ③ 결과
+
+```
+$ git rev-list --left-right --count origin/develop...HEAD
+origin/develop 에만: 0     HEAD 에만: 69
+```
+
+develop 을 완전히 따라잡았다. 머지 커밋 `fb07ded`. **푸시하지 않았다.**
+
+### ④ 미검증 — 다음에 할 것
+
+- **실기 검증 0건.** 젯슨 하드웨어가 분리된 상태(`/dev/ttyUSB0`·`/dev/ttyACM0` 부재,
+  ROS 노드 0개)라 주행으로 확인한 것이 없다. 빌드·단위테스트까지만이다.
+- develop 이 가져온 BE/FE 변경(`7c3e5f8` 실측 4점 아핀 캘리브레이션,
+  `3c65f2d` 2구역 평면도, `36e1c84` 구역 판정 안정화)과 EM 의 approach 수정이
+  **함께 도는 것을 본 적이 없다.** 재기동 시 구역 이동 → 도착 알림을 확인할 것.
+
+## 2026-08-13 12:15 — ✅ 단순 추종 원커맨드 기동 성공 / reid_node CUDA OOM·AMCL lifecycle 정지 2건 규명 (relu 실기 / Claude 진단·구현·기록)
+
+`scripts/simple_follow_up.sh --fe --init 0 0 0` 첫 실행에서 **AI 9노드 중 `reid_node`
+하나만 죽었다.** FE 는 "추종 시작에 실패했어요" 를 띄웠다. 원인은 스크립트 결함이 아니라
+Orin Nano 통합 메모리 조각화였고, 그 뒤에 AMCL lifecycle 정지가 하나 더 숨어 있었다.
+
+- **환경**: Jetson Orin Nano 8GB / JetPack 6.x / ROS 2 Humble / `ROS_DOMAIN_ID=42`
+- **커밋**: `8c88f40` + 미커밋 (이 항목과 함께 커밋)
+- **명령**: `bash scripts/simple_follow_up.sh --fe --init 0 0 0`
+
+### ① 🔴 reid_node CUDA OOM — 원인은 `lfb`(최대 연속 빈 블록)
+
+```
+[detector_node-2] [TRT] [MemUsageChange] TensorRT-managed allocation in
+                  IExecutionContext creation: CPU +0, GPU +19, now: CPU 0, GPU 32 (MiB)
+[reid_node-4] NvMapMemAllocInternalTagged: 1075072515 error 12
+[reid_node-4] NvMapMemHandleAlloc: error 0
+[reid_node-4] [FATAL] [reid_node]: Re-ID initialization failed: CUDA error: out of memory
+[reid_node-4]   File ".../torch/nn/modules/module.py", line 1370, in convert
+[reid_node-4]     return t.to(
+[reid_node-4] torch.AcceleratorError: CUDA error: out of memory
+[ERROR] [reid_node-4]: process has died [pid 8833, exit code 1]
+[fe_bridge_node-7] [INFO] [fe_bridge_node]: FE 타겟 선택 수신 → /select_target 1
+```
+
+`error 12` = ENOMEM (Tegra NvMap 할당기). 죽은 지점은 OSNet 을 GPU 로 올리는 `t.to(device)`.
+
+```
+$ free -m
+               total        used        free      shared  buff/cache   available
+Mem:            7619        4319         457          41        2841        3025
+$ tegrastats
+RAM 4482/7620MB (lfb 10x4MB) SWAP 2/3810MB (cached 0MB) GR3D_FREQ 58%
+```
+
+**`lfb 10x4MB` 가 결정적이다.** available 3025 MB 로 여유가 있어 보이지만, Orin Nano 는
+GPU/CPU 통합 메모리라 CUDA 할당은 **연속 물리 블록**이 필요하다. 최대 연속 빈 블록이
+4 MB 뿐이면 총량과 무관하게 실패한다. zram 스왑 3.8 GB 는 **2 MB 만 사용 중** — CUDA
+할당에는 쓰이지 못한다.
+
+메모리 점유 실측 (`ps -eo pid,rss,args` 를 파일로 받아 python 집계):
+
+| 사용처 | RSS |
+|---|---|
+| AI (person_follow_robot 8노드) | 1915 MB |
+| **VS Code + Claude Code 확장** | **1728 MB** |
+| 데스크톱 GUI (gnome-shell·Xorg·update-manager·gnome-software) | 850 MB |
+| EM 라이다/SLAM/EKF/MQTT | 458 MB |
+| STM 브릿지 | 170 MB |
+| AMCL + map_server | 86 MB |
+
+`detector_node` 단독 **1193 MB**(TensorRT 엔진 + CUDA 컨텍스트). 그게 먼저 GPU 를 잡고
+7초 뒤 `reid_node` 가 실패했다. AI 중복 기동은 없었다(`follow_robot_launch` 1개).
+
+### ② ✅ 조치 — `free_mem_for_ai.sh` + AI 노드 2개 제외
+
+`scripts/free_mem_for_ai.sh` 신설: AI 스택 + 불필요 GUI 유틸리티만 내리고 **EM 스택과
+데스크톱 세션(gnome-shell·Xorg)은 보존**한다. `follow_robot_launch.py` 에
+`map_target`·`debug_viz` launch 인자를 추가해 단순 추종에서 소비자가 없는
+`target_position_node`(약 100 MB) 와 `debug_visualization_node`(115 MB) 를 제외했다.
+
+```
+=== 종료 전 ===
+Mem:            7619        4355         404          41        2859        2989
+RAM 4480/7620MB (lfb 10x4MB)
+
+=== 종료 후 ===
+Mem:            7619        2848        2148          37        2622        4501
+RAM 2970/7620MB (lfb 49x4MB)
+```
+
+**RAM 4480 → 2970 MB (1510 MB 확보), `lfb 10x4MB → 49x4MB` (연속 블록 4.9배).**
+`drop_caches`/`compact_memory` 는 sudo 비밀번호가 필요해 건너뛰었고, 그것 없이도 회복됐다.
+EM 스택 전부 생존 확인.
+
+재기동 결과:
+```
+[reid_node] [INFO] [reid_node]: Re-ID node started with OSNet_x1_0 (device=cuda)
+```
+
+| 노드 | 상태 | RSS |
+|---|---|---|
+| camera_node | ✅ | 121 MB |
+| detector_node | ✅ | 1194 MB |
+| tracker_node | ✅ | 148 MB |
+| **reid_node** | **✅ device=cuda** | **781 MB** |
+| control_node | ✅ | 60 MB |
+| motor_node | ✅ | 58 MB |
+| fe_bridge_node | ✅ | 123 MB |
+| target_position_node | ⬜ 의도적 제외 (`map_target:=false`) | — |
+| debug_visualization_node | ⬜ 의도적 제외 (`debug_viz:=false`) | — |
+
+### ③ 🔴 AMCL lifecycle 이 `inactive` 에서 멈춰 `/robot_pose` 가 안 나왔다
+
+`/cmd_vel` 배선은 맞았는데 `/robot_pose` 가 무발행이었다.
+
+```
+$ ros2 topic info /cmd_vel -v
+Publisher count: 1
+  Node name: control_node          ← Nav2 없음, 의도대로
+Subscription count: 2
+  Node name: stm_serial_bridge
+  Node name: motor_node
+
+$ ros2 topic hz /robot_pose
+(무발행)
+$ ros2 topic hz /scan
+average rate: 11.266
+```
+
+TF 트리에 `odom→base_link` 만 있고 `map→odom` 이 없었다. 원인:
+
+```
+$ ros2 lifecycle get /amcl
+inactive [2]
+$ ros2 lifecycle get /map_server
+inactive [2]
+```
+
+`localization.launch.py` 가 `autostart: "true"` 인데도 lifecycle_manager 가 activate 까지
+밀지 못했다(메모리 압박 하에서 타임아웃 추정, 근본 원인 미확정). 수동 복구:
+
+```
+$ ros2 lifecycle set /map_server activate  → Transitioning successful
+$ ros2 lifecycle set /amcl activate        → Transitioning successful
+$ ros2 lifecycle get /map_server           → active [3]
+$ ros2 lifecycle get /amcl                 → active [3]
+```
+
+초기 위치 3회 발행 후:
+```
+$ ros2 topic hz /robot_pose
+average rate: 9.984
+
+$ ros2 topic echo /robot_pose --once | grep -A4 position
+  position:
+    x: 0.04784465573448869
+    y: 0.059592956721864515
+    z: 0.0
+
+$ ros2 run tf2_ros tf2_echo map odom
+- Translation: [0.022, 0.061, 0.000]
+- Rotation: in RPY (degree) [0.000, 0.000, -3.392]
+```
+
+→ `simple_follow_up.sh` 5단계에 **상태 확인 후 configure/activate 를 밀어 올리는 루프**를
+넣었다. 이미 `active` 면 no-op 이다.
+
+### ④ ✅ 종단 검증 — MQTT 스니퍼 25초
+
+`scripts/mqtt_sniff.py`(신설, `#` 전체 구독, **읽기 전용**) 로 브로커를 직접 관측.
+
+```
+✅ 접속 성공 your-server.example.com:1883 — '#' 구독
+
+===== 25초 관측 결과 =====
+[status/target]  115건  ~4.60 Hz
+   {"image_width": 640, "image_height": 480, "tracks": [{"id": 44, "x": 398, "y": 164, "w": 146, "h": 200}]}
+[status/position]  45건  ~1.80 Hz
+   {"x": 0.054, "y": 0.059, "yaw": -0.0118, "timestamp": "2026-08-13T03:14:31.391Z"}
+[status/cart]  6건  ~0.24 Hz
+   {"timestamp": "2026-08-13T12:14:30.016+09:00"}
+[carts/status]  1건  ~0.04 Hz
+   {"status": "offline"}          ← 리테인 잔재 (과거값)
+```
+
+`status/cart` 하트비트가 나온 것은 라즈베리파이가 켜진 뒤다 — 초기 FE "카트와 연결이
+끊겼어요" 는 RPi 미기동이 원인이었다(EM 스택과 무관).
+
+부수 확인 — MQTT 브릿지는 첫 실행부터 정상이었고 SELECT_TARGET 을 올바르게 무시했다:
+```
+[mqtt_bridge] MQTT 접속·구독 완료: cmd/move/cart (QoS1)
+[mqtt_bridge] SELECT_TARGET 수신 — AI fe_bridge_node가 /select_target 변환을 담당하므로 이 브릿지는 무시
+```
+
+### ⑤ 🔴 미해결 — FE `/select_target` 트랙 ID 불일치
+
+`reid_node` 가 살아난 뒤에도 FE 대상 선택은 실패했다.
+
+```
+[reid_node] Waiting for target selection
+[fe_bridge_node] FE 타겟 선택 수신 → /select_target 1
+[reid_node] Target selected: ID=1
+[reid_node] [ERROR] Memory Bank initialization failed: no target features collected
+[reid_node] Waiting for target selection
+```
+
+같은 시각 `status/target` 의 실제 트랙은 **`id: 44`** 였다. FE 가 보낸 `1` 이 현재 화면에
+없어 2초 등록 창에서 특징 수집이 0건이 됐다. 08-10 에는 FE 모달이 97 을 보여줬는데 실제는
+103 이었다(ByteTrack ID 드리프트) — **같은 계열의 재발**이다. AI 파트 영역.
+
+**우회 확인**: `--follow-only`(= `auto_select:=true`) 는 최근접(최대 bbox) 인물을 자동
+선택하므로 이 경로를 타지 않는다.
+
+### ⑥ ✅ `--follow-only` 모드 신설 — 지도 없는 시연용
+
+`control_node` 소스 확인 결과 구독이 **2개뿐**이다:
+```python
+self.create_subscription(Detection2DArray, "/target_person", self.target_callback, 10)
+self.create_subscription(LaserScan, "/scan", self.scan_callback, qos_profile_sensor_data)
+```
+TF·지도·오도메트리를 일절 쓰지 않으므로 **지도 밖에서도 추종이 그대로 동작한다.** 반대로
+지도 밖에서 AMCL 을 켜 두면 스캔이 지도와 안 맞아 발산하고 `/robot_pose` 가 엉뚱한 좌표를
+내보내므로 켜는 게 해롭다. → `--follow-only` 로 위치추정 스택(rf2o·EKF·ZUPT·AMCL·
+map_server·cart_pose_publisher·MQTT 브릿지)을 통째로 생략한다. **약 540 MB 절약**
+(+ AI 노드 2개 제외 215 MB = 총 755 MB).
+
+### ⑦ ✅ 커밋 전 정적 검증
+
+```
+$ ruff check embedded/Lidar/src/choll_nav ai/src/person_follow_robot/launch embedded/Lidar/scripts
+All checks passed!
+
+$ python3 -m pytest embedded/Lidar/src/choll_nav/test/test_nav_logic.py \
+                    embedded/Lidar/src/choll_mqtt_bridge/test/ -q
+..........................................................               [100%]
+58 passed in 0.19s
+
+$ bash -n embedded/Lidar/scripts/*.sh          → 이상 없음
+$ grep -n os.environ embedded/Lidar/scripts/mqtt_sniff.py
+27:BROKER_HOST = os.environ.get("CHOLL_MQTT_HOST", "your-server.example.com")
+29:BROKER_USER = os.environ.get("CHOLL_MQTT_USER", "")
+30:BROKER_PASS = os.environ.get("CHOLL_MQTT_PASS", "")
+```
+
+`mqtt_sniff.py` 의 브로커 계정 하드코딩(`choll`/`choll`)을 환경변수로 교체했다 —
+저장소가 공개될 수 있으므로. 없으면 사용법을 출력하고 종료한다.
+
+### ⑧ 함께 커밋한 것 — 후진 방어 (stash 회수)
+
+`allow_reverse` / `obstacle_stop_enabled` 는 08-10 에 구현·실기 확인했으나 **커밋 전에
+`git reset --hard` 를 해서 워킹트리에서 사라졌다.** `git stash@{0}`(부모 = 현재 HEAD)에
+남아 있어 `control_node.py` 만 골라 회수했다.
+
+```
+$ grep -c "allow_reverse\|obstacle_stop_enabled\|min_obstacle_distance_m\|front_half_span" \
+    ai/src/person_follow_robot/person_follow_robot/control_node.py
+17
+```
+
+- `allow_reverse: False` — 오차 단계 + PID 출력 단계 **이중 클램프**
+- `obstacle_stop_enabled: True` / `min_obstacle_distance_m: 0.8` / `front_half_span_deg: 30.0`
+- 🔴 임계값은 `target_distance_m`(1.0)보다 **작아야** 한다 — 같거나 크면 추종 대상 본인이
+  걸려 카트가 영원히 전진하지 못한다.
+
+⚠️ **후진·장애물 정지의 실기 재검증은 미완이다.** 08-10 에 동작을 확인했으나 이번 코드로
+다시 돌린 뒤의 원본 출력은 아직 없다. 다음에 할 것:
+```bash
+ros2 topic echo /cmd_vel | grep -c 'x: -'    # 0 이어야 함
+# 사람이 1m 안으로 끼어들 때 전진 정지·회전 유지 확인
+```
+
+⚠️ stash 의 `nav.launch.py`(+308/-53) 와 `nav2_params.yaml`(+14) 은 **꺼내지 않았다** —
+팀원이 AMCL 속도 작업 중인 파일이다. stash 에 그대로 남겨 뒀다.
+
+---
+
+## 2026-08-13 — 🟡 구역 미도달인데 FE "도착" 표시 — 원인 규명·수정 / **실기 재현 검증은 미완** (relu 관측 / Claude 진단·수정·기록)
+
+FE 화면에 `1구역에 도착했어요!` 가 떴으나 카트는 1구역에 도달하지 않은 상태였다.
+
+### ① 관측 (relu, 브라우저 콘솔)
+
+```
+[CartSocket] 수신: CART_POSITION_UPDATE {mapId: 2, x: 655.06, y: 483.34, yaw: -0.1812, valid: true}
+[CartSocket] 수신: NAVIGATION_STATUS_UPDATED {navigationId: 5, status: 'ACCEPTED', destinationZoneId: 1, failReason: null}
+[CartSocket] 수신: NAVIGATION_STATUS_UPDATED {navigationId: 5, status: 'STARTED',  destinationZoneId: 1, failReason: null}
+[CartSocket] 수신: NAVIGATION_STATUS_UPDATED {navigationId: 5, status: 'ARRIVED',  destinationZoneId: 1, failReason: null}
+```
+
+### ② 원인 (코드 추적, 실기 계측 아님)
+
+`goal_forwarder._handle_goal` 이 **추종 경로와 구역 이동 경로의 공통 통로**인데,
+`approach_distance` 를 경로 구분 없이 적용했다. 실행 인자는 `approach_distance:=1.0`
+(`ros2 launch choll_nav interface.launch.py approach_distance:=1.0 follow_gate_enabled:=true`).
+
+| 경로 | 진입 | 기존 approach |
+|---|---|---|
+| `/target_position` (AI 추종) | `_handle_goal(pose)` — throttle=True | 1.0 m (의도됨 — 사람=장애물) |
+| `/cart/target_pose` (BE 구역 이동) | `_handle_goal(msg, throttle=False)` | 1.0 m (**의도 아님**) |
+
+→ 목표에서 1.0 m 당긴 지점이 Nav2 goal + `xy_goal_tolerance: 0.35`
+→ **최대 1.35 m 못 미친 곳에서 SUCCEEDED**
+→ `status/nav-result` → `NavigationService.java:208` `case "SUCCEEDED" -> completeFromCart(cartId, "ARRIVED", null)`
+→ FE "도착".
+
+배제한 가설: `SlamCoordinateConverter.toSlamMeters` 아핀 역행렬은 수식상 정상이고,
+당시 localization 이 `library_v2.yaml` 이라 DB 아핀 계수(v2 기준)와 지도가 일치 —
+이번 증상의 원인이 아니다.
+
+⚠️ 구조적 문제(미해결): BE 는 도착 판정에 `status/position` 을 쓰지 않는다.
+EM 이 `SUCCEEDED` 를 보내면 **어디서 멈췄든** 목적지 구역 도착으로 표시된다.
+
+### ③ 수정
+
+`choll_nav/goal_forwarder.py` — 이미 있던 `throttle` 플래그를 재사용해 분기
+(파라미터 추가 없음). 추종만 유지거리 적용, 구역 이동은 목표 그대로.
+
+```python
+approach_distance = (
+    float(self.get_parameter("approach_distance").value) if throttle else 0.0
+)
+```
+
+### ④ 검증 결과 — 원본 출력
+
+```
+$ python3 -m pytest embedded/Lidar/src/choll_nav/test/test_nav_logic.py -q
+...............................                                          [100%]
+31 passed in 0.17s
+
+$ colcon build --symlink-install --packages-select choll_nav
+Starting >>> choll_nav
+Finished <<< choll_nav [5.71s]
+Summary: 1 package finished [6.51s]
+
+$ ruff check embedded/Lidar/src/choll_nav/
+embedded/Lidar/src/choll_nav/test/test_nav_logic.py:3:1: I001 Import block is un-sorted or un-formatted
+Found 1 error.
+```
+
+`I001` 과 `ruff format` 의 `goal_forwarder.py` 재포맷 지적은 **수정 전 HEAD(8c88f40)에서도
+동일하게 재현**되는 기존 항목이다(같은 명령을 stash 상태에서 재실행해 확인). 이번 수정으로
+새로 생긴 린트 문제는 없다.
+
+### ⑤ 미완 — 다음에 할 것
+
+**실기 재현 검증을 하지 않았다.** 진단은 코드 추적 기반이며, 아래를 측정해야 확정된다.
+
+```bash
+ros2 param get /goal_forwarder approach_distance      # 구역 이동 시 goal 로그와 대조
+ros2 topic echo /robot_pose --once --field pose.position   # SUCCEEDED 직후 실제 정지 좌표
+```
+
+기대: 수정 후 정지 좌표와 BE 가 보낸 target 의 거리 ≤ `xy_goal_tolerance`(0.35 m).
+
 ## 2026-08-10 02:00 — ✅ 사서 추종 배선: FOLLOW 버튼 게이트 + 1 m 유지거리 (relu 실기 / Claude 구현·기록)
 
 FE 추종 버튼이 카트에 전달되지 않던 구멍을 메웠다. **AI 제어를 되살리는 대신 이미 배선된

@@ -78,6 +78,20 @@ def generate_launch_description() -> LaunchDescription:
             "/cmd_vel_legacy로 격리 (거리 측정 /target_distance는 유지). "
             "예: legacy_control:=false",
         ),
+        DeclareLaunchArgument(
+            "map_target",
+            default_value="true",
+            description="target_position_node(/target_position 지도좌표 발행) 실행. "
+            "EM Nav2 추종에는 필수. 단순 추종(legacy_control:=true)에서는 소비자가 "
+            "없으므로 false로 꺼서 메모리를 아낄 수 있다. 예: map_target:=false",
+        ),
+        DeclareLaunchArgument(
+            "debug_viz",
+            default_value="true",
+            description="debug_visualization_node(오버레이 영상) 실행. false면 "
+            "약 115MB 절약. FE 영상은 fe_bridge_node가 따로 보내므로 영향 없다. "
+            "예: debug_viz:=false",
+        ),
         Node(
             package="person_follow_robot",
             executable="camera_node",
@@ -169,6 +183,16 @@ def generate_launch_description() -> LaunchDescription:
                 "target_timeout_sec": 1.0,
                 "max_linear_vel": 0.5,
                 "max_angular_vel": 1.0,
+                # 🔴 후진 금지. 사서가 책을 꺼내려 다가와도 물러서지 않는다.
+                #    거리가 target_distance_m 보다 가까우면 그냥 정지하고,
+                #    회전은 유지해 사서를 계속 바라본다.
+                "allow_reverse": False,
+                # 🔴 전방 장애물 정지. Nav2 없이 단순 추종만 돌릴 때의 유일한
+                #    충돌 방어다. 임계값은 target_distance_m(1.0)보다 작아야
+                #    한다 — 같거나 크면 추종 대상 본인이 걸려 전진을 못 한다.
+                "obstacle_stop_enabled": True,
+                "min_obstacle_distance_m": 0.8,
+                "front_half_span_deg": 30.0,
             }],
         ),
         Node(
@@ -210,6 +234,10 @@ def generate_launch_description() -> LaunchDescription:
             executable="target_position_node",
             name="target_position_node",
             output="screen",
+            # 단순 추종(legacy_control:=true)에서는 EM goal_forwarder 를 쓰지 않아
+            # /target_position 소비자가 없다. Orin Nano 통합 메모리를 아끼려고 끈다
+            # (2026-08-13: reid_node 가 CUDA OOM 으로 죽어 추종이 안 됐다).
+            condition=IfCondition(LaunchConfiguration("map_target")),
             parameters=[{
                 "cart_pose_topic": "/robot_pose",  # EM SLAM 포즈 계약 확정 시 갱신
                 "target_position_topic": "/target_position",
@@ -227,6 +255,9 @@ def generate_launch_description() -> LaunchDescription:
             executable="debug_visualization_node",
             name="debug_visualization_node",
             output="screen",
+            # 오버레이 영상은 디버그용. FE 영상은 fe_bridge_node 가 따로 보내므로
+            # 꺼도 FE 화면에는 영향이 없다.
+            condition=IfCondition(LaunchConfiguration("debug_viz")),
             parameters=[{
                 "save_debug_video": LaunchConfiguration("save_debug_video"),
                 "debug_video_path": LaunchConfiguration("debug_video_path"),

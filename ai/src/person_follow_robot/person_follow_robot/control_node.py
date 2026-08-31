@@ -203,7 +203,32 @@ class ControlNode(Node):
         self.declare_parameter("linear_kd", 0.05)
         self.declare_parameter("max_linear_vel", 0.5)
         self.declare_parameter("max_angular_vel", 1.0)
+        # 🔴 후진 금지 (2026-08-10). 기본 False.
+        #    사서가 책을 꺼내려 카트 쪽으로 다가오면 거리 오차가 음수가 되어
+        #    카트가 뒷걸음질친다. 실기에서 "사서가 다가가면 카트가 멀어진다"로
+        #    관측된 그 동작이다. 뒤쪽은 라이다 자기차폐 구간이라 후방 장애물도
+        #    못 본다 — 안전상으로도 후진은 열지 않는다.
+        #    True 로 바꾸면 예전 동작(거리 유지형 전후진)으로 돌아간다.
+        self.declare_parameter("allow_reverse", False)
+        # 🔴 전방 장애물 정지 (2026-08-10). Nav2 없이 단순 추종만 돌릴 때
+        #    유일한 충돌 방어다 — 기존 거리 조회는 **타겟 방향 창만** 보므로
+        #    정면에 벽이나 끼어든 사람이 있어도 감지하지 못했다.
+        #    임계값은 target_distance_m(1.0)보다 **작아야** 한다. 같거나 크면
+        #    추종 대상 본인이 매번 걸려 카트가 영영 전진하지 못한다.
+        self.declare_parameter("obstacle_stop_enabled", True)
+        self.declare_parameter("min_obstacle_distance_m", 0.8)
+        self.declare_parameter("front_half_span_deg", 30.0)
 
+        self.allow_reverse = bool(self.get_parameter("allow_reverse").value)
+        self.obstacle_stop_enabled = bool(
+            self.get_parameter("obstacle_stop_enabled").value
+        )
+        self.min_obstacle_distance_m = float(
+            self.get_parameter("min_obstacle_distance_m").value
+        )
+        self.front_half_span_rad = math.radians(
+            float(self.get_parameter("front_half_span_deg").value)
+        )
         self.target_distance = float(self.get_parameter("target_distance_m").value)
         self.camera_fov_deg = float(self.get_parameter("camera_fov_deg").value)
         self.lidar_yaw_offset_deg = float(
@@ -279,6 +304,32 @@ class ControlNode(Node):
         """Cache the newest LiDAR scan."""
         self.latest_scan = msg
 
+    def _front_obstacle_distance(self) -> float | None:
+        """Return the front obstacle distance when it is closer than the threshold.
+
+        로봇 정면(카메라 광축) 섹터를 조회한다. 기준각은 타겟 조회와 **같은 변환**을
+        쓴다 — `center_x_normalized=0` 이 곧 화면 중앙이자 로봇 정면이고, 라이다
+        장착 오프셋·좌우 반전이 여기에 함께 반영되어야 두 조회가 같은 축을 본다.
+
+        Returns:
+            임계값보다 가까운 장애물이 있으면 그 거리[m], 없으면 None.
+            유효 반사가 하나도 없을 때도 None (근거 없이 멈추지 않는다).
+        """
+        if not self.obstacle_stop_enabled or self.latest_scan is None:
+            return None
+        front_angle_rad = camera_bearing_to_lidar_angle(
+            0.0,
+            self.camera_fov_deg,
+            self.lidar_yaw_offset_deg,
+            self.lidar_mirrored,
+        )
+        nearest = min_valid_range_in_span(
+            self.latest_scan, front_angle_rad, self.front_half_span_rad
+        )
+        if nearest is None or nearest >= self.min_obstacle_distance_m:
+            return None
+        return nearest
+
     def _target_is_stale(self) -> bool:
         """Return True if no target message arrived within the timeout window."""
         elapsed = (self.get_clock().now() - self.last_target_time).nanoseconds / 1e9
@@ -338,6 +389,11 @@ class ControlNode(Node):
 
         if distance is not None:
             linear_error = distance - self.target_distance
+            if not self.allow_reverse:
+                # 1차 방어 — 오차 단계에서 자른다. 음수 오차를 PID 에 그대로
+                # 넣으면 사람이 접근하는 내내 D 항이 음수를 만들어, 출력만
+                # 잘라도 반응이 굼떠진다.
+                linear_error = max(0.0, linear_error)
             linear_vel = self.linear_pid.compute(linear_error, dt)
         else:
             # LiDAR 거리 못 구하면 안전하게 정지 (카메라만으로 전진은 위험)
@@ -349,6 +405,23 @@ class ControlNode(Node):
             )
             self.get_logger().warn(
                 f"LiDAR 거리 획득 실패({reason}), 선속도 0으로 설정",
+                throttle_duration_sec=2.0,
+            )
+
+        if not self.allow_reverse:
+            # 2차 방어 — 오차가 0 이어도 kd(0.05) 미분항이 순간 음수를 낼 수 있다.
+            # 회전(angular_vel)은 그대로 둔다: 제자리에서 사서를 계속 바라본다.
+            linear_vel = max(0.0, linear_vel)
+
+        # 전방 장애물 정지 — 전진만 막고 회전은 살린다. 그래야 사서를 계속
+        # 바라보다가, 장애물이 비키거나 사서가 옆으로 이동하면 바로 재개된다.
+        # 유효 반사가 하나도 없으면(None) 근거가 없으므로 정지시키지 않는다.
+        blocked_distance = self._front_obstacle_distance()
+        if blocked_distance is not None:
+            linear_vel = 0.0
+            self.get_logger().warning(
+                f"전방 {blocked_distance:.2f} m 에 장애물 — 전진 정지"
+                f" (임계 {self.min_obstacle_distance_m:.2f} m)",
                 throttle_duration_sec=2.0,
             )
 

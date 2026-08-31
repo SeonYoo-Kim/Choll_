@@ -7,6 +7,20 @@
 # 오도메트리는 임시로 rf2o(/odom_rf2o, 10Hz). STM32에는 속도 클램프가 없으므로
 # velocity_smoother가 ROS 쪽 유일한 클램프다 — 값 변경 시 주의.
 #
+# 🔴 2026-08-10 — 속도 상한은 이 파일이 최종 권위가 **아니다.**
+#   `choll_nav2/launch/nav.launch.py` 가 RewrittenYaml 로 아래 값들을 덮어쓴다
+#   (기본 linear 0.45 m/s / angular 0.4 rad/s. 정본 = 그 파일의 DEFAULT_MAX_*_VEL):
+#
+#     controller_server.FollowPath.max_vel_x / max_speed_xy / max_vel_theta
+#     velocity_smoother.max_velocity[x] / max_velocity[theta] / min_velocity[theta]
+#     behavior_server.max_rotational_vel
+#
+#   여기 남아 있는 숫자는 **런치를 우회해 이 yaml 을 직접 먹였을 때의 안전한
+#   폴백**이다(느린 쪽). 실주행 값을 바꾸려면 `choll-up --linear/--angular` 또는
+#   nav.launch.py 의 기본 상수를 고칠 것 — 이 파일을 고쳐도 런치가 덮어쓴다.
+#   덮어쓰지 **않는** 것: acc_lim_* / max_accel / max_decel / min_vel_x /
+#   min_velocity[x] / min_rotational_vel — 이 값들은 여기가 정본이다.
+#
 # ⚠ TODO-실측/팀확인 표기가 있는 값은 임의 확정 금지 (CLAUDE.md 규칙):
 #   - footprint: 2026-08-08 실측 반영 완료 (전후 0.62 / 바퀴 바깥면 0.44). 모순 해소
 #   - acc_lim: STM32 램프 4 rad/s²의 기준 축(바퀴/차체) 미확정 → 보수값 사용

@@ -73,9 +73,7 @@ class GoalForwarder(Node):
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         goal_pose_topic = str(self.get_parameter("goal_pose_topic").value)
-        target_point_topic = str(
-            self.get_parameter("target_point_topic").value
-        )
+        target_point_topic = str(self.get_parameter("target_point_topic").value)
         if goal_pose_topic:
             self.create_subscription(
                 PoseStamped, goal_pose_topic, self._on_target_pose, 10
@@ -136,6 +134,7 @@ class GoalForwarder(Node):
             f"point={target_point_topic or '(비활성)'}, "
             f"approach_distance="
             f"{float(self.get_parameter('approach_distance').value)}"
+            f" (추종 전용 — 구역 이동 goal에는 미적용)"
         )
 
     # ── 콜백 ──────────────────────────────────────────────────────────
@@ -230,9 +229,7 @@ class GoalForwarder(Node):
             if acted:
                 self.get_logger().info(f"주행 취소 요청{tag} → Nav2에 취소 전송")
             else:
-                self.get_logger().info(
-                    f"취소 요청 수신{tag} — 진행 중인 goal 없음"
-                )
+                self.get_logger().info(f"취소 요청 수신{tag} — 진행 중인 goal 없음")
         except Exception as exc:  # noqa: BLE001
             self.get_logger().error(f"취소 처리 실패: {exc}")
 
@@ -260,6 +257,9 @@ class GoalForwarder(Node):
             pose: map 또는 임의 프레임의 목표 pose.
             throttle: 스로틀 적용 여부. AI 연속 스트림은 True,
                 단발성 수동/BE 명령은 False (항상 선점).
+                approach_distance 적용 여부도 이 값을 따른다 — 추종 목표는
+                사람(=장애물)이라 앞에서 멈춰야 하지만, 구역 이동 목표는
+                "여기까지 가라"는 지점 자체라 당기면 안 된다.
         """
         if not pose.header.frame_id:
             self.get_logger().error(
@@ -306,11 +306,17 @@ class GoalForwarder(Node):
 
         robot_xy = self._lookup_robot_xy()
         quat_in = pose.pose.orientation
+        # 추종(연속 스트림)에만 유지거리를 적용한다. 구역 이동(BE 단발 명령)에
+        # 적용하면 목표 앞 approach_distance + xy_goal_tolerance 만큼 못 미친
+        # 곳에서 SUCCEEDED 가 나가고, BE 는 그걸 그대로 "구역 도착"으로 띄운다.
+        approach_distance = (
+            float(self.get_parameter("approach_distance").value) if throttle else 0.0
+        )
         goal_x, goal_y, quat = make_goal_pose_2d(
             robot_xy,
             target_xy,
             (quat_in.x, quat_in.y, quat_in.z, quat_in.w),
-            float(self.get_parameter("approach_distance").value),
+            approach_distance,
             bool(self.get_parameter("auto_orient").value),
         )
 

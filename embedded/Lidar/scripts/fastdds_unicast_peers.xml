@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- 멀티캐스트가 막힌 무선망에서 노트북 RViz 가 젯슨을 찾게 하는 설정.
+
+     왜 필요한가 (2026-08-10 실측): 공유기가 무선 클라이언트 간 멀티캐스트를
+     막아 젯슨의 239.255.0.1:17900 announce 가 노트북에 도달하지 않는다.
+     노트북에서 `ros2 topic list` 가 /parameter_events, /rosout 만 보이는 상태.
+     같은 서브넷이고 ROS_DOMAIN_ID=42, ROS_LOCALHOST_ONLY=0, ufw 비활성인데도
+     그렇다면 원인은 멀티캐스트 차단이다.
+
+     포트는 도메인42의 유니캐스트 메타트래픽 = 7400 + 250*42 + 10 + 2N.
+     젯슨 실측 리슨 포트 17910~17925, 17934, 17935 를 덮도록 N=0..15 를 넣었다.
+     (주소만 적으면 Fast DDS 가 N=0..3 만 시도해 대부분의 노드를 놓친다.)
+
+     사용: 노트북에서
+       export FASTRTPS_DEFAULT_PROFILES_FILE=~/fastdds_unicast_peers.xml
+       ros2 daemon stop && ros2 daemon start
+-->
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <participant profile_name="unicast_to_jetson" is_default_profile="true">
+      <rtps>
+        <builtin>
+          <initialPeersList>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17910</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17912</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17914</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17916</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17918</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17920</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17922</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17924</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17926</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17928</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17930</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17932</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17934</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17936</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17938</port>
+          </udpv4></locator>
+          <locator><udpv4>
+            <address>192.168.100.254</address><port>17940</port>
+          </udpv4></locator>
+          </initialPeersList>
+        </builtin>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

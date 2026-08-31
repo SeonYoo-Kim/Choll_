@@ -3,7 +3,6 @@
 import math
 
 import pytest
-
 from choll_nav.nav_logic import (
     compute_approach_point,
     heading_between,
